@@ -6,6 +6,7 @@ on:
   pull_request:
 
 jobs:
+  # galera de backend, adicionem os testes aqui depois ( não ter não é opção )
   backend:
     runs-on: ubuntu-latest
     steps:
@@ -19,6 +20,7 @@ jobs:
       - run: uv run mypy services/*/src libs/python/*/src
       - run: uv run pytest
 
+  # galera de web, adicionem os testes aqui depois ( se for ter )
   web:
     runs-on: ubuntu-latest
     steps:
