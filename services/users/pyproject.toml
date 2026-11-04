@@ -1,0 +1,25 @@
+[project]
+name = "users-service"
+version = "0.1.0"
+description = "Serviço de usuários (exemplo/template de serviço FastAPI + MySQL)."
+requires-python = ">=3.12"
+dependencies = [
+    "aiomysql>=0.3.2",
+    "alembic>=1.20.1",
+    "fastapi>=0.162.0",
+    "pydantic-settings>=2.16.2",
+    "pydantic[email]>=2.14.2",
+    "sqlalchemy[asyncio]>=2.1.7",
+    "uvicorn[standard]>=0.54.0",
+    "veriditi-common",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/users_service"]
+
+[tool.uv.sources]
+veriditi-common = { workspace = true }

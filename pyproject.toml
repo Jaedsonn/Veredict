@@ -1,0 +1,44 @@
+# Raiz do workspace Python (uv). Não é um pacote instalável:
+# apenas agrupa os serviços e libs compartilhadas sob um único uv.lock.
+[project]
+name = "veriditi-workspace"
+version = "0.0.0"
+requires-python = ">=3.12"
+# A raiz depende de todos os membros para que `uv sync` monte um único
+# .venv de desenvolvimento com tudo instalado (editável).
+dependencies = ["users-service", "veriditi-common"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+users-service = { workspace = true }
+veriditi-common = { workspace = true }
+
+[tool.uv.workspace]
+members = ["services/*", "libs/python/*"]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "httpx>=0.28.1",
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "ruff>=0.17.3",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["services/*/src", "libs/python/*/src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["services", "libs/python"]
+# importlib: permite vários serviços terem tests/conftest.py sem colisão de nomes
+addopts = "--import-mode=importlib"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

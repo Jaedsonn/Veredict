@@ -1,0 +1,17 @@
+{
+  "name": "veriditi",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:web": "npm run dev -w @veriditi/web",
+    "build:web": "npm run build -w @veriditi/web",
+    "lint:web": "npm run lint -w @veriditi/web",
+    "typecheck:web": "npm run typecheck -w @veriditi/web"
+  }
+}
