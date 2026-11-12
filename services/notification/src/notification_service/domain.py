@@ -39,3 +39,26 @@ class RenderedEmail:
 
 class TemplateRenderError(Exception):
     """Template que gera um e-mail inválido; é bug de template, não erro de entrada"""
+
+
+@dataclass(frozen=True, slots=True)
+class OutgoingEmail:
+    """Mesmo objeto em todas as tentativas: o Message-ID repetido deixa o MTA deduplicar"""
+
+    to: str = field(repr=False)
+    subject: str
+    text: str = field(repr=False)
+    html: str = field(repr=False)
+    message_id: str
+
+
+class EmailDeliveryError(Exception):
+    """Falha de envio sem o endereço: reason é o tipo do erro, nunca a mensagem do servidor"""
+
+    def __init__(
+        self, reason: str, *, permanent: bool = False, smtp_code: int | None = None
+    ) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.permanent = permanent
+        self.smtp_code = smtp_code
