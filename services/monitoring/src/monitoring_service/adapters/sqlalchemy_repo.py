@@ -12,8 +12,8 @@ from veriditi_common.audit import AuditEvent
 from veriditi_common.logging import get_logger
 
 MYSQL_DUPLICATE_ENTRY: Final = 1062
-# Deadlock e lock wait timeout: o InnoDB desfaz a transação e uma nova tentativa é segura
-_RETRYABLE_ERRNOS: Final = frozenset({1213, 1205})
+# Só deadlock: o InnoDB desfaz a vítima na hora. Repetir um 1205 seguraria o POST mais 50 s
+MYSQL_DEADLOCK: Final = 1213
 
 log = get_logger(__name__)
 _SQLITE_DUPLICATE: Final = "UNIQUE constraint failed: audit_events.event_id"
@@ -27,10 +27,9 @@ def is_duplicate_event_id(exc: IntegrityError) -> bool:
     return _SQLITE_DUPLICATE in str(exc.orig)
 
 
-def _retryable_errno(exc: OperationalError) -> int | None:
+def _is_deadlock(exc: OperationalError) -> bool:
     args: tuple[object, ...] = getattr(exc.orig, "args", ())
-    errno = args[0] if args else None
-    return errno if isinstance(errno, int) and errno in _RETRYABLE_ERRNOS else None
+    return bool(args) and args[0] == MYSQL_DEADLOCK
 
 
 def _record(event: AuditEvent, received_at: datetime) -> AuditEventRecord:
@@ -61,9 +60,11 @@ class SqlAlchemyAuditEventRepository:
             return await self._insert(event, received_at)
         except OperationalError as exc:
             # Reenvios concorrentes esperando a 1ª escrita entram em deadlock se ela desfizer
-            if (errno := _retryable_errno(exc)) is None:
+            if not _is_deadlock(exc):
                 raise
-            log.warning("audit_insert_retried", event_id=str(event.event_id), db_errno=errno)
+            log.warning(
+                "audit_insert_retried", event_id=str(event.event_id), db_errno=MYSQL_DEADLOCK
+            )
             return await self._insert(event, received_at)
 
     async def _insert(self, event: AuditEvent, received_at: datetime) -> bool:

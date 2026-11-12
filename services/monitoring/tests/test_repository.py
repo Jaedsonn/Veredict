@@ -278,11 +278,10 @@ DUPLICATE = _integrity_error(
     [(None, True), (DUPLICATE, False)],
     ids=["retry-inserts", "retry-finds-duplicate"],
 )
-@pytest.mark.parametrize("errno", [1213, 1205], ids=["deadlock", "lock-wait-timeout"])
 async def test_deadlock_is_retried_once(
-    received_at: datetime, errno: int, second: Exception | None, expected: bool
+    received_at: datetime, second: Exception | None, expected: bool
 ) -> None:
-    session = _ScriptedSession(_operational(errno), second)
+    session = _ScriptedSession(_operational(1213), second)
     repo = SqlAlchemyAuditEventRepository(session)  # type: ignore[arg-type]
 
     with capture_logs() as logs:
@@ -291,7 +290,7 @@ async def test_deadlock_is_retried_once(
     assert session.added == 2
     assert session.rollbacks == (1 if second is None else 2)
     assert [line["event"] for line in logs] == ["audit_insert_retried"]
-    assert logs[0]["db_errno"] == errno
+    assert logs[0]["db_errno"] == 1213
 
 
 async def test_second_deadlock_is_raised(received_at: datetime) -> None:
@@ -304,8 +303,9 @@ async def test_second_deadlock_is_raised(received_at: datetime) -> None:
     assert (session.added, session.rollbacks) == (2, 2)
 
 
-async def test_other_operational_errors_are_not_retried(received_at: datetime) -> None:
-    session = _ScriptedSession(_operational(2013))
+@pytest.mark.parametrize("errno", [1205, 2013], ids=["lock-wait-timeout", "lost-connection"])
+async def test_other_operational_errors_are_not_retried(received_at: datetime, errno: int) -> None:
+    session = _ScriptedSession(_operational(errno))
     repo = SqlAlchemyAuditEventRepository(session)  # type: ignore[arg-type]
 
     with pytest.raises(OperationalError):
