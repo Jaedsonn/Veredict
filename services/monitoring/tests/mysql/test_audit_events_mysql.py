@@ -1,15 +1,22 @@
 """Migration 0001 do monitoring contra MySQL real: DDL físico, GRANT append-only e REVOKE"""
 
+import asyncio
 import os
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pymysql
 import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import URL, func, select
 
+from monitoring_service.adapters.sqlalchemy_repo import SqlAlchemyAuditEventRepository
 from monitoring_service.config import get_settings
+from monitoring_service.models import AuditEventRecord
+from veriditi_common.audit import AuditEvent, AuditOutcome
+from veriditi_common.db import Database
 
 pytestmark = pytest.mark.mysql
 
@@ -123,3 +130,78 @@ def test_downgrade_revokes_table_grant(migrated: Config) -> None:
 
     assert "`audit_events`" not in _writer_grants()
     command.upgrade(migrated, "head")
+
+
+def _writer_database() -> Database:
+    url = URL.create(
+        "mysql+aiomysql",
+        username=WRITER,
+        password=WRITER_PASSWORD,
+        host=HOST,
+        port=PORT,
+        database=LOGS_DB,
+        query={"charset": "utf8mb4"},
+    )
+    return Database(url.render_as_string(hide_password=False))
+
+
+def _event(**overrides: object) -> AuditEvent:
+    values: dict[str, object] = {
+        "service": "auth",
+        "action": "auth.user.registered",
+        "outcome": AuditOutcome.SUCCESS,
+        "request_id": None,
+    }
+    values.update(overrides)
+    return AuditEvent(**values)  # type: ignore[arg-type]
+
+
+def test_concurrent_resends_store_one_row(migrated: Config) -> None:
+    # Síncrono com asyncio.run: a fixture migrated já usa o asyncio.run do env.py
+    event = _event()
+    received_at = datetime.now(UTC)
+
+    async def scenario() -> tuple[list[bool], int]:
+        db = _writer_database()
+
+        async def add() -> bool:
+            async with db.session_factory() as session:
+                repo = SqlAlchemyAuditEventRepository(session)
+                return await repo.add(event, received_at=received_at)
+
+        try:
+            results = await asyncio.gather(*(add() for _ in range(5)))
+            async with db.session_factory() as session:
+                count = await session.scalar(select(func.count()).select_from(AuditEventRecord))
+        finally:
+            await db.dispose()
+        return sorted(results), int(count or 0)
+
+    results, count = asyncio.run(scenario())
+
+    assert results == [False, False, False, False, True]
+    assert count == 1
+
+
+def test_roundtrip_keeps_microseconds_in_utc(migrated: Config) -> None:
+    occurred = datetime(2026, 11, 12, 9, 0, 0, 123456, tzinfo=timezone(timedelta(hours=-3)))
+    received_at = datetime(2026, 11, 12, 15, 0, 0, 654321, tzinfo=UTC)
+    event = _event(occurred_at=occurred)
+
+    async def scenario() -> AuditEventRecord | None:
+        db = _writer_database()
+        try:
+            async with db.session_factory() as session:
+                await SqlAlchemyAuditEventRepository(session).add(event, received_at=received_at)
+            async with db.session_factory() as session:
+                return await session.scalar(select(AuditEventRecord))
+        finally:
+            await db.dispose()
+
+    record = asyncio.run(scenario())
+
+    assert record is not None
+    assert record.occurred_at == datetime(2026, 11, 12, 12, 0, 0, 123456, tzinfo=UTC)
+    assert record.occurred_at.tzinfo is UTC
+    assert record.received_at == received_at
+    assert record.event_id == event.event_id
