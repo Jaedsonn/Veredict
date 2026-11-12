@@ -172,7 +172,7 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 - **Regras de negócio:**
   - Rotas públicas e protegidas declaradas numa tabela.
   - Valida o JWT (assinatura, `exp`, `iss`, `aud`) antes de repassar.
-  - Injeta `X-User-Id`, `X-Request-ID`, `X-Forwarded-For` e o token interno, removendo esses cabeçalhos se vierem do cliente.
+  - Injeta `X-User-Id`, `X-User-Email`, `X-Session-Id` (claim `sid`), `X-Request-ID`, `X-Forwarded-For` e o token interno, removendo esses cabeçalhos se vierem do cliente.
   - Notificação e Monitoramento não têm rota.
   - Timeout de upstream de 5 s.
   - Rate limit de login, cadastro e reenvio do código.

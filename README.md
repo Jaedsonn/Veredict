@@ -48,6 +48,11 @@ O auth assina o access token com `JWT_PRIVATE_KEY` e o gateway valida com
 mexe num par já existente. `make keys force=1` troca o par: reinicie auth e
 gateway, e as sessões abertas caem.
 
+O `.env.example` fica só com `JWT_PRIVATE_KEY=` e `JWT_PUBLIC_KEY=` vazios. Um
+par preenchido ali seria copiado para todo `.env` novo, o `make keys`
+responderia "já existem" e todo ambiente passaria a usar uma chave privada
+conhecida, que assina token válido para qualquer usuário.
+
 | O quê                     | URL                                |
 | ------------------------- | ---------------------------------- |
 | Web                       | http://localhost:3000              |
@@ -306,8 +311,10 @@ só para o log `jwt_rejected`.
 `User-Agent`, `If-*` e `Range`; o resto cai, inclusive `Authorization`, `Cookie`,
 `X-Forwarded-*`, `Forwarded`, `X-Real-IP` e `X-Refresh-Token`. O gateway sempre
 injeta `X-Internal-Token`, `X-Request-ID` e `X-Forwarded-For` (um único IP, o
-real) e, nas rotas protegidas, `X-User-Id`, `X-User-Email` e `X-Session-Id`
-(só quando o token tem a claim `sid`). `X-User-Email` vai em UTF-8: um upstream
+real) e, nas rotas protegidas, `X-User-Id`, `X-User-Email` e `X-Session-Id`.
+O `X-Session-Id` vem da claim `sid` (o `family_id` da sessão, que o auth emite) e
+só vai quando a claim existe; o `get_current_user` do auth o lê, por exemplo para
+a troca de senha encerrar as outras sessões e manter a atual. `X-User-Email` vai em UTF-8: um upstream
 Starlette lê em latin-1, então quem precisar do e-mail Unicode faz
 `value.encode("latin-1").decode()`.
 

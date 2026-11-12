@@ -283,9 +283,11 @@ async def test_session_id_comes_from_sid_claim(
     sid = str(uuid.uuid4())
     route = auth_mock.post("/me/password").respond(204)
 
-    await client.post("/api/me/password", headers=_bearer(make_token(sid=sid)), json={})
+    headers = {**_bearer(make_token(sid=sid)), "X-Session-Id": str(uuid.uuid4())}
 
-    assert route.calls.last.request.headers["x-session-id"] == sid
+    await client.post("/api/me/password", headers=headers, json={})
+
+    assert route.calls.last.request.headers.get_list("x-session-id") == [sid]
 
 
 async def test_forged_user_id_is_dropped_on_public_route(

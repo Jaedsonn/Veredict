@@ -115,7 +115,7 @@ def intruder_key() -> rsa.RSAPrivateKey:
 
 @pytest.fixture
 def make_token(rsa_keys: RsaKeys) -> TokenFactory:
-    """Claims no formato exato do PyJwtTokenIssuer do auth (#54)"""
+    """Claims do PyJwtTokenIssuer do auth (#54); sid só quando o teste pede, como o family_id"""
 
     def factory(
         *,
