@@ -348,3 +348,23 @@ async def test_record_after_drain_is_delivered_directly() -> None:
     await asyncio.gather(*spawned)
 
     assert audit.actions() == ["auth.user.late"]
+
+
+async def test_circular_metadata_falls_back_to_minimal_event() -> None:
+    event = _event()
+    event.metadata["self"] = event.metadata
+
+    async with httpx.AsyncClient() as client, respx.mock(assert_all_called=False) as mock:
+        mock.post(EVENTS_URL).respond(202)
+        with capture_logs() as logs:
+            await HttpAuditLogger(client, BASE_URL, SecretStr(TOKEN)).record(event)
+
+    [entry] = logs
+    assert entry["audit_fallback"] is True
+    assert entry["audit_event"] == {
+        "event_id": str(event.event_id),
+        "service": "auth",
+        "action": "auth.user.registered",
+        "outcome": "success",
+        "occurred_at": event.occurred_at.isoformat(),
+    }

@@ -134,9 +134,23 @@ class HttpAuditLogger:
                 "audit_delivery_failed",
                 audit_fallback=True,
                 error_type=type(exc).__name__,
-                audit_event=event.model_dump(mode="json", fallback=repr, warnings=False),
+                audit_event=_fallback_dump(event),
                 **extra,
             )
+
+
+def _fallback_dump(event: AuditEvent) -> dict[str, Any]:
+    """Nunca levanta: metadata circular ou exótico cai num resumo com o event_id"""
+    try:
+        return event.model_dump(mode="json", fallback=repr, warnings=False)
+    except Exception:
+        return {
+            "event_id": str(event.event_id),
+            "service": event.service,
+            "action": event.action,
+            "outcome": event.outcome.value,
+            "occurred_at": event.occurred_at.isoformat(),
+        }
 
 
 class InMemoryAuditLogger:
