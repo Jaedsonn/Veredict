@@ -13,7 +13,7 @@ Uma fila com entrega garantida (broker, outbox, consumidores, DLQ) é a soluçã
 ## Desvio em relação ao documento original
 
 - **Previsto:** *triggers* e *eventos* enviados aos serviços internos, sem mecanismo definido (seções 4.1, 4.2.3 e 4.2.6).
-- **No repositório:** interfaces e implementação HTTP em `veriditi_common` (#4): `AuditLogger`/`HttpAuditLogger` em `audit.py` e `Notifier`/`HttpNotifier` em `notifications.py`. Os consumidores ficam no #5 (monitoring) e no #6 (notification).
+- **No repositório:** interfaces e implementação HTTP em `veriditi_common` (#4): `AuditLogger`/`HttpAuditLogger` em `audit.py` e `Notifier`/`HttpNotifier` em `notifications.py`. O consumidor de auditoria existe desde o #5 (`POST /internal/events` no monitoring, idempotente pelo `event_id`); o de notificações fica no #6.
 - **Motivação:** reduzir o escopo da Sprint 1 sem acoplar as regras de negócio ao mecanismo de transporte.
 
 ## Decisão
