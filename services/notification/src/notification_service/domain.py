@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -25,3 +26,16 @@ class InvalidTemplateDataError(Exception):
     def __init__(self, errors: list[dict[str, Any]]) -> None:
         super().__init__("data inválido para o template")
         self.errors = errors
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedEmail:
+    """Corpo fora do repr: o texto leva o código de verificação"""
+
+    subject: str
+    text: str = field(repr=False)
+    html: str = field(repr=False)
+
+
+class TemplateRenderError(Exception):
+    """Template que gera um e-mail inválido; é bug de template, não erro de entrada"""
