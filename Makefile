@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install up down logs db dev-web dev-users migrate migration test db-test-contract lint format check
+.PHONY: help install up down logs db dev-web dev-auth migrate migration test db-test-contract lint format check
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -26,14 +26,14 @@ dev-web:
 
 # No futuro a gente vai fazer um geral para todos os serviços
 # Mas por enquanto bora deixar somente para cada serviço específico
-dev-users:
-	uv run uvicorn users_service.main:create_app --factory --reload --port 8001
+dev-auth:
+	uv run uvicorn auth_service.main:create_app --factory --reload --port 8001
 
 migrate:
-	uv run alembic -c services/users/alembic.ini upgrade head
+	uv run alembic -c services/auth/alembic.ini upgrade head
 
 migration:
-	uv run alembic -c services/users/alembic.ini revision --autogenerate -m "$(m)"
+	uv run alembic -c services/auth/alembic.ini revision --autogenerate -m "$(m)"
 
 test:
 	uv run pytest
