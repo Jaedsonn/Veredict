@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -9,6 +10,20 @@ class NotificationStatus(StrEnum):
     PENDING = "pending"
     SENT = "sent"
     FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class StoredNotification:
+    """Linha de notifications_sent: sem destinatário nem data, por desenho (§5.4)"""
+
+    id: int
+    idempotency_key: str
+    template: str
+    status: NotificationStatus
+    attempts: int
+    message_id: str | None
+    created_at: datetime
+    sent_at: datetime | None
 
 
 class UnknownTemplateError(Exception):

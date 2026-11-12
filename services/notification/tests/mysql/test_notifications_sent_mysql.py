@@ -1,16 +1,23 @@
 """Migration 0001 do notification contra MySQL real: DDL físico, GRANT sem DELETE e REVOKE"""
 
+import asyncio
 import os
 import re
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pymysql
 import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import URL, func, select
 
+from notification_service.adapters.sqlalchemy_repo import SqlAlchemyNotificationRepository
 from notification_service.config import get_settings
+from notification_service.domain import NotificationStatus, StoredNotification
+from notification_service.models import NotificationRecord
+from veriditi_common.db import Database
 
 pytestmark = pytest.mark.mysql
 
@@ -153,3 +160,121 @@ def test_downgrade_revokes_table_grant(migrated: Config) -> None:
     assert "`notifications_sent`" not in _runtime_grants()
     command.upgrade(migrated, "head")
     assert "`veriditi`.`notifications_sent`" in _runtime_grants()
+
+
+def _runtime_database() -> Database:
+    url = URL.create(
+        "mysql+aiomysql",
+        username=RUNTIME,
+        password=RUNTIME_PASSWORD,
+        host=HOST,
+        port=PORT,
+        database=DB,
+        query={"charset": "utf8mb4"},
+    )
+    return Database(url.render_as_string(hide_password=False))
+
+
+async def _count(db: Database) -> int:
+    async with db.session_factory() as session:
+        count = await session.scalar(select(func.count()).select_from(NotificationRecord))
+    return int(count or 0)
+
+
+def test_concurrent_reservations_store_one_row(migrated: Config) -> None:
+    # Síncrono com asyncio.run: a fixture migrated já usa o asyncio.run do env.py
+    created_at = datetime.now(UTC)
+
+    async def scenario() -> tuple[list[int | None], int]:
+        db = _runtime_database()
+        repo = SqlAlchemyNotificationRepository(db.session_factory)
+        try:
+            results = await asyncio.gather(
+                *(repo.add("welcome:7", "welcome", created_at=created_at) for _ in range(5))
+            )
+            count = await _count(db)
+        finally:
+            await db.dispose()
+        return list(results), count
+
+    results, count = asyncio.run(scenario())
+
+    assert sum(isinstance(result, int) for result in results) == 1
+    assert results.count(None) == 4
+    assert count == 1
+
+
+def test_reservations_waiting_on_a_rolled_back_insert_survive_the_deadlock(
+    migrated: Config,
+) -> None:
+    # As repetições esperam o lock da 1ª reserva; quando ela desfaz, o InnoDB escolhe vítimas 1213
+    async def scenario() -> tuple[list[int | None], int]:
+        db = _runtime_database()
+        repo = SqlAlchemyNotificationRepository(db.session_factory)
+        first = _connect()
+        first.autocommit(False)
+        try:
+            with first.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO notifications_sent (idempotency_key, template) "
+                    "VALUES ('welcome:8', 'welcome')"
+                )
+            tasks = [
+                asyncio.create_task(repo.add("welcome:8", "welcome", created_at=datetime.now(UTC)))
+                for _ in range(3)
+            ]
+            await asyncio.sleep(1.0)
+            first.rollback()
+            results = await asyncio.gather(*tasks)
+            count = await _count(db)
+        finally:
+            first.close()
+            await db.dispose()
+        return list(results), count
+
+    results, count = asyncio.run(scenario())
+
+    assert sum(isinstance(result, int) for result in results) == 1
+    assert results.count(None) == 2
+    assert count == 1
+
+
+def test_roundtrip_and_conditional_update(migrated: Config) -> None:
+    brt = timezone(timedelta(hours=-3))
+    created_at = datetime(2026, 11, 12, 9, 0, 0, 123456, tzinfo=brt)
+    sent_at = datetime(2026, 11, 12, 15, 0, 3, 654321, tzinfo=UTC)
+    mid = "<fixed-1@veriditi.app>"
+
+    async def scenario() -> tuple[list[bool], StoredNotification | None, list[int | None]]:
+        db = _runtime_database()
+        repo = SqlAlchemyNotificationRepository(db.session_factory)
+        try:
+            notification_id = await repo.add("Key", "welcome", created_at=created_at)
+            assert notification_id is not None
+            outcomes = [
+                await repo.mark_sent(notification_id, attempts=1, message_id=mid, sent_at=sent_at),
+                await repo.mark_sent(notification_id, attempts=2, message_id=mid, sent_at=sent_at),
+                await repo.mark_failed(notification_id, attempts=3),
+            ]
+            stored = await repo.get("Key")
+            # ascii_bin: a caixa diferencia a chave
+            others = [
+                await repo.add("key", "welcome", created_at=created_at),
+                await repo.add("Key", "welcome", created_at=created_at),
+            ]
+        finally:
+            await db.dispose()
+        return outcomes, stored, others
+
+    outcomes, stored, others = asyncio.run(scenario())
+
+    assert outcomes == [True, False, False]
+    assert stored is not None
+    assert stored.status is NotificationStatus.SENT
+    assert (stored.attempts, stored.message_id) == (1, mid)
+    assert stored.created_at == datetime(2026, 11, 12, 12, 0, 0, 123456, tzinfo=UTC)
+    assert stored.created_at.tzinfo is UTC
+    assert stored.sent_at == sent_at
+    assert stored.sent_at is not None and stored.sent_at.tzinfo is UTC
+    assert isinstance(others[0], int)
+    assert others[1] is None
