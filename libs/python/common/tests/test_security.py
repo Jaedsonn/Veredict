@@ -17,6 +17,7 @@ from veriditi_common.security import (
     CurrentUserDep,
     InternalTokenDep,
     install_internal_auth,
+    internal_router,
 )
 
 JsonLogs = Callable[[], list[dict[str, Any]]]
@@ -169,3 +170,25 @@ def test_internal_headers() -> None:
     expected = {"x-internal-token", "x-user-id", "x-user-email", "x-session-id"}
 
     assert expected == INTERNAL_HEADERS
+
+
+async def test_internal_router_requires_token_on_every_route() -> None:
+    app = FastAPI()
+    install_error_handlers(app)
+    install_internal_auth(app, SecretStr(TOKEN))
+    router = internal_router()
+
+    @router.post("/events", status_code=202)
+    async def events() -> dict[str, str]:
+        return {"ok": "1"}
+
+    app.include_router(router)
+    app.add_middleware(RequestContextMiddleware)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        denied = await client.post("/internal/events")
+        allowed = await client.post("/internal/events", headers={"X-Internal-Token": TOKEN})
+
+    assert denied.status_code == 401
+    assert denied.json() == UNAUTHORIZED
+    assert allowed.status_code == 202

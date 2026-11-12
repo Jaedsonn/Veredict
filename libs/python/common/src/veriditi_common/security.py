@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated, Final
 
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, Request
 from pydantic import SecretStr
 
 from veriditi_common.errors import UnauthorizedError
@@ -80,3 +80,12 @@ async def get_current_user(
 
 InternalTokenDep = Annotated[None, Depends(require_internal_token)]
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
+
+
+def internal_router(prefix: str = "/internal", *, tags: list[str] | None = None) -> APIRouter:
+    """Toda rota interna nasce exigindo o token, sem depender de lembrar a dependência"""
+    return APIRouter(
+        prefix=prefix,
+        tags=list(tags or ["internal"]),
+        dependencies=[Depends(require_internal_token)],
+    )
