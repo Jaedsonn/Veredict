@@ -96,6 +96,10 @@ class RequestContextMiddleware:
                 await internal_error_response()(scope, receive, send_with_request_id)
             finally:
                 path: str = scope["path"]
+                extra: dict[str, Any] = {}
+                if response_started and finished_at is None:
+                    # O status já foi enviado, mas o corpo parou no meio
+                    extra["truncated"] = True
                 log.log(
                     logging.DEBUG if path.startswith(_QUIET_PREFIX) else logging.INFO,
                     "request_finished",
@@ -105,6 +109,7 @@ class RequestContextMiddleware:
                     duration_ms=round(
                         ((finished_at or time.perf_counter()) - started_at) * 1000, 2
                     ),
+                    **extra,
                 )
                 await _run_deferred(pending)
 

@@ -2,12 +2,13 @@ import asyncio
 import io
 import json
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import httpx
 import pytest
 from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.responses import StreamingResponse
 from httpx import ASGITransport, AsyncClient
 from starlette.types import Message, Receive, Scope, Send
 
@@ -42,6 +43,14 @@ def _app(seen: dict[str, Any] | None = None) -> FastAPI:
     async def slow_task(background_tasks: BackgroundTasks) -> dict[str, str]:
         background_tasks.add_task(asyncio.sleep, 0.3)
         return {"ok": "1"}
+
+    @app.get("/stream")
+    async def stream() -> StreamingResponse:
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"a"
+            raise RuntimeError("caiu no meio")
+
+        return StreamingResponse(chunks())
 
     @app.get("/boom")
     async def boom() -> None:
@@ -244,3 +253,23 @@ async def test_duration_stops_at_response_body_not_background_tasks(json_logs: J
 
     [line] = [e for e in json_logs() if e["event"] == "request_finished"]
     assert line["duration_ms"] < 300
+
+
+async def test_failure_after_response_started_marks_access_log_truncated(
+    json_logs: JsonLogs,
+) -> None:
+    transport = ASGITransport(app=_app(), raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        resp = await client.get("/stream")
+
+    assert resp.status_code == 200
+    [access] = [e for e in json_logs() if e["event"] == "request_finished"]
+    assert access["truncated"] is True
+    assert [e for e in json_logs() if e["event"] == "unhandled_exception"]
+
+
+async def test_complete_response_is_not_truncated(json_logs: JsonLogs) -> None:
+    await _get("/x")
+
+    [access] = [e for e in json_logs() if e["event"] == "request_finished"]
+    assert "truncated" not in access
