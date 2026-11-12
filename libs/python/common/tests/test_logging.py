@@ -66,6 +66,7 @@ def test_uvicorn_access_and_httpx_info_are_silenced(json_logs: JsonLogs) -> None
     logging.getLogger("uvicorn.access").info("GET / 200")
     logging.getLogger("httpx").info("HTTP Request: GET http://x")
     logging.getLogger("httpcore").info("connect")
+    logging.getLogger("aiosqlite").debug("executing INSERT ('segredo@sql.test',)")
 
     assert json_logs() == []
 

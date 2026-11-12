@@ -204,7 +204,8 @@ def configure_logging(
     access = logging.getLogger("uvicorn.access")
     access.handlers = [logging.NullHandler()]
     access.propagate = False
-    for name in ("httpx", "httpcore"):
+    # O aiosqlite loga em DEBUG cada statement com os parâmetros (e-mail, hash)
+    for name in ("httpx", "httpcore", "aiosqlite"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
