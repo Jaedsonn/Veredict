@@ -11,6 +11,7 @@ import pytest
 from aiosmtplib import (
     SMTPAuthenticationError,
     SMTPConnectError,
+    SMTPException,
     SMTPNotSupported,
     SMTPRecipientRefused,
     SMTPRecipientsRefused,
@@ -204,6 +205,13 @@ def _refused(*codes: int) -> SMTPRecipientsRefused:
     )
 
 
+def _connect_error(cause: BaseException) -> SMTPConnectError:
+    """Como o aiosmtplib faz: raise SMTPConnectError(...) from exc"""
+    error = SMTPConnectError("Error connecting to mailpit on port 465")
+    error.__cause__ = cause
+    return error
+
+
 @pytest.mark.parametrize(
     ("error", "reason", "permanent", "smtp_code"),
     [
@@ -227,6 +235,20 @@ def _refused(*codes: int) -> SMTPRecipientsRefused:
             None,
         ),
         (ssl.SSLError(1, "handshake interrompido"), "SSLError", False, None),
+        (
+            _connect_error(ssl.SSLCertVerificationError(1, "certificate verify failed")),
+            "SMTPConnectError",
+            True,
+            None,
+        ),
+        (_connect_error(ConnectionRefusedError()), "SMTPConnectError", False, None),
+        (
+            SMTPException("SMTP STARTTLS extension not supported by server."),
+            "SMTPException",
+            True,
+            None,
+        ),
+        (SMTPException("No suitable authentication method found."), "SMTPException", True, None),
     ],
     ids=[
         "connect",
@@ -244,6 +266,10 @@ def _refused(*codes: int) -> SMTPRecipientsRefused:
         "smtputf8-not-supported",
         "cert-verification",
         "other-ssl-error",
+        "tls-cert-wrapped-in-connect",
+        "connect-refused-wrapped",
+        "starttls-missing-generic",
+        "auth-missing-generic",
     ],
 )
 async def test_errors_are_classified_without_the_address(

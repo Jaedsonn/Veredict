@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from aiosmtplib import (
     SMTP,
+    SMTPConnectError,
     SMTPException,
     SMTPNotSupported,
     SMTPRecipientsRefused,
@@ -59,9 +60,20 @@ def _delivery_error(exc: SMTPException | OSError) -> EmailDeliveryError:
     if isinstance(exc, SMTPResponseException):
         return EmailDeliveryError(reason, permanent=_is_permanent(exc.code), smtp_code=exc.code)
     # Antes do OSError genérico: servidor sem STARTTLS/SMTPUTF8 ou certificado inválido não mudam
-    if isinstance(exc, SMTPNotSupported | ssl.SSLCertVerificationError):
+    if isinstance(exc, SMTPNotSupported | ssl.SSLCertVerificationError) or _cert_rejected(exc):
+        return EmailDeliveryError(reason, permanent=True)
+    # SMTPException puro só sai de erro de configuração: STARTTLS ou AUTH ausentes no servidor
+    if type(exc) is SMTPException:
         return EmailDeliveryError(reason, permanent=True)
     return EmailDeliveryError(reason)
+
+
+def _cert_rejected(exc: BaseException) -> bool:
+    """O use_tls embrulha a falha do handshake em SMTPConnectError"""
+    if not isinstance(exc, SMTPConnectError):
+        return False
+    causes = (exc.__cause__, exc.__context__)
+    return any(isinstance(cause, ssl.SSLCertVerificationError) for cause in causes)
 
 
 class SmtpClient(Protocol):
