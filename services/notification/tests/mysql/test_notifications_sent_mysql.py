@@ -12,6 +12,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import URL, func, select
+from structlog.testing import capture_logs
 
 from notification_service.adapters.sqlalchemy_repo import SqlAlchemyNotificationRepository
 from notification_service.config import get_settings
@@ -207,7 +208,8 @@ def test_concurrent_reservations_store_one_row(migrated: Config) -> None:
 def test_reservations_waiting_on_a_rolled_back_insert_survive_the_deadlock(
     migrated: Config,
 ) -> None:
-    # As repetições esperam o lock da 1ª reserva; quando ela desfaz, o InnoDB escolhe vítimas 1213
+    # Duas esperas no lock da 1ª reserva: quando ela desfaz, o InnoDB mata uma com 1213.
+    # Com só duas, a repetição da vítima espera a vencedora e acha a duplicata, sem novo deadlock
     async def scenario() -> tuple[list[int | None], int]:
         db = _runtime_database()
         repo = SqlAlchemyNotificationRepository(db.session_factory)
@@ -221,7 +223,7 @@ def test_reservations_waiting_on_a_rolled_back_insert_survive_the_deadlock(
                 )
             tasks = [
                 asyncio.create_task(repo.add("welcome:8", "welcome", created_at=datetime.now(UTC)))
-                for _ in range(3)
+                for _ in range(2)
             ]
             await asyncio.sleep(1.0)
             first.rollback()
@@ -232,11 +234,14 @@ def test_reservations_waiting_on_a_rolled_back_insert_survive_the_deadlock(
             await db.dispose()
         return list(results), count
 
-    results, count = asyncio.run(scenario())
+    with capture_logs() as logs:
+        results, count = asyncio.run(scenario())
 
     assert sum(isinstance(result, int) for result in results) == 1
-    assert results.count(None) == 2
+    assert results.count(None) == 1
     assert count == 1
+    retried = [line for line in logs if line["event"] == "notification_insert_retried"]
+    assert [line["db_errno"] for line in retried] == [1213]
 
 
 def test_roundtrip_and_conditional_update(migrated: Config) -> None:
