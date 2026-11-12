@@ -39,3 +39,18 @@ class Route:
     prefix: bool = field(default=False, kw_only=True)
     # Headers do cliente além da allowlist do proxy (ex.: assinatura de webhook)
     extra_request_headers: frozenset[str] = field(default=frozenset(), kw_only=True)
+
+
+@dataclass(frozen=True, slots=True)
+class Principal:
+    user_id: int
+    email: str = field(repr=False)
+    session_id: str | None = None
+
+
+class InvalidTokenError(Exception):
+    """Todo motivo vira o mesmo 401; o reason vai só para o log"""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
