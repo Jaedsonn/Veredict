@@ -20,6 +20,18 @@ jobs:
       - run: uv run mypy services/*/src libs/python/*/src
       - run: uv run pytest
 
+  # MySQL real com docker/mysql/init via docker run, igual ao local (ADR-023);
+  # services: do GitHub não aceita o bind mount dos scripts de init
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: make db-test
+
   # galera de web, adicionem os testes aqui depois ( se for ter )
   web:
     runs-on: ubuntu-latest
