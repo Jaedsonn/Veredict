@@ -30,6 +30,24 @@ class RsaKeys:
     public_pem_escaped: str
 
 
+class FakeClock:
+    """Relógio monotônico controlado pelo teste, sem sleep real"""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def fake_clock() -> FakeClock:
+    return FakeClock()
+
+
 def _rsa_keys() -> RsaKeys:
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public = private.public_key()

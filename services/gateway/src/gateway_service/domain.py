@@ -42,6 +42,13 @@ class Route:
 
 
 @dataclass(frozen=True, slots=True)
+class RateDecision:
+    allowed: bool
+    # Segundos inteiros para o header Retry-After; 0 quando permitido
+    retry_after: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class Principal:
     user_id: int
     email: str = field(repr=False)
