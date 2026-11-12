@@ -19,6 +19,14 @@ veriditi/
 └── pyproject.toml            # uv workspace (um único uv.lock)
 ```
 
+## Documentação
+
+| Documento | Conteúdo |
+| --------- | -------- |
+| [Requisitos e escopo](docs/requisitos.md) | RF01–RF21, RNF01–RNF08, escopo da Sprint 1 (30%) e rastreabilidade |
+| [ADRs](docs/adr/README.md) | Decisões de arquitetura e desvios em relação ao documento original |
+| [Banco de dados](docs/banco-de-dados.md) | Modelo de dados, posse por serviço e privilégios |
+
 ## Pré-requisitos
 
 Node 22+, [uv](https://docs.astral.sh/uv/), Docker com Compose.
