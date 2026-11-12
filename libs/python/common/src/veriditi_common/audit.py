@@ -49,7 +49,7 @@ class AuditEvent(BaseModel):
 
     event_id: UUID = Field(default_factory=uuid4)
     occurred_at: AwareDatetime = Field(default_factory=lambda: datetime.now(UTC))
-    service: str = Field(min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9_-]*$")
+    service: str = Field(min_length=1, max_length=40, pattern=rf"^{_SEGMENT}$")
     # <serviço>.<entidade>.<verbo_passado>, ex.: auth.user.registered
     action: str = Field(max_length=80, pattern=rf"^{_SEGMENT}\.{_SEGMENT}\.{_SEGMENT}$")
     outcome: AuditOutcome

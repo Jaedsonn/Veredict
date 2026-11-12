@@ -83,6 +83,8 @@ def test_invalid_actions(service: str, action: str) -> None:
     "overrides",
     [
         {"service": "a" * 41, "action": "a" * 41 + ".x.y"},
+        {"service": "api-gw", "action": "api_gw.x.y"},
+        {"service": "Auth", "action": "auth.x.y"},
         {"resource_type": "r" * 41},
         {"resource_id": "r" * 65},
         {"actor_id": 0},
