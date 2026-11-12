@@ -75,6 +75,40 @@ async def test_sensitive_metadata_is_stored_redacted(
     assert record.metadata_ == {"password": REDACTED, "email_masked": "a***@example.com"}
 
 
+SECRET_NAMES = [
+    "password",
+    "token",
+    "code",
+    "secret",
+    "recoveryCodes",
+    "backup_codes",
+    "codes",
+    "código",
+    "auth.code",
+    "otp code",
+    "otpauth_uri",
+    "seed",
+]
+KEPT_NAMES = ["status_code", "error_code", "zip_code", "token_type", "email_masked"]
+
+
+async def test_secret_names_never_reach_storage(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory, db: Database
+) -> None:
+    metadata = {name: "s3cr3t" for name in SECRET_NAMES}
+    metadata |= {name: "kept" for name in KEPT_NAMES}
+    metadata["nested"] = [{name: "s3cr3t" for name in SECRET_NAMES}]
+
+    await client.post(URL, json=make_event(metadata=metadata), headers=auth_headers)
+
+    [record] = await _records(db)
+    assert "s3cr3t" not in repr(record.metadata_)
+    assert record.metadata_ is not None
+    assert {name: record.metadata_[name] for name in KEPT_NAMES} == dict.fromkeys(
+        KEPT_NAMES, "kept"
+    )
+
+
 @pytest.mark.parametrize(
     "headers",
     [{}, {"X-Internal-Token": "wrong-token-0123456789"}],

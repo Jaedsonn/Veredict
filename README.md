@@ -128,15 +128,17 @@ acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`.
 A redação troca por `[redacted]` o valor de chaves sensíveis, em qualquer
 nível do evento (`is_sensitive_key` em `veriditi_common/logging.py`):
 
-- o nome é normalizado (`apiKey` e `X-Api-Key` viram `api_key`/`x_api_key`);
+- o nome é normalizado: camelCase, acentos, `-`, `.` e espaço (`apiKey`, `X-Api-Key`,
+  `auth.code` e `código` viram `api_key`, `x_api_key`, `auth_code` e `codigo`);
 - é sensível o nome que contém `password`, `passphrase`, `secret`, `token`,
   `authorization`, `cookie`, `credential`, `signature`, `private_key`,
-  `api_key`, `access_key`, `signing_key`, `encryption_key`, `session_key` ou
-  `database_url`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`, `jwt`,
-  `dsn`, `hmac` e afins;
-- `code` é sensível, e `*_code` só com prefixo de segredo (`verification_code`,
-  `otp_code`, `reset_code`...). `status_code`, `zip_code` e `error_code` não são:
-  por isso o código de erro de negócio vai em `error_code`;
+  `api_key`, `access_key`, `signing_key`, `encryption_key`, `session_key`,
+  `database_url` ou `otpauth`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`,
+  `jwt`, `dsn`, `hmac`, `seed` e afins;
+- `code` e `codes` são sensíveis, e `*_code(s)` só com prefixo de segredo
+  (`verification_code`, `recovery_codes`, `backup_codes`, `otp_code`...). `status_code`,
+  `zip_code` e `error_code` não são: por isso o código de erro de negócio vai em
+  `error_code`;
 - metadados do segredo não são redigidos (`token_type`, `token_id`,
   `password_changed_at`, `has_password`...);
 - pares `(nome, valor)` são tratados como headers quando o nome é bytes ou a

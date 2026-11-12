@@ -3,6 +3,7 @@
 import logging
 import re
 import sys
+import unicodedata
 from collections.abc import Mapping
 from typing import Any, Final, TextIO
 
@@ -30,6 +31,7 @@ SENSITIVE_KEY_PARTS: Final[frozenset[str]] = frozenset(
         "access_key",
         "session_key",
         "database_url",
+        "otpauth",
     }
 )
 # Sensíveis quando são um segmento inteiro do nome (otp, mas não footprint)
@@ -47,12 +49,33 @@ _SENSITIVE_SEGMENTS: Final = frozenset(
         "dsn",
         "hmac",
         "pepper",
+        "seed",
+        "senhas",
+        "codigos",
     }
 )
-# *_code só é segredo com um destes prefixos; status_code, zip_code, error_code não são
+# *_code(s) só é segredo com um destes prefixos; status_code, zip_code, error_code não são
 _SECRET_CODE_PREFIXES: Final = frozenset(
-    {"verification", "otp", "mfa", "auth", "reset", "confirmation", "recovery", "pin"}
+    {
+        "verification",
+        "otp",
+        "totp",
+        "mfa",
+        "2fa",
+        "auth",
+        "reset",
+        "confirmation",
+        "recovery",
+        "backup",
+        "security",
+        "access",
+        "login",
+        "sms",
+        "email",
+        "pin",
+    }
 )
+_CODE_SEGMENTS: Final = frozenset({"code", "codes"})
 # Metadados sobre o segredo (token_type, password_changed_at, has_password), não o segredo
 _METADATA_SUFFIXES: Final = (
     "_type",
@@ -75,18 +98,23 @@ _UNTOUCHED_KEYS: Final = frozenset({"exc_info", "stack_info", "_record", "_from_
 
 
 _CAMEL_BOUNDARY: Final = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_SEPARATORS: Final = re.compile(r"[\s.\-]+")
+
+
+def _strip_accents(key: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", key) if not unicodedata.combining(c))
 
 
 def _normalize(key: str) -> str:
-    """apiKey, privateKey e X-Api-Key viram api_key, private_key e x_api_key"""
-    return _CAMEL_BOUNDARY.sub("_", key).lower().replace("-", "_")
+    """apiKey, X-Api-Key, auth.code e código viram api_key, x_api_key, auth_code e codigo"""
+    return _SEPARATORS.sub("_", _CAMEL_BOUNDARY.sub("_", _strip_accents(key)).lower())
 
 
 def _is_secret_code(segments: list[str]) -> bool:
     """code sozinho ou com prefixo de segredo; o hash de um código é tão sensível quanto ele"""
     if segments[-1] == "hash":
         segments = segments[:-1]
-    if not segments or segments[-1] != "code":
+    if not segments or segments[-1] not in _CODE_SEGMENTS:
         return False
     prefix = segments[:-1]
     return (
