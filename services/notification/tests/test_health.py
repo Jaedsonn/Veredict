@@ -45,8 +45,8 @@ async def test_ready_does_not_connect_to_database(client: AsyncClient) -> None:
     assert resp.json() == {"status": "ok"}
 
 
-def test_metadata_has_no_tables_yet() -> None:
-    assert Base.metadata.tables == {}
+def test_metadata_only_has_notifications_sent() -> None:
+    assert set(Base.metadata.tables) == {"notifications_sent"}
 
 
 async def test_responses_carry_request_id(client: AsyncClient) -> None:
