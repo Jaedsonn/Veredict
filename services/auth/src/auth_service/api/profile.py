@@ -64,6 +64,7 @@ async def change_password(
             user_id=current_user.id,
             current_password=payload.current_password,
             new_password=payload.new_password,
+            current_session_id=current_user.session_id,
             current_refresh_token=current_refresh,
         ),
         ctx,
