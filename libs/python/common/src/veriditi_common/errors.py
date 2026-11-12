@@ -18,6 +18,7 @@ _HTTP_ERRORS: Final[dict[int, tuple[str, str]]] = {
     403: ("forbidden", "Acesso negado."),
     404: ("not_found", "Recurso não encontrado."),
     405: ("method_not_allowed", "Método não permitido."),
+    413: ("payload_too_large", "Corpo da requisição grande demais."),
 }
 _DEFAULT_HTTP_ERROR: Final = ("http_error", "Não foi possível concluir a operação.")
 # input e ctx repetem o que o cliente mandou (senha, metadata); a web lê só loc, msg e type
@@ -56,6 +57,10 @@ class UnauthorizedError(AppError):
         super().__init__(401, "unauthorized", message)
 
 
+def http_error_body(status_code: int) -> dict[str, Any]:
+    return error_body(*_HTTP_ERRORS.get(status_code, _DEFAULT_HTTP_ERROR))
+
+
 def internal_error_response() -> JSONResponse:
     return JSONResponse(error_body(INTERNAL_ERROR_CODE, _INTERNAL_ERROR_MESSAGE), status_code=500)
 
@@ -74,7 +79,7 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
     if isinstance(exc.detail, dict):
         body: dict[str, Any] = {"detail": exc.detail}
     else:
-        body = error_body(*_HTTP_ERRORS.get(exc.status_code, _DEFAULT_HTTP_ERROR))
+        body = http_error_body(exc.status_code)
     return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
 
 

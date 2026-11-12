@@ -342,6 +342,7 @@ CREATE TABLE audit_events (
 
 `prev_hash` e `hash` (`CHAR(64)`, `hash` UNIQUE) entram na migration do **#34**, junto com o encadeamento.
 
+- Limites de entrada (#5): o `metadata` tem no máximo 16 KiB em JSON compacto (UTF-8) e 8 níveis de aninhamento, contando o próprio objeto; acima disso, 422. O corpo do `POST /internal/events` tem no máximo 64 KiB (`BodySizeLimitMiddleware` da lib, pelo `Content-Length` ou contando o stream), acima disso, `413 payload_too_large`. Por consequência, uma página do `GET` com `limit=200` fica em torno de 200 × 17 KiB ≈ 3,4 MB.
 - A redação do `metadata` é por **nome de chave**: um segredo no valor de uma chave neutra (`note: "Bearer …"`) passa. Não pôr segredo em valores é responsabilidade do produtor.
 - Um INSERT duplicado consome um `id` (o InnoDB não devolve o `AUTO_INCREMENT`), então os ids não são contíguos.
 - A ordem do `id` é a da reserva do `AUTO_INCREMENT`, não a dos COMMITs: uma transação lenta pode confirmar o `id` 6 depois que o 7 já está visível. O cursor `after_id` é estável para paginar dados já confirmados, mas **não serve para acompanhar a cauda** com escritas concorrentes: quem leu até o 7 nunca verá o 6. Nota para o #34: o encadeamento e qualquer leitura incremental precisam de uma marca d'água atrasada (`received_at < now() - Δ`, com Δ maior que a transação mais longa) ou de uma sequência gerada sob lock na mesma transação do INSERT. `occurred_at` também não serve, porque depende do relógio do produtor.

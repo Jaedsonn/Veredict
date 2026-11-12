@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Final
 
 from fastapi import FastAPI
 
@@ -11,8 +12,11 @@ from veriditi_common.db import Database
 from veriditi_common.errors import install_error_handlers
 from veriditi_common.health import build_health_router
 from veriditi_common.logging import configure_logging
-from veriditi_common.middleware import RequestContextMiddleware
+from veriditi_common.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
 from veriditi_common.security import install_internal_auth
+
+# Folga sobre o metadata de 16 KiB para os demais campos e o escape do JSON
+MAX_BODY_BYTES: Final = 64 * 1024
 
 
 def create_app(
@@ -37,5 +41,7 @@ def create_app(
     install_internal_auth(app, settings.internal_token)
     app.include_router(build_health_router(get_session))
     app.include_router(events.router)
+    # Dentro do RequestContextMiddleware: o 413 também leva X-Request-ID e entra no log
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_BODY_BYTES)
     app.add_middleware(RequestContextMiddleware)
     return app

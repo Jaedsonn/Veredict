@@ -1,10 +1,37 @@
+import json
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Literal
+from typing import Any, Final, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, JsonValue
+from pydantic import AwareDatetime, BaseModel, ConfigDict, JsonValue, field_validator
 
 from veriditi_common.audit import AuditEvent, AuditOutcome
+
+MAX_METADATA_BYTES: Final = 16 * 1024
+MAX_METADATA_DEPTH: Final = 8
+
+
+def _children(node: object) -> Iterable[object] | None:
+    if isinstance(node, dict):
+        return node.values()
+    if isinstance(node, list | tuple):
+        return node
+    return None
+
+
+def _depth(value: object) -> int:
+    """Iterativa: um JSON aninhado de propósito não estoura a pilha do Python"""
+    deepest = 0
+    pending: list[tuple[object, int]] = [(value, 1)]
+    while pending and deepest <= MAX_METADATA_DEPTH:
+        node, level = pending.pop()
+        children = _children(node)
+        if children is None:
+            continue
+        deepest = max(deepest, level)
+        pending.extend((child, level + 1) for child in children)
+    return deepest
 
 
 class AuditEventIn(AuditEvent):
@@ -13,6 +40,21 @@ class AuditEventIn(AuditEvent):
     event_id: UUID
     occurred_at: AwareDatetime
     request_id: UUID | None
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _metadata_depth(cls, value: Any) -> Any:
+        if _depth(value) > MAX_METADATA_DEPTH:
+            raise ValueError(f"metadata passa de {MAX_METADATA_DEPTH} níveis")
+        return value
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_size(cls, value: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded.encode("utf-8", "surrogatepass")) > MAX_METADATA_BYTES:
+            raise ValueError(f"metadata passa de {MAX_METADATA_BYTES} bytes em JSON")
+        return value
 
 
 class AcceptedResponse(BaseModel):

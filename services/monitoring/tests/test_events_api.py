@@ -1,4 +1,5 @@
-from collections.abc import Callable
+import json
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from typing import Any
 
@@ -408,3 +409,74 @@ async def test_validation_error_does_not_echo_metadata(
     assert resp.status_code == 422
     assert "s3cr3t-in-echo" not in resp.text
     assert all(set(item) == {"type", "loc", "msg"} for item in resp.json()["detail"])
+
+
+def _nested(depth: int) -> dict[str, Any]:
+    """metadata com depth níveis de objeto, contando o próprio metadata"""
+    value: dict[str, Any] = {"leaf": 1}
+    for _ in range(depth - 1):
+        value = {"k": value}
+    return value
+
+
+@pytest.mark.parametrize(("depth", "status"), [(8, 202), (9, 422)])
+async def test_metadata_depth_is_limited(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory, depth: int, status: int
+) -> None:
+    resp = await client.post(URL, json=make_event(metadata=_nested(depth)), headers=auth_headers)
+
+    assert resp.status_code == status
+
+
+async def test_absurd_nesting_is_rejected_without_recursion_error(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory
+) -> None:
+    body = json.dumps(make_event(metadata={"k": 1})).replace(
+        '"k": 1', '"k": ' + "[" * 5000 + "]" * 5000
+    )
+    headers = {**auth_headers, "content-type": "application/json"}
+
+    resp = await client.post(URL, content=body.encode(), headers=headers)
+
+    assert resp.status_code == 422
+
+
+# {"blob":"..."} tem 11 bytes além do valor
+@pytest.mark.parametrize(("size", "status"), [(16 * 1024 - 11, 202), (16 * 1024 - 10, 422)])
+async def test_metadata_size_is_limited(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory, size: int, status: int
+) -> None:
+    body = make_event(metadata={"blob": "a" * size})
+
+    resp = await client.post(URL, json=body, headers=auth_headers)
+
+    assert resp.status_code == status
+
+
+async def test_body_above_64_kib_is_payload_too_large(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory, db: Database
+) -> None:
+    body = make_event(metadata={"blob": "a" * 70_000})
+
+    resp = await client.post(URL, json=body, headers=auth_headers)
+
+    assert resp.status_code == 413
+    assert resp.json() == {
+        "detail": {"code": "payload_too_large", "message": "Corpo da requisição grande demais."}
+    }
+    assert await _records(db) == []
+
+
+async def test_streamed_body_without_length_is_also_limited(
+    client: AsyncClient, auth_headers: Headers
+) -> None:
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b'{"metadata": {"blob": "'
+        for _ in range(80):
+            yield b"a" * 1024
+        yield b'"}}'
+
+    headers = {**auth_headers, "content-type": "application/json"}
+    resp = await client.post(URL, content=chunks(), headers=headers)
+
+    assert resp.status_code == 413

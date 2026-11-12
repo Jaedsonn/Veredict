@@ -10,10 +10,12 @@ from typing import Any, Final
 
 import structlog
 from starlette.datastructures import Headers, MutableHeaders
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from veriditi_common.errors import internal_error_response
+from veriditi_common.errors import http_error_body, internal_error_response
 from veriditi_common.logging import get_logger
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"
@@ -171,3 +173,35 @@ def client_ip(request: Request) -> str | None:
     if forwarded and (ip := _valid_ip(forwarded.split(",")[0])):
         return ip
     return _valid_ip(request.client.host) if request.client else None
+
+
+class BodySizeLimitMiddleware:
+    """413 pelo Content-Length antes de ler e pela contagem do stream quando ele falta"""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = Headers(scope=scope).get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > self.max_bytes:
+            response = JSONResponse(http_error_body(413), status_code=413)
+            await response(scope, receive, send)
+            return
+
+        received = 0
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    # Dentro do app: o handler de HTTPException responde no formato padrão
+                    raise HTTPException(413)
+            return message
+
+        await self.app(scope, limited_receive, send)
