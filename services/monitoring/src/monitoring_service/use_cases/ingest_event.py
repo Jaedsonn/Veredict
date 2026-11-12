@@ -1,3 +1,4 @@
+import math
 from typing import Any
 
 from monitoring_service.domain import StoredAuditEvent
@@ -54,4 +55,21 @@ def _diverging_fields(event: AuditEvent, stored: StoredAuditEvent) -> list[str]:
         "resource_id": event.resource_id,
         "metadata": event.metadata,
     }
-    return [name for name, value in incoming.items() if getattr(stored, name) != value]
+    return [name for name, value in incoming.items() if not _same(getattr(stored, name), value)]
+
+
+def _same(stored: Any, incoming: Any) -> bool:
+    """O JSON do MySQL devolve o double com 16 dígitos; 0.1 + 0.2 não é bug do produtor"""
+    if isinstance(stored, dict) and isinstance(incoming, dict):
+        return stored.keys() == incoming.keys() and all(
+            _same(stored[key], incoming[key]) for key in stored
+        )
+    if isinstance(stored, list) and isinstance(incoming, list):
+        return len(stored) == len(incoming) and all(map(_same, stored, incoming))
+    if _is_number(stored) and _is_number(incoming) and float in (type(stored), type(incoming)):
+        return math.isclose(stored, incoming, rel_tol=1e-15, abs_tol=0)
+    return bool(stored == incoming)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)

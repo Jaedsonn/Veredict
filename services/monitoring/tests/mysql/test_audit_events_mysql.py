@@ -13,6 +13,7 @@ from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import URL, func, select
+from structlog.testing import capture_logs
 
 from monitoring_service.adapters.sqlalchemy_repo import SqlAlchemyAuditEventRepository
 from monitoring_service.config import Settings, get_settings
@@ -31,6 +32,7 @@ WRITER = "veriditi_logs_writer"
 WRITER_PASSWORD = os.environ.get("LOGS_DB_PASSWORD", "l")
 LOGS_DB = "veriditi_logs"
 TABLE_ACCESS_DENIED = 1142
+TOKEN = "test-internal-token-0123456789"
 
 INSERT_EVENT = (
     "INSERT INTO audit_events (event_id, occurred_at, service, action, outcome) "
@@ -217,6 +219,27 @@ def _deep(levels: int) -> dict[str, object]:
     return value
 
 
+def _writer_settings() -> Settings:
+    return Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        db_host=HOST,
+        db_port=PORT,
+        db_name=LOGS_DB,
+        db_user=WRITER,
+        db_password=WRITER_PASSWORD,  # type: ignore[arg-type]
+        internal_api_token=TOKEN,  # type: ignore[arg-type]
+    )
+
+
+async def _post(client: AsyncClient, body: dict[str, object]) -> int:
+    resp = await client.post(
+        "/internal/events",
+        content=json.dumps(body).encode(),
+        headers={"X-Internal-Token": TOKEN, "content-type": "application/json"},
+    )
+    return resp.status_code
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -231,34 +254,42 @@ def _deep(levels: int) -> dict[str, object]:
 def test_payload_mysql_would_refuse_is_422_not_500(
     migrated: Config, overrides: dict[str, object]
 ) -> None:
-    token = "test-internal-token-0123456789"
-    settings = Settings(
-        _env_file=None,  # type: ignore[call-arg]
-        db_host=HOST,
-        db_port=PORT,
-        db_name=LOGS_DB,
-        db_user=WRITER,
-        db_password=WRITER_PASSWORD,  # type: ignore[arg-type]
-        internal_api_token=token,  # type: ignore[arg-type]
-    )
     body = {**_event().model_dump(mode="json"), **overrides}
 
     async def scenario() -> tuple[int, int]:
-        app = create_app(settings=settings)
+        app = create_app(settings=_writer_settings())
         async with (
             app.router.lifespan_context(app),
             AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client,
         ):
-            resp = await client.post(
-                "/internal/events",
-                content=json.dumps(body).encode(),
-                headers={"X-Internal-Token": token, "content-type": "application/json"},
-            )
+            status = await _post(client, body)
             async with app.state.db.session_factory() as session:
                 count = await session.scalar(select(func.count()).select_from(AuditEventRecord))
-        return resp.status_code, int(count or 0)
+        return status, int(count or 0)
 
     assert asyncio.run(scenario()) == (422, 0)
+
+
+def test_identical_resend_with_floats_is_not_a_conflict(migrated: Config) -> None:
+    # O JSON do MySQL devolve o double com 16 dígitos significativos, não 17
+    metadata = {"a": 123456789.12345679, "b": 1794481488.1332421, "c": [0.1, 1e-7, -0.0]}
+    body = _event(metadata=metadata).model_dump(mode="json")
+
+    async def scenario() -> tuple[list[int], list[dict[str, object]]]:
+        app = create_app(settings=_writer_settings())
+        async with (
+            app.router.lifespan_context(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client,
+        ):
+            first = await _post(client, body)
+            with capture_logs() as logs:
+                second = await _post(client, body)
+        return [first, second], [line for line in logs if line["event"] == "audit_event_conflict"]
+
+    statuses, conflicts = asyncio.run(scenario())
+
+    assert statuses == [202, 202]
+    assert conflicts == []
 
 
 def test_resends_waiting_on_a_rolled_back_insert_survive_the_deadlock(migrated: Config) -> None:

@@ -172,3 +172,28 @@ async def test_equal_resend_does_not_warn_conflict(
         await ingest.execute(event.model_copy(update=resend))
 
     assert all(line["event"] != "audit_event_conflict" for line in logs)
+
+
+async def test_float_rounded_by_storage_is_not_a_conflict(
+    ingest: IngestAuditEvent, repo: InMemoryAuditEventRepository
+) -> None:
+    event = _event(metadata={"a": 1794481488.1332421, "nested": [{"b": 123456789.12345679}]})
+    await ingest.execute(event)
+    # Como o JSON do MySQL devolve: 16 dígitos significativos
+    repo.rows[0].metadata.update({"a": 1794481488.133242, "nested": [{"b": 123456789.1234568}]})
+
+    with capture_logs() as logs:
+        await ingest.execute(event)
+
+    assert all(line["event"] != "audit_event_conflict" for line in logs)
+
+
+async def test_different_float_is_still_a_conflict(ingest: IngestAuditEvent) -> None:
+    event = _event(metadata={"ratio": 1.5})
+    await ingest.execute(event)
+
+    with capture_logs() as logs:
+        await ingest.execute(event.model_copy(update={"metadata": {"ratio": 1.6}}))
+
+    [conflict] = [line for line in logs if line["event"] == "audit_event_conflict"]
+    assert conflict["fields"] == ["metadata"]
