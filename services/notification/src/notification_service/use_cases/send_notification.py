@@ -108,6 +108,7 @@ class SendNotification:
         context = {**context, "notification_id": notification_id}
         error = EmailDeliveryError("NotAttempted")
         attempt = 0
+        delivered = False
         try:
             for attempt in range(1, self._retry.max_attempts + 1):
                 try:
@@ -118,8 +119,8 @@ class SendNotification:
                     # Bug no adapter conta como falha transitória; o tipo basta, a mensagem não
                     error = EmailDeliveryError(type(exc).__name__)
                 else:
-                    await self._finish_sent(email, context, attempt)
-                    return
+                    delivered = True
+                    break
                 log.warning(
                     "notification_email_attempt_failed",
                     **context,
@@ -135,7 +136,17 @@ class SendNotification:
         except asyncio.CancelledError:
             log.warning("notification_delivery_interrupted", **context, attempts=attempt)
             raise
-        await self._finish_failed(context, attempt, error)
+        # Fora do except acima: cancelado aqui, o SMTP já terminou e o log diz se entregou
+        try:
+            if delivered:
+                await self._finish_sent(email, context, attempt)
+            else:
+                await self._finish_failed(context, attempt, error)
+        except asyncio.CancelledError:
+            log.warning(
+                "notification_finish_interrupted", **context, attempts=attempt, delivered=delivered
+            )
+            raise
 
     async def _finish_sent(
         self, email: OutgoingEmail, context: dict[str, Any], attempts: int

@@ -323,6 +323,38 @@ async def test_cancellation_during_backoff_leaves_row_pending(
     assert line["attempts"] == 1
 
 
+class _BlockingMarkSent(InMemoryNotificationRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+
+    async def mark_sent(self, notification_id: int, **kwargs: Any) -> bool:
+        self.entered.set()
+        await asyncio.Event().wait()
+        return True
+
+
+async def test_cancellation_while_finishing_does_not_claim_delivery_was_interrupted(
+    harness_for: Any, sender: InMemoryEmailSender, make_request: Any
+) -> None:
+    repo = _BlockingMarkSent()
+    harness = harness_for(sender, notifications=repo)
+
+    with capture_logs() as logs:
+        await harness.use_case.execute(make_request())
+        task = asyncio.create_task(harness.scheduler.tasks.pop()())
+        await repo.entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert len(sender.sent) == 1
+    events = [line["event"] for line in logs]
+    assert "notification_delivery_interrupted" not in events
+    [line] = [line for line in logs if line["event"] == "notification_finish_interrupted"]
+    assert (line["delivered"], line["attempts"]) == (True, 1)
+
+
 async def test_retry_policy_is_a_single_constant(
     harness_for: Any, sleep: Any, make_request: Any
 ) -> None:
