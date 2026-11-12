@@ -1,6 +1,6 @@
 import pytest
 
-from veriditi_common.settings import ServiceSettings
+from veriditi_common.settings import BaseServiceSettings, ServiceSettings
 
 
 def _settings(**overrides: object) -> ServiceSettings:
@@ -48,3 +48,11 @@ def test_migration_url_requires_migrator_credentials(missing: str) -> None:
 def test_passwords_are_not_leaked_in_repr() -> None:
     rendered = repr(_settings(db_password="s3nh4-runtime", db_migrator_password="s3nh4-ddl"))
     assert "s3nh4" not in rendered
+
+
+def test_base_settings_work_without_database_variables() -> None:
+    settings = BaseServiceSettings(_env_file=None, service_name="gateway")  # type: ignore[call-arg]
+
+    assert settings.service_name == "gateway"
+    assert settings.debug is False
+    assert issubclass(ServiceSettings, BaseServiceSettings)

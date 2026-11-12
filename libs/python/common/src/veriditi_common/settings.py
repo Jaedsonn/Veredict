@@ -2,18 +2,17 @@ from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class ServiceSettings(BaseSettings):
-    """Configuração base de qualquer serviço, lida de variáveis de ambiente
-
-    Cada serviço conecta com dois usuários MySQL: o de runtime (DB_USER), só com
-    DML nas próprias tabelas, e o `migrator` (DB_MIGRATOR_USER), com DDL, usado
-    apenas pelo Alembic
-    """
+class BaseServiceSettings(BaseSettings):
+    """Configuração comum a todo serviço, inclusive os que não usam banco (gateway)"""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     service_name: str
     debug: bool = False
+
+
+class ServiceSettings(BaseServiceSettings):
+    """Serviço com banco: runtime (DB_USER) só com DML e `migrator` com DDL para o Alembic"""
 
     db_host: str = "localhost"
     db_port: int = 3306
