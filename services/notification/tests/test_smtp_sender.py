@@ -41,18 +41,49 @@ EMAIL = OutgoingEmail(
 )
 
 
-class FakeTransport:
-    def __init__(self, error: Exception | None = None) -> None:
-        self.error = error
-        self.calls: list[tuple[EmailMessage, dict[str, Any]]] = []
+class FakeClient:
+    """Registra a sequência de comandos; fail_on escolhe em qual deles levantar"""
 
-    async def __call__(self, message: EmailMessage, **kwargs: Any) -> None:
-        self.calls.append((message, kwargs))
-        if self.error is not None:
+    def __init__(
+        self, error: BaseException | None = None, *, fail_on: str = "send_message"
+    ) -> None:
+        self.error = error
+        self.fail_on = fail_on
+        self.options: dict[str, Any] = {}
+        self.steps: list[str] = []
+        self.login_args: tuple[str, str] | None = None
+        self.sent: list[tuple[EmailMessage, str, list[str]]] = []
+
+    def __call__(self, **options: Any) -> "FakeClient":
+        self.options = options
+        return self
+
+    async def _step(self, name: str) -> None:
+        self.steps.append(name)
+        if self.error is not None and self.fail_on == name:
             raise self.error
 
+    async def connect(self) -> None:
+        await self._step("connect")
 
-def _sender(transport: FakeTransport, **overrides: Any) -> SmtpEmailSender:
+    async def login(self, username: str, password: str, /) -> None:
+        self.login_args = (username, password)
+        await self._step("login")
+
+    async def send_message(
+        self, message: EmailMessage, /, *, sender: str, recipients: list[str]
+    ) -> None:
+        self.sent.append((message, sender, recipients))
+        await self._step("send_message")
+
+    async def quit(self) -> None:
+        await self._step("quit")
+
+    def close(self) -> None:
+        self.steps.append("close")
+
+
+def _sender(client: FakeClient, **overrides: Any) -> SmtpEmailSender:
     values: dict[str, Any] = {
         "host": "mailpit",
         "port": 1025,
@@ -63,7 +94,7 @@ def _sender(transport: FakeTransport, **overrides: Any) -> SmtpEmailSender:
         "start_tls": False,
         "use_tls": False,
         "timeout": 10.0,
-        "transport": transport,
+        "client_factory": client,
         "clock": lambda: NOW,
     }
     values.update(overrides)
@@ -103,37 +134,68 @@ def test_message_ids_are_unique_in_sender_domain() -> None:
 
 
 @pytest.mark.parametrize(("start_tls", "use_tls"), [(False, False), (True, False), (False, True)])
-async def test_transport_gets_explicit_connection_settings(start_tls: bool, use_tls: bool) -> None:
-    transport = FakeTransport()
+async def test_client_gets_explicit_connection_settings(start_tls: bool, use_tls: bool) -> None:
+    client = FakeClient()
 
-    await _sender(transport, start_tls=start_tls, use_tls=use_tls).send(EMAIL)
+    await _sender(client, start_tls=start_tls, use_tls=use_tls).send(EMAIL)
 
-    [(message, kwargs)] = transport.calls
-    assert kwargs == {
-        "sender": "no-reply@veriditi.app",
-        "recipients": [TO],
+    assert client.options == {
         "hostname": "mailpit",
         "port": 1025,
-        "username": None,
-        "password": None,
-        "start_tls": start_tls,
         "use_tls": use_tls,
+        "start_tls": start_tls,
         "timeout": 10.0,
     }
+    assert client.steps == ["connect", "send_message", "quit", "close"]
+    [(message, sender, recipients)] = client.sent
+    assert (sender, recipients) == ("no-reply@veriditi.app", [TO])
     assert message["Message-ID"] == EMAIL.message_id
     assert message["Date"] == "Thu, 12 Nov 2026 15:00:00 +0000"
     assert message["From"] == SENDER
 
 
-async def test_password_is_revealed_only_in_the_transport_call() -> None:
-    transport = FakeTransport()
-    sender = _sender(transport, username="apikey", password=SecretStr(SECRET))
+async def test_password_is_revealed_only_in_the_login_call() -> None:
+    client = FakeClient()
+    sender = _sender(client, username="apikey", password=SecretStr(SECRET))
 
     await sender.send(EMAIL)
 
-    [(_message, kwargs)] = transport.calls
-    assert (kwargs["username"], kwargs["password"]) == ("apikey", SECRET)
+    assert client.steps == ["connect", "login", "send_message", "quit", "close"]
+    assert client.login_args == ("apikey", SECRET)
+    assert SECRET not in repr(client.options)
     assert SECRET not in repr(vars(sender))
+
+
+@pytest.mark.parametrize(
+    "error", [SMTPServerDisconnected("caiu"), SMTPResponseException(421, "tchau"), TimeoutError()]
+)
+async def test_quit_failure_does_not_undo_the_delivery(error: Exception) -> None:
+    client = FakeClient(error, fail_on="quit")
+
+    await _sender(client).send(EMAIL)
+
+    assert client.steps == ["connect", "send_message", "quit", "close"]
+
+
+@pytest.mark.parametrize("step", ["connect", "login", "send_message"])
+async def test_failure_before_delivery_closes_without_quit(step: str) -> None:
+    client = FakeClient(SMTPServerDisconnected("caiu"), fail_on=step)
+    sender = _sender(client, username="apikey", password=SecretStr(SECRET))
+
+    with pytest.raises(EmailDeliveryError):
+        await sender.send(EMAIL)
+
+    assert "quit" not in client.steps
+    assert client.steps[-2:] == [step, "close"]
+
+
+async def test_cancellation_closes_the_connection() -> None:
+    client = FakeClient(asyncio.CancelledError(), fail_on="send_message")
+
+    with pytest.raises(asyncio.CancelledError):
+        await _sender(client).send(EMAIL)
+
+    assert client.steps == ["connect", "send_message", "close"]
 
 
 def _refused(*codes: int) -> SMTPRecipientsRefused:
@@ -188,7 +250,7 @@ async def test_errors_are_classified_without_the_address(
     error: Exception, reason: str, permanent: bool, smtp_code: int | None
 ) -> None:
     with pytest.raises(EmailDeliveryError) as exc:
-        await _sender(FakeTransport(error)).send(EMAIL)
+        await _sender(FakeClient(error)).send(EMAIL)
 
     assert (exc.value.reason, exc.value.permanent, exc.value.smtp_code) == (
         reason,
@@ -202,7 +264,7 @@ async def test_errors_are_classified_without_the_address(
 
 async def test_unexpected_errors_are_not_masked() -> None:
     with pytest.raises(RuntimeError, match="bug"):
-        await _sender(FakeTransport(RuntimeError("bug"))).send(EMAIL)
+        await _sender(FakeClient(RuntimeError("bug"))).send(EMAIL)
 
 
 async def test_failing_sender_fails_n_times_then_delivers() -> None:
@@ -225,19 +287,21 @@ def test_outgoing_email_repr_hides_address_and_bodies() -> None:
     assert EMAIL.message_id in shown
 
 
-class SlowTransport(FakeTransport):
+class SlowClient(FakeClient):
     """Cada comando cabe no timeout do aiosmtplib, mas a soma não"""
 
-    async def __call__(self, message: EmailMessage, **kwargs: Any) -> None:
-        self.calls.append((message, kwargs))
-        await asyncio.sleep(1)
+    async def _step(self, name: str) -> None:
+        self.steps.append(name)
+        if name != "quit":
+            await asyncio.sleep(0.03)
 
 
 async def test_whole_attempt_is_bounded_by_the_timeout() -> None:
-    transport = SlowTransport()
+    client = SlowClient()
+    sender = _sender(client, timeout=0.05, username="apikey", password=SecretStr(SECRET))
 
     with pytest.raises(EmailDeliveryError) as exc:
-        await _sender(transport, timeout=0.05).send(EMAIL)
+        await sender.send(EMAIL)
 
     assert (exc.value.reason, exc.value.permanent, exc.value.smtp_code) == (
         "TimeoutError",
@@ -245,5 +309,5 @@ async def test_whole_attempt_is_bounded_by_the_timeout() -> None:
         None,
     )
     assert exc.value.__context__ is None
-    [(_message, kwargs)] = transport.calls
-    assert kwargs["timeout"] == 0.05
+    assert client.steps == ["connect", "login", "close"]
+    assert client.options["timeout"] == 0.05

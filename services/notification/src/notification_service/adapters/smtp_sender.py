@@ -1,13 +1,14 @@
 import asyncio
 import ssl
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Sequence
+from contextlib import suppress
 from datetime import datetime
 from email.message import EmailMessage
 from email.utils import format_datetime, formataddr, make_msgid
-from typing import Any
+from typing import Any, Protocol
 
-import aiosmtplib
 from aiosmtplib import (
+    SMTP,
     SMTPException,
     SMTPNotSupported,
     SMTPRecipientsRefused,
@@ -63,6 +64,25 @@ def _delivery_error(exc: SMTPException | OSError) -> EmailDeliveryError:
     return EmailDeliveryError(reason)
 
 
+class SmtpClient(Protocol):
+    """O pedaço do aiosmtplib.SMTP que o envio usa; os testes trocam por um falso"""
+
+    async def connect(self) -> Any: ...
+
+    async def login(self, username: str, password: str, /) -> Any: ...
+
+    async def send_message(
+        self, message: EmailMessage, /, *, sender: str, recipients: Sequence[str]
+    ) -> Any: ...
+
+    async def quit(self) -> Any: ...
+
+    def close(self) -> None: ...
+
+
+SmtpClientFactory = Callable[..., SmtpClient]
+
+
 class SmtpEmailSender:
     """Uma conexão por envio: o volume da Sprint 1 não justifica um pool SMTP"""
 
@@ -78,7 +98,7 @@ class SmtpEmailSender:
         start_tls: bool,
         use_tls: bool,
         timeout: float,
-        transport: Callable[..., Awaitable[Any]] = aiosmtplib.send,
+        client_factory: SmtpClientFactory = SMTP,
         clock: Clock = utcnow,
     ) -> None:
         self._host = host
@@ -91,33 +111,49 @@ class SmtpEmailSender:
         self._start_tls = start_tls
         self._use_tls = use_tls
         self._timeout = timeout
-        self._transport = transport
+        self._client_factory = client_factory
         self._clock = clock
 
     async def send(self, email: OutgoingEmail) -> None:
         message = build_message(email, sender=self._from_header, date=self._clock())
-        password = self._password.get_secret_value() if self._username and self._password else None
+        # Explícito: start_tls=None faria o aiosmtplib tentar o STARTTLS sozinho
+        client = self._client_factory(
+            hostname=self._host,
+            port=self._port,
+            use_tls=self._use_tls,
+            start_tls=self._start_tls,
+            timeout=self._timeout,
+        )
         try:
             # O timeout do aiosmtplib vale por comando; este limita a tentativa inteira
             async with asyncio.timeout(self._timeout):
-                await self._transport(
-                    message,
-                    # Envelope explícito: não depende de o aiosmtplib reler o From e o To
-                    sender=self._sender_address,
-                    recipients=[email.to],
-                    hostname=self._host,
-                    port=self._port,
-                    username=self._username,
-                    password=password,
-                    # Explícito: None faria o aiosmtplib tentar o STARTTLS sozinho
-                    start_tls=self._start_tls,
-                    use_tls=self._use_tls,
-                    timeout=self._timeout,
+                await client.connect()
+                if self._username is not None and self._password is not None:
+                    await client.login(self._username, self._password.get_secret_value())
+                # Envelope explícito: não depende de o aiosmtplib reler o From e o To
+                await client.send_message(
+                    message, sender=self._sender_address, recipients=[email.to]
                 )
         # TimeoutError é OSError: o estouro do total cai como transitório
         except (SMTPException, OSError) as exc:
+            # close e não QUIT: um servidor travado seguraria a tentativa por mais um timeout
+            client.close()
             error = _delivery_error(exc)
+        except BaseException:
+            client.close()
+            raise
         else:
+            # Fora do timeout total: o QUIT não pode transformar entrega em falha e reenvio
+            await self._quit_quietly(client)
             return
         # Fora do except: nem __cause__ nem __context__ levam a exceção com o endereço
         raise error
+
+    async def _quit_quietly(self, client: SmtpClient) -> None:
+        """Depois do DATA aceito o e-mail já foi: QUIT lento ou recusado não vira falha"""
+        try:
+            with suppress(Exception):
+                async with asyncio.timeout(self._timeout):
+                    await client.quit()
+        finally:
+            client.close()
