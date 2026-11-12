@@ -15,9 +15,9 @@ from veriditi_common.audit import AuditEvent
 from veriditi_common.db import Database
 from veriditi_common.logging import (
     REDACTED,
-    SENSITIVE_KEYS,
     configure_logging,
     get_logger,
+    is_sensitive_key,
     mask_email,
     redact_sensitive,
 )
@@ -118,7 +118,61 @@ def test_redact_sensitive_compares_case_and_separator_insensitively() -> None:
         "Code": REDACTED,
         "n": 1,
     }
-    assert {"password", "code", "x-internal-token"} <= SENSITIVE_KEYS
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "password",
+        "current_password",
+        "password_hash",
+        "passwd",
+        "db_password",
+        "client_secret",
+        "token",
+        "refresh_token",
+        "X-Internal-Token",
+        "internal_api_token",
+        "Authorization",
+        "Set-Cookie",
+        "jwt_private_key",
+        "api_key",
+        "X-Api-Key",
+        "otp",
+        "otp_secret",
+        "code",
+        "verification_code",
+        b"authorization",
+    ],
+)
+def test_sensitive_key_variants(key: str | bytes) -> None:
+    assert is_sensitive_key(key)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["status_code", "error_code", "idempotency_key", "template", "to_masked", "request_id", 42],
+)
+def test_non_sensitive_keys(key: object) -> None:
+    assert not is_sensitive_key(key)
+
+
+def test_header_pairs_are_redacted_by_name(json_logs: JsonLogs) -> None:
+    get_logger("t").info(
+        "x",
+        raw_headers=[(b"authorization", b"Bearer abc"), (b"x-internal-token", b"tok")],
+        headers=[["Cookie", "sid=1"], ["Accept", "application/json"]],
+        error_code="invalid_credentials",
+        code="123456",
+    )
+
+    [line] = json_logs()
+    output = json.dumps(line)
+    for secret in ("Bearer abc", 'tok"', "sid=1", "123456"):
+        assert secret not in output
+    assert line["headers"][1] == ["Accept", "application/json"]
+    assert line["error_code"] == "invalid_credentials"
+    assert line["code"] == REDACTED
 
 
 def test_exception_does_not_leak_locals(json_logs: JsonLogs) -> None:

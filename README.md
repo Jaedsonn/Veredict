@@ -123,8 +123,11 @@ uvicorn ([ADR-012](docs/adr/0012-geracao-de-logs-estruturados.md)):
 
 Toda resposta traz o `X-Request-ID`: o do cliente, se for um UUID válido, ou um
 UUID4 novo. Para seguir uma requisição, `make logs | grep <request_id>`. O
-acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`, e chaves sensíveis
-(senha, token, código, cookie, `authorization`) saem como `[redacted]`.
+acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`. Chaves que contêm
+`password`, `secret`, `token`, `cookie`, `authorization`, `private_key`,
+`api_key` ou `otp`, e `code`/`*_code`, saem como `[redacted]`, inclusive em
+pares de headers. Por isso o código de erro de negócio vai em `error_code`
+(`status_code` e `error_code` não são redigidos).
 
 Os erros seguem `{"detail": {"code": "...", "message": "...", ...extras}}`, o
 formato lido por `apps/web/src/lib/errors.ts`; o 422 de validação mantém o

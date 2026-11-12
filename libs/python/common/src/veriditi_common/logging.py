@@ -8,23 +8,21 @@ from typing import Any, Final, TextIO
 import structlog
 from structlog.typing import EventDict, Processor, WrappedLogger
 
-SENSITIVE_KEYS: Final[frozenset[str]] = frozenset(
+# Basta a chave conter uma destas partes (minúsculas, "-" igual a "_")
+SENSITIVE_KEY_PARTS: Final[frozenset[str]] = frozenset(
     {
         "password",
-        "current_password",
-        "new_password",
-        "token",
-        "access_token",
-        "refresh_token",
-        "code",
+        "passwd",
         "secret",
+        "token",
         "authorization",
         "cookie",
-        "set-cookie",
-        "x-internal-token",
-        "internal_api_token",
+        "private_key",
+        "api_key",
     }
 )
+# code e *_code são sensíveis; o código de erro de negócio vai em error_code
+_NOT_SENSITIVE: Final = frozenset({"status_code", "error_code"})
 REDACTED: Final = "[redacted]"
 
 _HANDLER_NAME: Final = "veriditi"
@@ -32,24 +30,38 @@ _HANDLER_NAME: Final = "veriditi"
 _UNTOUCHED_KEYS: Final = frozenset({"exc_info", "stack_info", "_record", "_from_structlog"})
 
 
-def _normalize(key: str) -> str:
-    return key.lower().replace("-", "_")
+def is_sensitive_key(key: object) -> bool:
+    """Por parte do nome, para pegar db_password, jwt_private_key, verification_code e afins"""
+    if isinstance(key, bytes):
+        key = key.decode("latin-1")
+    if not isinstance(key, str):
+        return False
+    normalized = key.lower().replace("-", "_")
+    if normalized in _NOT_SENSITIVE:
+        return False
+    if normalized == "code" or normalized.endswith("_code"):
+        return True
+    if "otp" in normalized.split("_"):
+        return True
+    return any(part in normalized for part in SENSITIVE_KEY_PARTS)
 
 
-_SENSITIVE_NORMALIZED: Final = frozenset(_normalize(k) for k in SENSITIVE_KEYS)
-
-
-def _is_sensitive(key: object) -> bool:
-    return isinstance(key, str) and _normalize(key) in _SENSITIVE_NORMALIZED
+def _is_sensitive_pair(value: list[Any] | tuple[Any, ...]) -> bool:
+    """Par (nome, valor) como os headers crus do ASGI e do httpx"""
+    return (
+        len(value) == 2
+        and all(isinstance(item, str | bytes) for item in value)
+        and is_sensitive_key(value[0])
+    )
 
 
 def _redact(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return {k: REDACTED if _is_sensitive(k) else _redact(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact(v) for v in value]
-    if isinstance(value, tuple):
-        return tuple(_redact(v) for v in value)
+        return {k: REDACTED if is_sensitive_key(k) else _redact(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        sensitive = _is_sensitive_pair(value)
+        items = [value[0], REDACTED] if sensitive else [_redact(v) for v in value]
+        return tuple(items) if isinstance(value, tuple) else items
     return value
 
 
@@ -58,7 +70,7 @@ def redact_sensitive(logger: WrappedLogger, method_name: str, event_dict: EventD
     for key, value in event_dict.items():
         if key in _UNTOUCHED_KEYS:
             continue
-        event_dict[key] = REDACTED if _is_sensitive(key) else _redact(value)
+        event_dict[key] = REDACTED if is_sensitive_key(key) else _redact(value)
     return event_dict
 
 
