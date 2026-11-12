@@ -20,6 +20,7 @@ from auth_service.adapters.repositories import (
 )
 from auth_service.adapters.token_issuer import PyJwtTokenIssuer
 from auth_service.config import Settings
+from auth_service.domain.entities import RequestContext
 from auth_service.domain.password_policy import PasswordPolicy
 from auth_service.domain.verification_code import VerificationCodeService
 from auth_service.ports import (
@@ -41,10 +42,10 @@ from auth_service.use_cases import (
     UpdateProfile,
     VerifyEmail,
 )
-from veriditi_common.audit import AuditLogger
-from veriditi_common.middleware import RequestContext, get_request_context
-from veriditi_common.notifications import Notifier
-from veriditi_common.security import AuthenticatedUser, get_current_user
+from veriditi_common.audit import AuditLoggerDep, get_audit_logger
+from veriditi_common.middleware import client_ip, current_request_id
+from veriditi_common.notifications import NotifierDep, get_notifier
+from veriditi_common.security import CurrentUserDep, get_current_user
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -53,6 +54,7 @@ def get_app_settings(request: Request) -> Settings:
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+    """O Database vive em app.state (criado no lifespan) para os testes poderem trocá-lo."""
     async for session in request.app.state.db.session():
         yield session
 
@@ -76,7 +78,7 @@ def get_verification_code_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> VerificationCodeService:
     return VerificationCodeService(
-        pepper=settings.verification_pepper.get_secret_value(),
+        pepper=settings.pepper,
         ttl_minutes=settings.verification_code_ttl_minutes,
         max_attempts=settings.verification_max_attempts,
     )
@@ -87,14 +89,14 @@ def get_token_issuer(request: Request) -> TokenIssuer:
     return issuer
 
 
-def get_audit_logger(request: Request) -> AuditLogger:
-    audit: AuditLogger = request.app.state.audit_logger
-    return audit
-
-
-def get_notifier(request: Request) -> Notifier:
-    notifier: Notifier = request.app.state.notifier
-    return notifier
+def get_request_context(request: Request) -> RequestContext:
+    raw_ua = request.headers.get("user-agent")
+    user_agent = raw_ua.strip()[:255] if raw_ua and raw_ua.strip() else None
+    return RequestContext(
+        request_id=current_request_id(),
+        actor_ip=client_ip(request),
+        user_agent=user_agent,
+    )
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -104,10 +106,7 @@ PasswordHasherDep = Annotated[PasswordHasher, Depends(get_password_hasher)]
 PasswordPolicyDep = Annotated[PasswordPolicy, Depends(get_password_policy)]
 CodeServiceDep = Annotated[VerificationCodeService, Depends(get_verification_code_service)]
 TokenIssuerDep = Annotated[TokenIssuer, Depends(get_token_issuer)]
-AuditLoggerDep = Annotated[AuditLogger, Depends(get_audit_logger)]
-NotifierDep = Annotated[Notifier, Depends(get_notifier)]
 RequestContextDep = Annotated[RequestContext, Depends(get_request_context)]
-CurrentUserDep = Annotated[AuthenticatedUser, Depends(get_current_user)]
 
 
 def get_user_repository(session: SessionDep) -> UserRepository:
@@ -285,13 +284,17 @@ __all__ = [
     "SettingsDep",
     "TokenIssuerDep",
     "UserRepoDep",
+    "get_audit_logger",
     "get_authenticate_user_use_case",
     "get_change_password_use_case",
     "get_clock",
+    "get_current_user",
     "get_logout_user_use_case",
+    "get_notifier",
     "get_profile_use_case",
     "get_refresh_session_use_case",
     "get_register_user_use_case",
+    "get_request_context",
     "get_resend_code_use_case",
     "get_session",
     "get_update_profile_use_case",

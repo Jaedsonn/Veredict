@@ -1,15 +1,44 @@
 """Entidades e objetos de valor do domínio de Autenticação."""
 
+import ipaddress
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from ipaddress import IPv4Address, IPv6Address
 
-from auth_service.models import RevokeReason, UserRole, UserStatus, VerificationPurpose
+from auth_service.models import RevokeReason, UserStatus, VerificationPurpose
+
+
+@dataclass(frozen=True, slots=True)
+class RequestContext:
+    """Metadados de transporte extraídos da requisição HTTP para auditoria e sessão."""
+
+    request_id: str | None = None
+    actor_ip: str | None = None
+    user_agent: str | None = None
+
+    @property
+    def request_uuid(self) -> uuid.UUID | None:
+        if not self.request_id:
+            return None
+        try:
+            return uuid.UUID(self.request_id)
+        except ValueError:
+            return None
+
+    @property
+    def actor_ip_address(self) -> IPv4Address | IPv6Address | None:
+        if not self.actor_ip:
+            return None
+        try:
+            return ipaddress.ip_address(self.actor_ip)
+        except ValueError:
+            return None
 
 
 @dataclass(slots=True)
 class UserEntity:
-    """Representação de domínio de um usuário da plataforma."""
+    """Representação de domínio de um usuário da plataforma (`docs/banco-de-dados.md` §5.1)."""
 
     id: int
     email: str
@@ -19,14 +48,11 @@ class UserEntity:
     email_verified_at: datetime | None
     created_at: datetime
     updated_at: datetime
-    role: UserRole = UserRole.COMMON
-    cpf: str | None = None
-    oab_number: str | None = None
 
 
 @dataclass(slots=True)
 class VerificationCodeEntity:
-    """Representação de domínio de um código de verificação de 6 dígitos."""
+    """Representação de domínio de um código de verificação de 6 dígitos (§5.2)."""
 
     id: int
     user_id: int
@@ -40,7 +66,7 @@ class VerificationCodeEntity:
 
 @dataclass(slots=True)
 class RefreshTokenEntity:
-    """Representação de domínio de um refresh token persistido por hash."""
+    """Representação de domínio de um refresh token persistido por hash (§5.3)."""
 
     id: int
     user_id: int

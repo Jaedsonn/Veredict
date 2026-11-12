@@ -14,7 +14,7 @@ from auth_service.domain.entities import (
     UserEntity,
     VerificationCodeEntity,
 )
-from auth_service.models import RevokeReason, UserRole, VerificationPurpose
+from auth_service.models import RevokeReason, VerificationPurpose
 
 
 @runtime_checkable
@@ -51,7 +51,14 @@ class TokenIssuer(Protocol):
     def refresh_ttl_days(self) -> int:
         """Tempo de vida do refresh token em dias."""
 
-    def issue_access_token(self, *, user_id: int, email: str, now: datetime) -> str:
+    def issue_access_token(
+        self,
+        *,
+        user_id: int,
+        email: str,
+        now: datetime,
+        session_id: uuid.UUID | None = None,
+    ) -> str:
         """Emite um JWT RS256 assinado com as claims exigidas pelo API Gateway (#9)."""
 
     def generate_refresh_token(self) -> tuple[str, str]:
@@ -71,27 +78,41 @@ class UserRepository(Protocol):
         email: str,
         name: str,
         password_hash: str,
-        role: UserRole = UserRole.COMMON,
-        cpf: str | None = None,
-        oab_number: str | None = None,
         now: datetime,
+        commit: bool = True,
     ) -> UserEntity:
         """Cria usuário `pending_verification`; levanta `EmailAlreadyRegisteredError`."""
 
     async def get_by_id(self, user_id: int) -> UserEntity | None:
         """Busca usuário pelo ID primário."""
 
-    async def get_by_email(self, email: str) -> UserEntity | None:
-        """Busca usuário pelo e-mail normalizado."""
+    async def get_by_email(
+        self,
+        email: str,
+        *,
+        for_update: bool = False,
+    ) -> UserEntity | None:
+        """Busca usuário pelo e-mail normalizado (opcionalmente com `SELECT ... FOR UPDATE`)."""
 
-    async def mark_email_verified(self, user_id: int, *, verified_at: datetime) -> UserEntity:
-        """Ativa a conta do usuário (`status = active`) e preenche `email_verified_at`."""
+    async def mark_email_verified(
+        self,
+        user_id: int,
+        *,
+        verified_at: datetime,
+        commit: bool = True,
+    ) -> UserEntity:
+        """Ativa conta `pending_verification` (`status = active`) e preenche `email_verified_at`."""
 
     async def update_name(self, user_id: int, *, name: str, now: datetime) -> UserEntity:
         """Atualiza o nome do usuário."""
 
     async def update_password_hash(
-        self, user_id: int, *, password_hash: str, now: datetime
+        self,
+        user_id: int,
+        *,
+        password_hash: str,
+        now: datetime,
+        commit: bool = True,
     ) -> UserEntity:
         """Atualiza o hash de senha do usuário."""
 
@@ -143,10 +164,17 @@ class VerificationCodeRepository(Protocol):
         max_attempts: int,
         now: datetime,
     ) -> VerificationCodeEntity:
-        """Incrementa `attempts`; se atingir `max_attempts`, marca `consumed_at = now`."""
+        """Incrementa `attempts` atomicamente; ao atingir `max_attempts`, marca `consumed_at`."""
 
-    async def mark_consumed(self, code_id: int, *, consumed_at: datetime) -> None:
-        """Marca o código como consumido."""
+    async def mark_consumed(
+        self,
+        code_id: int,
+        *,
+        consumed_at: datetime,
+        max_attempts: int | None = None,
+        commit: bool = True,
+    ) -> bool:
+        """Marca o código como consumido condicionalmente; retorna `True` se consumiu."""
 
 
 @runtime_checkable
@@ -169,6 +197,20 @@ class RefreshTokenRepository(Protocol):
     async def get_by_hash(self, token_hash: str) -> RefreshTokenEntity | None:
         """Busca um refresh token pelo seu hash SHA-256."""
 
+    async def rotate_token(
+        self,
+        *,
+        current_token_id: int,
+        user_id: int,
+        new_token_hash: str,
+        family_id: uuid.UUID,
+        expires_at: datetime,
+        created_ip: str | None,
+        user_agent: str | None,
+        now: datetime,
+    ) -> RefreshTokenEntity | None:
+        """Revoga condicionalmente o token atual (`rotated`) e cria o sucessor na transação."""
+
     async def revoke(
         self,
         token_id: int,
@@ -185,5 +227,6 @@ class RefreshTokenRepository(Protocol):
         reason: RevokeReason,
         revoked_at: datetime,
         exclude_token_hash: str | None = None,
+        exclude_family_id: uuid.UUID | None = None,
     ) -> int:
-        """Revoga todos os refresh tokens ativos do usuário (opcionalmente preservando o atual)."""
+        """Revoga os refresh tokens ativos do usuário (preservando opcionalmente a sessão atual)."""

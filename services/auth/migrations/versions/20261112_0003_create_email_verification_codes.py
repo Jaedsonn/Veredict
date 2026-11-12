@@ -47,12 +47,6 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_email_verification_codes")),
-        sa.ForeignKeyConstraint(
-            ["user_id"],
-            ["users.id"],
-            name=op.f("fk_email_verification_codes_user_id_users"),
-            ondelete="RESTRICT",
-        ),
         sa.CheckConstraint(
             "attempts >= 0",
             name=op.f("ck_email_verification_codes_attempts_non_negative"),
@@ -61,10 +55,19 @@ def upgrade() -> None:
         mysql_charset="utf8mb4",
         mysql_collate="utf8mb4_0900_ai_ci",
     )
+    # Criado antes da FK para o InnoDB usar o índice composto (prefixo user_id) sem índice extra
     op.create_index(
-        "ix_email_verification_codes_user_id_consumed_at",
+        op.f("ix_email_verification_codes_user_id_consumed_at"),
         "email_verification_codes",
         ["user_id", "consumed_at"],
+    )
+    op.create_foreign_key(
+        op.f("fk_email_verification_codes_user_id_users"),
+        "email_verification_codes",
+        "users",
+        ["user_id"],
+        ["id"],
+        ondelete="RESTRICT",
     )
     grant_table_privileges(
         op.get_bind(),
@@ -80,9 +83,5 @@ def downgrade() -> None:
         table="email_verification_codes",
         privileges=PRIVILEGES,
         user=context.config.attributes["runtime_db_user"],
-    )
-    op.drop_index(
-        "ix_email_verification_codes_user_id_consumed_at",
-        table_name="email_verification_codes",
     )
     op.drop_table("email_verification_codes")

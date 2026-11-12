@@ -22,10 +22,8 @@ from auth_service.domain.errors import (
     InvalidCredentialsError,
     InvalidCurrentPasswordError,
     InvalidRefreshTokenError,
-    InvalidRegistrationDataError,
     InvalidVerificationCodeError,
     RefreshTokenReuseDetectedError,
-    ResendRateLimitError,
     UserNotFoundError,
     VerificationCodeExpiredError,
     VerificationCodeTooManyAttemptsError,
@@ -35,10 +33,12 @@ from auth_service.domain.password_policy import PasswordPolicy
 from auth_service.ports import Clock, PasswordHasher, TokenIssuer
 from veriditi_common.audit import AuditLogger, HttpAuditLogger
 from veriditi_common.db import Database
+from veriditi_common.errors import install_error_handlers
 from veriditi_common.health import build_health_router
 from veriditi_common.logging import configure_logging
 from veriditi_common.middleware import RequestContextMiddleware
 from veriditi_common.notifications import HttpNotifier, Notifier
+from veriditi_common.security import install_internal_auth
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
@@ -54,8 +54,9 @@ def _register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(WeakPasswordError)
-    @app.exception_handler(InvalidRegistrationDataError)
-    async def handle_validation_domain_error(_request: Request, exc: DomainError) -> JSONResponse:
+    async def handle_validation_domain_error(
+        _request: Request, exc: WeakPasswordError
+    ) -> JSONResponse:
         field = exc.field or "password"
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -94,14 +95,6 @@ def _register_exception_handlers(app: FastAPI) -> None:
             content={"detail": {"code": exc.code, "message": exc.message}},
         )
 
-    @app.exception_handler(ResendRateLimitError)
-    async def handle_rate_limit(_request: Request, exc: ResendRateLimitError) -> JSONResponse:
-        return JSONResponse(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            content={"detail": {"code": exc.code, "message": exc.message}},
-            headers={"Retry-After": str(exc.retry_after_seconds)},
-        )
-
     @app.exception_handler(InvalidCredentialsError)
     @app.exception_handler(InvalidRefreshTokenError)
     @app.exception_handler(RefreshTokenReuseDetectedError)
@@ -133,16 +126,28 @@ def _register_exception_handlers(app: FastAPI) -> None:
 def create_app(
     settings: Settings | None = None,
     db: Database | None = None,
-    *,
     audit_logger: AuditLogger | None = None,
     notifier: Notifier | None = None,
+    *,
     clock: Clock | None = None,
     password_hasher: PasswordHasher | None = None,
     token_issuer: TokenIssuer | None = None,
 ) -> FastAPI:
     """App factory do serviço de Autenticação (`auth-service`)."""
     resolved_settings = settings or get_settings()
-    configure_logging(resolved_settings.service_name)
+    configure_logging(resolved_settings.service_name, level=resolved_settings.log_level)
+
+    # Fail-fast: valida segredos obrigatórios antes de aceitar tráfego
+    token = resolved_settings.internal_token
+    _ = resolved_settings.pepper
+    resolved_token_issuer = token_issuer or PyJwtTokenIssuer(
+        private_key_pem=resolved_settings.resolved_jwt_private_key(),
+        public_key_pem=resolved_settings.resolved_jwt_public_key(),
+        issuer=resolved_settings.jwt_issuer,
+        audience=resolved_settings.jwt_audience,
+        access_ttl_seconds=resolved_settings.access_token_ttl_seconds,
+        refresh_ttl_days=resolved_settings.refresh_token_ttl_days,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -151,38 +156,28 @@ def create_app(
         app.state.clock = clock or SystemClock()
         app.state.password_policy = PasswordPolicy()
         app.state.password_hasher = password_hasher or Argon2PasswordHasher()
-        app.state.token_issuer = token_issuer or PyJwtTokenIssuer(
-            private_key_pem=resolved_settings.resolved_jwt_private_key(),
-            public_key_pem=resolved_settings.resolved_jwt_public_key(),
-            issuer=resolved_settings.jwt_issuer,
-            audience=resolved_settings.jwt_audience,
-            access_ttl_seconds=resolved_settings.access_token_ttl_seconds,
-            refresh_ttl_days=resolved_settings.refresh_token_ttl_days,
-        )
+        app.state.token_issuer = resolved_token_issuer
 
-        http_client = httpx.AsyncClient()
-        app.state.http_client = http_client
-        internal_token = resolved_settings.internal_api_token.get_secret_value()
+        app.state.http = httpx.AsyncClient()
         app.state.audit_logger = audit_logger or HttpAuditLogger(
-            client=http_client,
-            base_url=resolved_settings.monitoring_url,
-            token=internal_token,
+            app.state.http, resolved_settings.monitoring_url, token
         )
         app.state.notifier = notifier or HttpNotifier(
-            client=http_client,
-            base_url=resolved_settings.notification_url,
-            token=internal_token,
+            app.state.http, resolved_settings.notification_url, token
         )
         try:
             yield
         finally:
-            await http_client.aclose()
+            await app.state.http.aclose()
             await app.state.db.dispose()
 
     app = FastAPI(title=f"{resolved_settings.service_name} service", lifespan=lifespan)
-    app.add_middleware(RequestContextMiddleware)
+    install_error_handlers(app)
+    install_internal_auth(app, token)
     _register_exception_handlers(app)
     app.include_router(build_health_router(get_session))
     app.include_router(auth_router)
     app.include_router(profile_router)
+    # Último add_middleware para envolver toda a pilha e drenar tarefas adiadas no finally
+    app.add_middleware(RequestContextMiddleware)
     return app

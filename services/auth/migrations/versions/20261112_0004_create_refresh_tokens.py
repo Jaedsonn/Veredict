@@ -53,12 +53,6 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_refresh_tokens")),
         sa.UniqueConstraint("token_hash", name=op.f("uq_refresh_tokens_token_hash")),
-        sa.ForeignKeyConstraint(
-            ["user_id"],
-            ["users.id"],
-            name=op.f("fk_refresh_tokens_user_id_users"),
-            ondelete="RESTRICT",
-        ),
         sa.CheckConstraint(
             "(revoked_at IS NULL) = (revoke_reason IS NULL)",
             name=op.f("ck_refresh_tokens_revocation_consistent"),
@@ -67,10 +61,19 @@ def upgrade() -> None:
         mysql_charset="utf8mb4",
         mysql_collate="utf8mb4_0900_ai_ci",
     )
+    # Criado antes da FK para o InnoDB usar o índice composto (prefixo user_id) sem índice extra
     op.create_index(
-        "ix_refresh_tokens_user_id_revoked_at",
+        op.f("ix_refresh_tokens_user_id_revoked_at"),
         "refresh_tokens",
         ["user_id", "revoked_at"],
+    )
+    op.create_foreign_key(
+        op.f("fk_refresh_tokens_user_id_users"),
+        "refresh_tokens",
+        "users",
+        ["user_id"],
+        ["id"],
+        ondelete="RESTRICT",
     )
     grant_table_privileges(
         op.get_bind(),
@@ -87,5 +90,4 @@ def downgrade() -> None:
         privileges=PRIVILEGES,
         user=context.config.attributes["runtime_db_user"],
     )
-    op.drop_index("ix_refresh_tokens_user_id_revoked_at", table_name="refresh_tokens")
     op.drop_table("refresh_tokens")

@@ -9,7 +9,6 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     Index,
-    Integer,
     SmallInteger,
     String,
 )
@@ -38,13 +37,6 @@ class UserStatus(enum.StrEnum):
     PENDING_VERIFICATION = "pending_verification"
     ACTIVE = "active"
     BLOCKED = "blocked"
-
-
-class UserRole(enum.StrEnum):
-    """Perfis de usuário da 1ª versão conforme Decisão D1 e Apêndice A (REQ 01)."""
-
-    COMMON = "common"
-    LAWYER = "lawyer"
 
 
 class VerificationPurpose(enum.StrEnum):
@@ -97,16 +89,12 @@ class EmailVerificationCode(Base):
     __tablename__ = "email_verification_codes"
     __table_args__ = (
         CheckConstraint("attempts >= 0", name="attempts_non_negative"),
-        Index(
-            "ix_email_verification_codes_user_id_consumed_at",
-            "user_id",
-            "consumed_at",
-        ),
+        Index(None, "user_id", "consumed_at"),
     )
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer(), "sqlite"),
+        BigInteger(),
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
@@ -140,12 +128,12 @@ class RefreshToken(Base):
             "(revoked_at IS NULL) = (revoke_reason IS NULL)",
             name="revocation_consistent",
         ),
-        Index("ix_refresh_tokens_user_id_revoked_at", "user_id", "revoked_at"),
+        Index(None, "user_id", "revoked_at"),
     )
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer(), "sqlite"),
+        BigInteger(),
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )

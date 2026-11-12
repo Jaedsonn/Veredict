@@ -30,13 +30,6 @@ class WeakPasswordError(DomainError):
         super().__init__(code="weak_password", message=message, field=field)
 
 
-class InvalidRegistrationDataError(DomainError):
-    """Dados de cadastro violam regras de negócio (ex.: Decisão D1 / Apêndice A)."""
-
-    def __init__(self, message: str, *, field: str) -> None:
-        super().__init__(code="invalid_registration_data", message=message, field=field)
-
-
 class VerificationCodeExpiredError(DomainError):
     """Código de verificação expirado, inexistente ou já utilizado (`400 Bad Request`)."""
 
@@ -69,17 +62,6 @@ class InvalidVerificationCodeError(DomainError):
             field="code",
         )
         self.attempts_remaining = attempts_remaining
-
-
-class ResendRateLimitError(DomainError):
-    """Limite de frequência de reenvio atingido (`429 Too Many Requests`)."""
-
-    def __init__(self, retry_after_seconds: int) -> None:
-        super().__init__(
-            code="rate_limited",
-            message="Aguarde antes de solicitar um novo código.",
-        )
-        self.retry_after_seconds = max(1, retry_after_seconds)
 
 
 class InvalidCredentialsError(DomainError):
