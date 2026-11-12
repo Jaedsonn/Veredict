@@ -94,4 +94,6 @@ async def test_integrity_error_does_not_repeat_parameters(db: Database) -> None:
         with pytest.raises(IntegrityError) as caught:
             await conn.execute(metadata.tables["t"].insert().values(id=1, u_id=987654321))
 
-    assert "987654321" not in str(caught.value)
+    message = str(caught.value)
+    assert "987654321" not in message
+    assert "hidden due to hide_parameters=True" in message
