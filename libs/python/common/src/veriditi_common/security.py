@@ -83,7 +83,7 @@ CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 
 def internal_router(prefix: str = "/internal", *, tags: list[str] | None = None) -> APIRouter:
-    """Toda rota interna nasce exigindo o token, sem depender de lembrar a dependência"""
+    """Exige o token em toda rota de API (@router.get/post); add_route e mount ficam de fora"""
     return APIRouter(
         prefix=prefix,
         tags=list(tags or ["internal"]),
