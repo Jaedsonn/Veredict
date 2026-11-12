@@ -20,6 +20,7 @@ from veriditi_common.logging import (
     get_logger,
     is_sensitive_key,
     mask_email,
+    redact,
     redact_sensitive,
 )
 
@@ -424,3 +425,37 @@ def test_header_pair_with_list_value_is_redacted(json_logs: JsonLogs) -> None:
 
     [line] = json_logs()
     assert line["headers"] == [["authorization", REDACTED]]
+
+
+def test_redact_covers_the_names_from_the_audit_issue() -> None:
+    data = {"password": "p", "token": "t", "code": "c", "secret": "s", "email_masked": "a***"}
+
+    assert redact(data) == {
+        "password": REDACTED,
+        "token": REDACTED,
+        "code": REDACTED,
+        "secret": REDACTED,
+        "email_masked": "a***",
+    }
+
+
+def test_redact_is_recursive_and_keeps_metadata_about_secrets() -> None:
+    data = {
+        "nested": {"apiKey": "k", "status_code": 401},
+        "items": [{"verification_code": "123456"}, {"token_type": "bearer"}],
+        "headers": [["Authorization", "Bearer x"], ["Accept", "*/*"]],
+    }
+
+    assert redact(data) == {
+        "nested": {"apiKey": REDACTED, "status_code": 401},
+        "items": [{"verification_code": REDACTED}, {"token_type": "bearer"}],
+        "headers": [["Authorization", REDACTED], ["Accept", "*/*"]],
+    }
+
+
+def test_redact_does_not_mutate_the_original() -> None:
+    data = {"nested": {"password": "p"}, "items": [{"secret": "s"}]}
+
+    redact(data)
+
+    assert data == {"nested": {"password": "p"}, "items": [{"secret": "s"}]}

@@ -139,6 +139,11 @@ def _is_header_key(key: object) -> bool:
     return isinstance(key, str) and "header" in _normalize(key)
 
 
+def redact(value: Any) -> Any:
+    """Mesma redação dos logs para dados com outro destino, como o metadata da auditoria"""
+    return _redact(value)
+
+
 def redact_sensitive(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
     """Troca por [redacted] o valor de chaves sensíveis, inclusive aninhadas"""
     for key, value in event_dict.items():
