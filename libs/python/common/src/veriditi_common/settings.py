@@ -32,19 +32,15 @@ class BaseServiceSettings(BaseSettings):
         """INTERNAL_API_TOKEN= vazio conta como ausente, não como token curto"""
         return None if value == "" else value
 
-    @field_validator("internal_api_token")
-    @classmethod
-    def _token_min_length(cls, value: SecretStr | None) -> SecretStr | None:
-        if value is not None and len(value.get_secret_value()) < _MIN_TOKEN_LENGTH:
-            raise ValueError(
-                f"INTERNAL_API_TOKEN precisa de ao menos {_MIN_TOKEN_LENGTH} caracteres"
-            )
-        return value
-
     @property
     def internal_token(self) -> SecretStr:
+        """Valida aqui, e não no campo, para o Alembic não quebrar com um token curto no .env"""
         if self.internal_api_token is None:
             raise RuntimeError("INTERNAL_API_TOKEN não definido")
+        if len(self.internal_api_token.get_secret_value()) < _MIN_TOKEN_LENGTH:
+            raise RuntimeError(
+                f"INTERNAL_API_TOKEN precisa de ao menos {_MIN_TOKEN_LENGTH} caracteres"
+            )
         return self.internal_api_token
 
 

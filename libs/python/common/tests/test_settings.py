@@ -89,11 +89,16 @@ def test_empty_internal_token_counts_as_missing() -> None:
     assert _base(internal_api_token="").internal_api_token is None
 
 
-def test_internal_token_requires_16_characters() -> None:
-    with pytest.raises(ValidationError, match="16"):
-        _base(internal_api_token="a" * 15)
+def test_internal_token_requires_16_characters_only_on_access() -> None:
+    short = _base(internal_api_token="a" * 15)
 
+    with pytest.raises(RuntimeError, match="16"):
+        _ = short.internal_token
     assert _base(internal_api_token=TOKEN).internal_token.get_secret_value() == TOKEN
+
+
+def test_short_token_does_not_break_settings_used_by_alembic() -> None:
+    assert _settings(internal_api_token="curto").migration_database_url
 
 
 def test_internal_token_is_not_leaked_in_repr() -> None:
@@ -112,8 +117,8 @@ def test_service_settings_without_token_stay_valid() -> None:
 
 
 def test_short_token_is_not_repeated_in_the_error() -> None:
-    with pytest.raises(ValidationError) as caught:
-        _base(internal_api_token="short-secret-1")
+    with pytest.raises(RuntimeError) as caught:
+        _ = _base(internal_api_token="short-secret-1").internal_token
 
     assert "short-secret-1" not in str(caught.value)
 
