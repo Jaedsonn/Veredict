@@ -68,3 +68,25 @@ class RateLimitExceededError(Exception):
         super().__init__(policy)
         self.policy = policy
         self.retry_after = retry_after
+
+
+class UpstreamUnavailableError(Exception):
+    def __init__(self, upstream: Upstream, error_type: str) -> None:
+        super().__init__(upstream.name)
+        self.upstream = upstream
+        self.error_type = error_type
+
+
+class UpstreamTimeoutError(Exception):
+    def __init__(self, upstream: Upstream, error_type: str) -> None:
+        super().__init__(upstream.name)
+        self.upstream = upstream
+        self.error_type = error_type
+
+
+class UpstreamAuthRejectedError(Exception):
+    """Upstream recusou o token interno: erro de configuração, não sessão expirada"""
+
+    def __init__(self, upstream: Upstream) -> None:
+        super().__init__(upstream.name)
+        self.upstream = upstream
