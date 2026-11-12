@@ -112,6 +112,32 @@ make db-test                     # contrato + migrations num MySQL descartável 
 
 `make help` lista todos os comandos.
 
+### Logs e X-Request-ID
+
+Os serviços escrevem uma linha JSON por evento no stdout, inclusive as do
+uvicorn ([ADR-012](docs/adr/0012-geracao-de-logs-estruturados.md)):
+
+```json
+{"method": "GET", "path": "/nao-existe", "status_code": 404, "duration_ms": 1.38, "event": "request_finished", "request_id": "3f2b8c1e-8a4e-4a39-9a2b-1f1e0c9d7a55", "level": "info", "logger": "veriditi_common.middleware", "service": "gateway", "timestamp": "2026-11-12T05:26:22.960365Z"}
+```
+
+Toda resposta traz o `X-Request-ID`: o do cliente, se for um UUID válido, ou um
+UUID4 novo. Para seguir uma requisição, `make logs | grep <request_id>`. O
+acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`, e chaves sensíveis
+(senha, token, código, cookie, `authorization`) saem como `[redacted]`.
+
+Os erros seguem `{"detail": {"code": "...", "message": "...", ...extras}}`, o
+formato lido por `apps/web/src/lib/errors.ts`; o 422 de validação mantém o
+formato do FastAPI. Falhas de entrega ao monitoring e ao notification não
+quebram a requisição: aparecem no log com `audit_fallback=true` e
+`notification_fallback=true`.
+
+| Variável | Uso |
+| -------- | --- |
+| `LOG_LEVEL` | `DEBUG`, `INFO` (padrão), `WARNING` ou `ERROR` |
+| `INTERNAL_API_TOKEN` | Mínimo de 16 caracteres; auth, notification e monitoring não sobem sem ele |
+| `MONITORING_URL`, `NOTIFICATION_URL` | Só no `make dev`; o compose fixa `http://monitoring:8000` e `http://notification:8000` |
+
 ### Web sem o backend (gateway mock)
 
 Enquanto o roteamento do API Gateway (#11) não existe, a web roda contra um mock em memória

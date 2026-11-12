@@ -13,7 +13,7 @@ Uma fila com entrega garantida (broker, outbox, consumidores, DLQ) é a soluçã
 ## Desvio em relação ao documento original
 
 - **Previsto:** *triggers* e *eventos* enviados aos serviços internos, sem mecanismo definido (seções 4.1, 4.2.3 e 4.2.6).
-- **No repositório:** ainda não implementado. A interface fica na lib comum (#4); os consumidores são o #5 (monitoring) e o #6 (notification).
+- **No repositório:** interfaces e implementação HTTP em `veriditi_common` (#4): `AuditLogger`/`HttpAuditLogger` em `audit.py` e `Notifier`/`HttpNotifier` em `notifications.py`. Os consumidores ficam no #5 (monitoring) e no #6 (notification).
 - **Motivação:** reduzir o escopo da Sprint 1 sem acoplar as regras de negócio ao mecanismo de transporte.
 
 ## Decisão
@@ -24,6 +24,7 @@ Uma fila com entrega garantida (broker, outbox, consumidores, DLQ) é a soluçã
 - A implementação da Sprint 1 (`HttpAuditLogger` e equivalente para notificações) agenda a chamada com `BackgroundTasks` do FastAPI e faz `POST /internal/events` (monitoring) ou `POST /internal/notifications` (notification), com um token interno compartilhado.
 - A resposta ao usuário não espera a entrega ("fire-and-forget").
 - Se a chamada falhar, o evento é escrito no log do próprio serviço com `audit_fallback=true`.
+- Se a notificação falhar, o log registra `notification_fallback=true` sem o conteúdo: só `template`, `idempotency_key` e o e-mail mascarado, nunca `data` (que leva o código) nem o destinatário em claro.
 
 **Sprint 2 (#37):** trocar a implementação por outbox transacional + Redis Streams, com retentativas e DLQ. Esta ADR passa então a **Substituída** pela ADR do broker.
 
@@ -33,7 +34,7 @@ Uma fila com entrega garantida (broker, outbox, consumidores, DLQ) é a soluçã
 - (+) A troca para outbox na Sprint 2 muda só a implementação injetada (DIP); nenhuma regra de negócio é alterada.
 - (+) Uma falha no Monitoramento ou na Notificação não derruba nem atrasa o login ou o cadastro (ADR-003).
 - (−) **Risco aceito:** um evento de auditoria pode se perder se o Monitoramento estiver fora do ar ou se o processo cair antes do envio. Isso enfraquece temporariamente a ADR-001. A mitigação é o outbox na Sprint 2 (#37). Até lá, os eventos perdidos ficam rastreáveis pelo `audit_fallback=true`.
-- (−) O mesmo vale para e-mails: um código de verificação pode não ser enviado. A web já oferece o reenvio (#13).
+- (−) O mesmo vale para e-mails: um código de verificação pode não ser enviado, e, sem o conteúdo no log, não dá para reenviá-lo a partir dele. A web já oferece o reenvio (#13).
 
 ## Alternativas consideradas
 
