@@ -97,7 +97,7 @@ DB_CONTRACT_ENV := CONTRACT_DB_PORT=3317 DB_MIGRATOR_PASSWORD=m AUTH_DB_PASSWORD
 
 define db_test_up
 	@docker rm -f $(DB_TEST) >/dev/null 2>&1 || true
-	docker run --rm -d --name $(DB_TEST) -p 3317:3306 \
+	docker run --rm -d --name $(DB_TEST) -p 127.0.0.1:3317:3306 \
 		-e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=veriditi $(addprefix -e ,$(DB_CONTRACT_ENV)) \
 		-v "$(CURDIR)/docker/mysql/init:/docker-entrypoint-initdb.d:ro" \
 		mysql:8.4 --default-time-zone=+00:00 >/dev/null
