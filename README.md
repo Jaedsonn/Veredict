@@ -135,10 +135,11 @@ nível do evento (`is_sensitive_key` em `veriditi_common/logging.py`):
   `api_key`, `access_key`, `signing_key`, `encryption_key`, `session_key`,
   `database_url` ou `otpauth`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`,
   `jwt`, `dsn`, `hmac`, `seed` e afins;
-- `code` e `codes` são sensíveis, e `*_code(s)` só com prefixo de segredo
-  (`verification_code`, `recovery_codes`, `backup_codes`, `otp_code`...). `status_code`,
-  `zip_code` e `error_code` não são: por isso o código de erro de negócio vai em
-  `error_code`;
+- `code`, `codes`, `codigo` e `codigos` sozinhos são sensíveis; com mais segmentos, só
+  quando o segmento logo antes é prefixo de segredo (`verification_code`,
+  `recovery_codes`, `one_time_code`...) ou, em português, quando o logo depois é um
+  qualificador (`codigo_verificacao`). `status_code`, `email_error_code`, `zip_code` e
+  `codigo_postal` não são: por isso o código de erro de negócio vai em `error_code`;
 - metadados do segredo não são redigidos (`token_type`, `token_id`,
   `password_changed_at`, `has_password`...);
 - pares `(nome, valor)` são tratados como headers quando o nome é bytes ou a

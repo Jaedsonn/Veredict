@@ -43,7 +43,6 @@ _SENSITIVE_SEGMENTS: Final = frozenset(
         "pwd",
         "pass",
         "senha",
-        "codigo",
         "jwt",
         "bearer",
         "dsn",
@@ -51,10 +50,9 @@ _SENSITIVE_SEGMENTS: Final = frozenset(
         "pepper",
         "seed",
         "senhas",
-        "codigos",
     }
 )
-# *_code(s) só é segredo com um destes prefixos; status_code, zip_code, error_code não são
+# *_code(s) só é segredo com um destes prefixos logo antes; status_code e email_error_code não são
 _SECRET_CODE_PREFIXES: Final = frozenset(
     {
         "verification",
@@ -75,7 +73,22 @@ _SECRET_CODE_PREFIXES: Final = frozenset(
         "pin",
     }
 )
-_CODE_SEGMENTS: Final = frozenset({"code", "codes"})
+# Prefixos de dois segmentos: one_time_code, two_factor_code
+_SECRET_CODE_COMPOUNDS: Final = frozenset({("one", "time"), ("two", "factor")})
+_CODE_SEGMENTS: Final = frozenset({"code", "codes", "codigo", "codigos"})
+# Em português o qualificador vem depois: codigo_verificacao, codigos_recuperacao
+_SECRET_CODE_QUALIFIERS_PT: Final = frozenset(
+    {
+        "verificacao",
+        "confirmacao",
+        "recuperacao",
+        "acesso",
+        "ativacao",
+        "seguranca",
+        "autenticacao",
+        "redefinicao",
+    }
+)
 # Metadados sobre o segredo (token_type, password_changed_at, has_password), não o segredo
 _METADATA_SUFFIXES: Final = (
     "_type",
@@ -111,16 +124,18 @@ def _normalize(key: str) -> str:
 
 
 def _is_secret_code(segments: list[str]) -> bool:
-    """code sozinho ou com prefixo de segredo; o hash de um código é tão sensível quanto ele"""
+    """code sozinho ou com prefixo de segredo logo antes; o hash de um código é tão sensível"""
     if segments[-1] == "hash":
         segments = segments[:-1]
+    if len(segments) >= 2 and segments[-2] in {"codigo", "codigos"}:
+        return segments[-1] in _SECRET_CODE_QUALIFIERS_PT
     if not segments or segments[-1] not in _CODE_SEGMENTS:
         return False
     prefix = segments[:-1]
     return (
         not prefix
-        or any(s in _SECRET_CODE_PREFIXES for s in prefix)
-        or ("one_time" in "_".join(prefix))
+        or prefix[-1] in _SECRET_CODE_PREFIXES
+        or tuple(prefix[-2:]) in _SECRET_CODE_COMPOUNDS
     )
 
 
