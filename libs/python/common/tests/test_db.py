@@ -55,7 +55,7 @@ def test_check_constraint_without_name_is_rejected() -> None:
     metadata = make_metadata()
     table = sa.Table("t", metadata, sa.Column("x", sa.Integer))
 
-    # Falha já ao anexar a CHECK na tabela, antes de qualquer DDL ser gerado.
+    # Falha já ao anexar a CHECK, antes de gerar qualquer DDL
     with pytest.raises(sa.exc.InvalidRequestError, match="explicitly named"):
         table.append_constraint(sa.CheckConstraint("x > 0"))
 
