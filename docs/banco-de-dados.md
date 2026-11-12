@@ -445,12 +445,12 @@ Cada serviço declara a própria `Base` com `metadata = make_metadata()` (`verid
 - O initdb **não concede nenhum privilégio de tabela**. As tabelas ainda não existem nessa hora, e o MySQL só aceita GRANT de SELECT/INSERT em tabela existente. Cada GRANT nasce na migration que cria a tabela (seção 11).
 - Um usuário sem nenhum privilégio num banco **nem consegue conectar** a ele (erro 1044). Por isso o `<serviço>-migrate` precisa terminar antes de o serviço subir.
 
-Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAME` (`ServiceSettings.database_url`), além de `DB_MIGRATOR_USER` e `DB_MIGRATOR_PASSWORD` no container de migração (`ServiceSettings.migration_database_url`). O compose do #3 faz o mapeamento, por exemplo `AUTH_DB_PASSWORD` → `DB_PASSWORD` do auth.
+Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAME` (`ServiceSettings.database_url`), além de `DB_MIGRATOR_USER` e `DB_MIGRATOR_PASSWORD` no container de migração (`ServiceSettings.migration_database_url`). O compose faz o mapeamento desde o #3: `AUTH_DB_PASSWORD` → `DB_PASSWORD` do auth, `NOTIFICATION_DB_PASSWORD` → do notification e `LOGS_DB_PASSWORD` → do monitoring (com `DB_NAME=veriditi_logs`). Os três têm um `<serviço>-migrate` (`auth-migrate`, `notification-migrate`, `monitoring-migrate`), o único que recebe `DB_MIGRATOR_*`, e o serviço só sobe depois que ele termina. O Makefile faz a mesma tradução para `make dev`/`make migrate s=<serviço>`.
 
 ## 11. Política de migrations
 
 - **Uma pasta `migrations/` e uma `version_table` por serviço**: `alembic_version_<serviço>`. Sem isso, dois serviços no mesmo banco disputariam a mesma `alembic_version`.
-- **Histórico linear**: exatamente 1 head por serviço. Se dois PRs criarem a mesma revisão, quem mergear por último rebaseia e renumera.
+- **Histórico linear**: no máximo 1 head por serviço (0 enquanto o serviço ainda não tem revisão, como notification e monitoring até o #6 e o #5). Se dois PRs criarem a mesma revisão, quem mergear por último rebaseia e renumera.
 - Revisões sequenciais (`0001`, `0002`, …) em arquivos `YYYYMMDD_<rev>_<slug>.py`.
 - **Uma revisão mergeada na `main` nunca é editada**; a mudança vem numa nova. A única exceção é o rebaseline do #3 (`users` → `auth`), aceito porque ainda não existe ambiente implantado e a troca de `version_table` já exige recriar o volume.
 - **Migrations não importam models**: usam tipos físicos explícitos (`mysql.DATETIME(fsp=6)`, `mysql.CHAR(64, charset="ascii", collation="ascii_bin")`, `sa.text("CURRENT_TIMESTAMP(6)")`). Assim uma migration antiga continua igual mesmo que o model mude.
@@ -464,8 +464,8 @@ Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAM
   )
   ```
   O `downgrade` chama `revoke_table_privileges` **antes** do `DROP`, porque o MySQL não revoga privilégios de tabela apagada.
-- Toda revisão tem `downgrade()` funcional. O CI (job `database`, criado no #3) roda para cada serviço:
-  1. `alembic heads` (1 linha);
+- Toda revisão tem `downgrade()` funcional. O CI (job `database`, criado no #3) roda `make db-test`, que num MySQL descartável com `docker/mysql/init` executa os testes marcados como `mysql` e, para cada serviço com `alembic.ini`:
+  1. `alembic heads` (no máximo 1 linha);
   2. `upgrade head`;
   3. `alembic check`;
   4. `downgrade base`;
@@ -513,6 +513,10 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 | #9 | Sem motivo da revogação | `revoke_reason` + CHECK de consistência | Distingue rotação, logout e roubo na auditoria |
 | #9 | `family_id` sem índice; o harness sugeria um | Sem índice na Sprint 1 | O reuso revoga por usuário; nenhuma consulta usa `family_id` |
 | #3, #5 | `LOGS_DB_MIGRATOR_*` separado | Um único `migrator` para os dois bancos | Uma credencial de DDL a menos para gerenciar; o runtime continua separado |
+| #3 | `LogsDbSettings` / `env_prefix="LOGS_DB_"` para o monitoring | O monitoring usa o `ServiceSettings` com `db_name = "veriditi_logs"` como padrão; o compose mapeia `LOGS_DB_PASSWORD` para `DB_PASSWORD` | Um único `migrator` (acima); nome do banco e do usuário são fixos pelo init, então só a senha vai para o `.env` |
+| #3 | Compose sobe 9 serviços, sem `notification-migrate` | Entra o `notification-migrate` | O notification é dono de `notifications_sent` (seções 7 e 12) e a seção 10 exige `<serviço>-migrate` antes do serviço; com `versions/` vazia ele só cria a `alembic_version_notification` |
+| #3 | Healthcheck em `/health/ready` checa o banco | O `auth` checa; `notification` e `monitoring` respondem o ready sem abrir conexão até a issue que cria a tabela deles (#6, #5) | Sem nenhum GRANT o usuário de runtime nem conecta (1044, seção 10), e o compose ficaria `unhealthy` |
+| #3 | Job `database`: `alembic heads` com 1 linha | No máximo 1 linha (0 enquanto o serviço não tem revisão) | Notification e monitoring nascem sem revisão; com qualquer revisão, a regra de 1 head continua (seção 11) |
 | #3 | `01-logs-db.sql` cria o usuário `veriditi_logs_writer` | O usuário é criado em `02-service-users.sh` | A senha vem do ambiente, e `.sql` não expande `${VAR}` |
 | #41 (exemplo) | `02-service-users.sql` com `${AUTH_DB_PASSWORD}` e GRANT no init | `.sh` + GRANT na migration | Mesmo motivo; GRANT de SELECT/INSERT exige tabela existente |
 | #41 (exemplo) | `auth_svc` com DELETE em `users` | Sem DELETE em `users` | Convenção de exclusão do próprio #41 (`blocked` + anonimização) |
@@ -532,4 +536,6 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 ## Como verificar
 
 - `uv run pytest`: tipos, convenções e helpers em SQLite.
-- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC e o DDL físico dos tipos.
+- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos e a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade).
+- `make db-test-migrations`: num MySQL descartável igual, roda os 5 passos da seção 11 para cada serviço com banco.
+- `make db-test`: os dois acima; é o que o job `database` do CI executa.
