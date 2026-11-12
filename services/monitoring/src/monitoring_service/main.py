@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from monitoring_service.api import events
 from monitoring_service.config import Settings, get_settings
 from monitoring_service.dependencies import get_session
 from monitoring_service.ports import Clock
@@ -36,5 +37,6 @@ def create_app(
     # Fail-fast: sem INTERNAL_API_TOKEN o serviço não sobe
     install_internal_auth(app, settings.internal_token)
     app.include_router(build_health_router(get_session))
+    app.include_router(events.router)
     app.add_middleware(RequestContextMiddleware)
     return app

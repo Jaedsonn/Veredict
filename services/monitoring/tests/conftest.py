@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from monitoring_service.config import Settings
@@ -48,13 +49,17 @@ async def db() -> AsyncIterator[Database]:
 
 
 @pytest.fixture
-async def client(settings: Settings, db: Database) -> AsyncIterator[AsyncClient]:
-    app = create_app(settings=settings, db=db, clock=lambda: RECEIVED_AT)
+async def app(settings: Settings, db: Database) -> AsyncIterator[FastAPI]:
+    application = create_app(settings=settings, db=db, clock=lambda: RECEIVED_AT)
 
-    async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
+    async with application.router.lifespan_context(application):
+        yield application
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
 
 
 @pytest.fixture
