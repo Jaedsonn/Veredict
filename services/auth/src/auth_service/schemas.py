@@ -33,16 +33,13 @@ def _validate_and_normalize_email(value: str) -> str:
 
 
 class RegisterRequest(BaseModel):
-    """Contrato de entrada de `POST /auth/register` ([S1-07], REQ 01, Decisão D1)."""
+    """Contrato de entrada de `POST /auth/register` ([S1-07], RF01)."""
 
     model_config = ConfigDict(extra="ignore")
 
     name: str
     email: str
     password: str
-    role: str = "common"
-    cpf: str | None = None
-    oab_number: str | None = None
 
     @field_validator("name")
     @classmethod

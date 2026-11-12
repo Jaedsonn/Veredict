@@ -3,10 +3,10 @@
 import uuid
 from dataclasses import dataclass
 
-from auth_service.domain.entities import UserEntity
-from auth_service.domain.password_policy import PasswordPolicy, validate_registration_profile
+from auth_service.domain.entities import RequestContext, UserEntity
+from auth_service.domain.password_policy import PasswordPolicy
 from auth_service.domain.verification_code import VerificationCodeService
-from auth_service.models import UserRole, VerificationPurpose
+from auth_service.models import VerificationPurpose
 from auth_service.ports import (
     Clock,
     PasswordHasher,
@@ -14,7 +14,6 @@ from auth_service.ports import (
     VerificationCodeRepository,
 )
 from veriditi_common.audit import AuditEvent, AuditLogger, AuditOutcome
-from veriditi_common.middleware import RequestContext
 from veriditi_common.notifications import NotificationRequest, Notifier
 
 
@@ -34,9 +33,6 @@ class RegisterCommand:
     name: str
     email: str
     password: str
-    role: str | UserRole = UserRole.COMMON
-    cpf: str | None = None
-    oab_number: str | None = None
 
 
 class RegisterUser:
@@ -74,23 +70,17 @@ class RegisterUser:
         normalized_name = cmd.name.strip()
 
         self._password_policy.validate(cmd.password, field="password")
-        parsed_role, normalized_cpf, normalized_oab = validate_registration_profile(
-            role=cmd.role,
-            cpf=cmd.cpf,
-            oab_number=cmd.oab_number,
-        )
 
         now = self._clock.now()
         password_hash = self._hasher.hash(cmd.password)
 
+        # Persiste usuário e código de verificação atomicamente na mesma transação
         user = await self._users.create(
             email=normalized_email,
             name=normalized_name,
             password_hash=password_hash,
-            role=parsed_role,
-            cpf=normalized_cpf,
-            oab_number=normalized_oab,
             now=now,
+            commit=False,
         )
 
         raw_code = self._code_service.generate_code()
@@ -125,11 +115,10 @@ class RegisterUser:
                 action="auth.user.registered",
                 outcome=AuditOutcome.SUCCESS,
                 actor_id=user.id,
-                actor_ip=ctx.actor_ip,
-                request_id=_parse_uuid(ctx.request_id),
+                actor_ip=ctx.actor_ip_address,
+                request_id=ctx.request_uuid,
                 resource_type="user",
                 resource_id=str(user.id),
-                metadata={"role": user.role.value},
             )
         )
 
