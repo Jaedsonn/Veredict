@@ -6,7 +6,7 @@ import ssl
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -204,9 +204,9 @@ async def test_stalled_server_fails_within_one_timeout(serve: Serve) -> None:
     assert stub.messages == []
 
 
-async def _failure(sender: SmtpEmailSender) -> EmailDeliveryError:
+async def _failure(sender: SmtpEmailSender, outgoing: OutgoingEmail = EMAIL) -> EmailDeliveryError:
     with pytest.raises(EmailDeliveryError) as exc:
-        await sender.send(EMAIL)
+        await sender.send(outgoing)
     return exc.value
 
 
@@ -240,4 +240,26 @@ async def test_starttls_with_untrusted_certificate_is_permanent(
     error = await _failure(_sender(await serve(stub), timeout=2.0, start_tls=True))
 
     assert (error.reason, error.permanent) == ("SSLCertVerificationError", True)
+    assert stub.messages == []
+
+
+async def test_idn_domain_goes_as_punycode_in_envelope_and_header(serve: Serve) -> None:
+    stub = SmtpStub()
+
+    # Sem SMTPUTF8 no servidor: antes virava SMTPNotSupported e o To saía quebrado
+    await _sender(await serve(stub), timeout=2.0).send(replace(EMAIL, to="ana@exemplo.café"))
+
+    assert stub.envelopes == [("<no-reply@veriditi.app>", ["<ana@exemplo.xn--caf-dma>"])]
+    [raw] = stub.messages
+    assert b"\nTo: ana@exemplo.xn--caf-dma\r\n" in raw
+
+
+async def test_non_ascii_local_part_needs_smtputf8(serve: Serve) -> None:
+    stub = SmtpStub()
+    sender = _sender(await serve(stub), timeout=2.0)
+
+    error = await _failure(sender, replace(EMAIL, to="joão@exemplo.café"))
+
+    # Sem forma ASCII possível: só um servidor com SMTPUTF8 entregaria
+    assert (error.reason, error.permanent) == ("SMTPNotSupported", True)
     assert stub.messages == []

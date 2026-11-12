@@ -2,6 +2,7 @@ import asyncio
 import ssl
 from collections.abc import Callable, Sequence
 from contextlib import suppress
+from dataclasses import replace
 from datetime import datetime
 from email.message import EmailMessage
 from email.utils import format_datetime, formataddr, make_msgid
@@ -15,6 +16,7 @@ from aiosmtplib import (
     SMTPRecipientsRefused,
     SMTPResponseException,
 )
+from email_validator import EmailNotValidError, validate_email
 from pydantic import SecretStr
 
 from notification_service.domain import EmailDeliveryError, OutgoingEmail
@@ -42,6 +44,16 @@ def build_message(email: OutgoingEmail, *, sender: str, date: datetime) -> Email
     message.set_content(email.text)
     message.add_alternative(email.html, subtype="html")
     return message
+
+
+def ascii_address(address: str) -> str:
+    """Domínio IDN em punycode: dispensa SMTPUTF8 e o policy.SMTP não quebra o header To"""
+    try:
+        validated = validate_email(address, check_deliverability=False)
+    except EmailNotValidError:
+        return address
+    # None quando a parte local não é ASCII: aí só um servidor com SMTPUTF8 entrega
+    return validated.ascii_email or address
 
 
 def _is_permanent(code: int) -> bool:
@@ -127,6 +139,7 @@ class SmtpEmailSender:
         self._clock = clock
 
     async def send(self, email: OutgoingEmail) -> None:
+        email = replace(email, to=ascii_address(email.to))
         message = build_message(email, sender=self._from_header, date=self._clock())
         # Explícito: start_tls=None faria o aiosmtplib tentar o STARTTLS sozinho
         client = self._client_factory(

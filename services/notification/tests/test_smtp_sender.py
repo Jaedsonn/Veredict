@@ -3,6 +3,7 @@ import email
 import email.policy
 import re
 import ssl
+from dataclasses import replace
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from typing import Any
@@ -153,6 +154,25 @@ async def test_client_gets_explicit_connection_settings(start_tls: bool, use_tls
     assert message["Message-ID"] == EMAIL.message_id
     assert message["Date"] == "Thu, 12 Nov 2026 15:00:00 +0000"
     assert message["From"] == SENDER
+
+
+@pytest.mark.parametrize(
+    ("to", "wire"),
+    [
+        ("ana@exemplo.café", "ana@exemplo.xn--caf-dma"),
+        ("joão@exemplo.café", "joão@exemplo.café"),
+        ("ana@exemplo.com", "ana@exemplo.com"),
+    ],
+    ids=["idn-domain", "non-ascii-local-part", "ascii"],
+)
+async def test_idn_domain_is_sent_in_ascii_form(to: str, wire: str) -> None:
+    client = FakeClient()
+
+    await _sender(client).send(replace(EMAIL, to=to))
+
+    [(message, _sender_address, recipients)] = client.sent
+    assert recipients == [wire]
+    assert message["To"] == wire
 
 
 async def test_password_is_revealed_only_in_the_login_call() -> None:
