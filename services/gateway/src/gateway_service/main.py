@@ -35,7 +35,9 @@ def create_app(
 
     app = FastAPI(title=f"{settings.service_name} service", lifespan=lifespan)
     install_error_handlers(app)
-    app.include_router(build_health_router(get_http_client, settings.upstreams))
+    app.include_router(
+        build_health_router(get_http_client, settings.upstream_urls, settings.health_timeout_s)
+    )
     # Sempre o último add_middleware, para ficar por fora do CORS do #11
     app.add_middleware(RequestContextMiddleware)
     return app
