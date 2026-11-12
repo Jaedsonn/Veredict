@@ -26,10 +26,14 @@ space := $(empty) $(empty)
 need_s = $(if $(filter $(s),$(SERVICES)),,$(error use s=<$(subst $(space),|,$(SERVICES))>))
 need_db_s = $(if $(filter $(s),$(DB_SERVICES)),,$(error use s=<$(subst $(space),|,$(DB_SERVICES))>))
 
-# Lê o .env no shell e traduz a senha do serviço `s` para as DB_* do ServiceSettings
-svc_env = set -a; [ ! -f .env ] || . ./.env; set +a; \
-	$(if $(DB_USER_$(s)),export DB_NAME=$(or $(DB_NAME_$(s)),veriditi) DB_USER=$(DB_USER_$(s)) \
-	DB_PASSWORD="$${$(DB_PASS_$(s))}" DB_MIGRATOR_USER=migrator;)
+# Lê uma chave sem executar o .env: o ambiente vence, senão a última linha KEY= sem aspas
+env_get = env_get() { printenv "$$1" || { [ -f .env ] && grep -E "^$$1=" .env | tail -n 1 | \
+	cut -d= -f2- | sed -e "s/^\"\(.*\)\"$$/\1/" -e "s/^'\(.*\)'$$/\1/"; }; };
+
+# O resto do .env (DB_HOST, DB_PORT, DB_MIGRATOR_PASSWORD...) o pydantic lê sozinho
+svc_env = $(if $(DB_USER_$(s)),$(env_get) export DB_NAME=$(or $(DB_NAME_$(s)),veriditi) \
+	DB_USER=$(DB_USER_$(s)) DB_MIGRATOR_USER=migrator \
+	DB_PASSWORD="$$(env_get $(DB_PASS_$(s)))";)
 
 help:
 	@grep -E '^[a-zA-Z-][a-zA-Z_-]*:.*?## ' $(MAKEFILE_LIST) | \
