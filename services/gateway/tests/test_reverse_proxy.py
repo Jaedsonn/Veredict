@@ -581,9 +581,12 @@ async def test_body_limit_error_is_not_upstream_error(
 
 
 class FailingStream(httpx.AsyncByteStream):
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error or httpx.ReadError("caiu")
+
     async def __aiter__(self) -> AsyncIterator[bytes]:
         yield b'{"detail":'
-        raise httpx.ReadError("caiu")
+        raise self.error
 
     async def aclose(self) -> None:
         return None
@@ -598,3 +601,15 @@ async def test_read_error_on_401_body_is_unavailable(
         await _forward(proxy, _request())
 
     assert exc.value.error_type == "ReadError"
+
+
+async def test_timeout_on_401_body_is_timeout(proxy: ReverseProxy, upstream: Recorder) -> None:
+    upstream.respond = lambda r: httpx.Response(
+        401, stream=FailingStream(httpx.ReadTimeout("lento"))
+    )
+
+    with capture_logs() as logs, pytest.raises(UpstreamTimeoutError) as exc:
+        await _forward(proxy, _request())
+
+    assert exc.value.error_type == "ReadTimeout"
+    assert [e["event"] for e in logs] == ["upstream_timeout"]

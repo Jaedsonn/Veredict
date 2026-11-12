@@ -212,6 +212,18 @@ async def _relay(
             await resp.aclose()
 
 
+def _upstream_error(
+    upstream: Upstream, exc: httpx.TransportError
+) -> UpstreamTimeoutError | UpstreamUnavailableError:
+    """PoolTimeout é falta de conexão livre (503); os demais timeouts são do upstream (504)"""
+    error_type = type(exc).__name__
+    if isinstance(exc, httpx.TimeoutException) and not isinstance(exc, httpx.PoolTimeout):
+        log.warning("upstream_timeout", upstream=upstream.name, error_type=error_type)
+        return UpstreamTimeoutError(upstream, error_type)
+    log.warning("upstream_unavailable", upstream=upstream.name, error_type=error_type)
+    return UpstreamUnavailableError(upstream, error_type)
+
+
 class ReverseProxy:
     def __init__(
         self,
@@ -272,13 +284,8 @@ class ReverseProxy:
             log.info("client_disconnected", upstream=upstream.name)
             # Ninguém recebe esta resposta; evita o unhandled_exception no middleware
             return Response(status_code=400)
-        except httpx.PoolTimeout as exc:
-            raise self._unavailable(upstream, exc) from None
-        except httpx.TimeoutException as exc:
-            log.warning("upstream_timeout", upstream=upstream.name, error_type=type(exc).__name__)
-            raise UpstreamTimeoutError(upstream, type(exc).__name__) from None
         except httpx.TransportError as exc:
-            raise self._unavailable(upstream, exc) from None
+            raise _upstream_error(upstream, exc) from None
 
         raw = _raw_body(resp)
         prefix: list[bytes] = []
@@ -287,7 +294,7 @@ class ReverseProxy:
                 prefix = await _read_prefix(raw, _MAX_401_BODY)
         except httpx.TransportError as exc:
             await resp.aclose()
-            raise self._unavailable(upstream, exc) from None
+            raise _upstream_error(upstream, exc) from None
         if prefix and _is_internal_auth_rejection(b"".join(prefix)):
             await resp.aclose()
             log.error("upstream_internal_auth_rejected", upstream=upstream.name)
@@ -300,8 +307,3 @@ class ReverseProxy:
         )
         response.raw_headers = downstream_headers(resp.headers.raw)
         return response
-
-    @staticmethod
-    def _unavailable(upstream: Upstream, exc: Exception) -> UpstreamUnavailableError:
-        log.warning("upstream_unavailable", upstream=upstream.name, error_type=type(exc).__name__)
-        return UpstreamUnavailableError(upstream, type(exc).__name__)
