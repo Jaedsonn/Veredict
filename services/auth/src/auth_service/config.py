@@ -4,7 +4,7 @@ from veriditi_common.settings import ServiceSettings
 
 
 class Settings(ServiceSettings):
-    service_name: str = "users"
+    service_name: str = "auth"
 
 
 @lru_cache

@@ -3,9 +3,9 @@ from collections.abc import AsyncIterator
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from users_service.config import Settings
-from users_service.main import create_app
-from users_service.models import Base
+from auth_service.config import Settings
+from auth_service.main import create_app
+from auth_service.models import Base
 from veriditi_common.db import Database
 
 

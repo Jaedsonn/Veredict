@@ -2,8 +2,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from users_service.models import User
-from users_service.schemas import UserCreate
+from auth_service.models import User
+from auth_service.schemas import UserCreate
 
 
 class EmailAlreadyExistsError(Exception):

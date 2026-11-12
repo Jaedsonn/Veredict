@@ -6,13 +6,13 @@ version = "0.0.0"
 requires-python = ">=3.12"
 # A raiz depende de todos os membros para que `uv sync` monte um único
 # .venv de desenvolvimento com tudo instalado (editável).
-dependencies = ["users-service", "veriditi-common"]
+dependencies = ["auth-service", "veriditi-common"]
 
 [tool.uv]
 package = false
 
 [tool.uv.sources]
-users-service = { workspace = true }
+auth-service = { workspace = true }
 veriditi-common = { workspace = true }
 
 [tool.uv.workspace]

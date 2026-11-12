@@ -12,15 +12,15 @@ WORKDIR /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    --mount=type=bind,source=services/users/pyproject.toml,target=services/users/pyproject.toml \
+    --mount=type=bind,source=services/auth/pyproject.toml,target=services/auth/pyproject.toml \
     --mount=type=bind,source=libs/python/common/pyproject.toml,target=libs/python/common/pyproject.toml \
-    uv sync --frozen --no-dev --no-install-workspace --package users-service
+    uv sync --frozen --no-dev --no-install-workspace --package auth-service
 
 COPY pyproject.toml uv.lock ./
 COPY libs/python/common libs/python/common
-COPY services/users services/users
+COPY services/auth services/auth
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable --package users-service
+    uv sync --frozen --no-dev --no-editable --package auth-service
 
 FROM python:3.12-slim AS runtime
 
@@ -28,8 +28,8 @@ RUN useradd --system --uid 1001 --no-create-home app
 WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
-COPY --chown=app:app services/users/alembic.ini ./alembic.ini
-COPY --chown=app:app services/users/migrations ./migrations
+COPY --chown=app:app services/auth/alembic.ini ./alembic.ini
+COPY --chown=app:app services/auth/migrations ./migrations
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
@@ -40,4 +40,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"
 
-CMD ["uvicorn", "users_service.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "auth_service.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

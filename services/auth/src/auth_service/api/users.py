@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query, status
 
-from users_service.dependencies import UserRepoDep
-from users_service.repository import EmailAlreadyExistsError
-from users_service.schemas import UserCreate, UserRead
+from auth_service.dependencies import UserRepoDep
+from auth_service.repository import EmailAlreadyExistsError
+from auth_service.schemas import UserCreate, UserRead
 
 router = APIRouter(prefix="/users", tags=["users"])
 

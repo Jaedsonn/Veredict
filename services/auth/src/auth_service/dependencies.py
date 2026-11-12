@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from users_service.repository import UserRepository
+from auth_service.repository import UserRepository
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:

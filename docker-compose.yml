@@ -27,24 +27,24 @@ services:
       retries: 20
       start_period: 20s
 
-  users-migrate:
-    build: &users-build
+  auth-migrate:
+    build: &auth-build
       context: .
-      dockerfile: services/users/Dockerfile
+      dockerfile: services/auth/Dockerfile
     environment: *db-env
     command: ["alembic", "upgrade", "head"]
     depends_on:
       mysql:
         condition: service_healthy
 
-  users:
-    build: *users-build
+  auth:
+    build: *auth-build
     restart: unless-stopped
     environment: *db-env
     ports:
       - "${USERS_PORT:-8001}:8000"
     depends_on:
-      users-migrate:
+      auth-migrate:
         condition: service_completed_successfully
 
   web:
@@ -57,7 +57,7 @@ services:
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
-      users:
+      auth:
         condition: service_healthy
 
 volumes:

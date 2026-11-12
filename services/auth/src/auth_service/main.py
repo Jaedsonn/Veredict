@@ -3,9 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from users_service.api.users import router as users_router
-from users_service.config import Settings, get_settings
-from users_service.dependencies import get_session
+from auth_service.api.users import router as users_router
+from auth_service.config import Settings, get_settings
+from auth_service.dependencies import get_session
 from veriditi_common.db import Database
 from veriditi_common.health import build_health_router
 

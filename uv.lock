@@ -8,7 +8,7 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "users-service",
+    "auth-service",
     "veriditi-common",
     "veriditi-workspace",
 ]
@@ -141,6 +141,33 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/83/6607060659998f00afdea0d8375c1e6e2b7d515ab905090d9a5a02f48851/ast_serialize-0.13.1-cp39-abi3-win32.whl", hash = "sha256:4f98da562e5901d69c7dd30885594c5438f859edf354e9ac7517d188fb026c3a", size = 1131889, upload-time = "2026-10-17T00:04:12.953Z" },
     { url = "https://files.pythonhosted.org/packages/9f/6f/bafd6490fe7b355627fabe95f4417e3d02da93102c8552550eb9a0774e1e/ast_serialize-0.13.1-cp39-abi3-win_amd64.whl", hash = "sha256:ddf7cbc9c8abf70102c4a088efe154bb86bfb825b0a10e556d2b15972cf99bd7", size = 1171153, upload-time = "2026-10-17T00:04:14.362Z" },
     { url = "https://files.pythonhosted.org/packages/11/25/4235f4b375a67a37ac595bf478a5407a744eaf7b64113c1c3a5432b8d954/ast_serialize-0.13.1-cp39-abi3-win_arm64.whl", hash = "sha256:48f11d96c9ec71119612f8e79a8c55c12f2b136716d68347433c561d27a25f43", size = 1139035, upload-time = "2026-10-17T00:04:15.767Z" },
+]
+
+[[package]]
+name = "auth-service"
+version = "0.1.0"
+source = { editable = "services/auth" }
+dependencies = [
+    { name = "aiomysql" },
+    { name = "alembic" },
+    { name = "fastapi" },
+    { name = "pydantic", extra = ["email"] },
+    { name = "pydantic-settings" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "veriditi-common" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiomysql", specifier = ">=0.3.2" },
+    { name = "alembic", specifier = ">=1.20.1" },
+    { name = "fastapi", specifier = ">=0.162.0" },
+    { name = "pydantic", extras = ["email"], specifier = ">=2.14.2" },
+    { name = "pydantic-settings", specifier = ">=2.16.2" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.7" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
+    { name = "veriditi-common", editable = "libs/python/common" },
 ]
 
 [[package]]
@@ -1282,33 +1309,6 @@ wheels = [
 ]
 
 [[package]]
-name = "users-service"
-version = "0.1.0"
-source = { editable = "services/users" }
-dependencies = [
-    { name = "aiomysql" },
-    { name = "alembic" },
-    { name = "fastapi" },
-    { name = "pydantic", extra = ["email"] },
-    { name = "pydantic-settings" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "veriditi-common" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiomysql", specifier = ">=0.3.2" },
-    { name = "alembic", specifier = ">=1.20.1" },
-    { name = "fastapi", specifier = ">=0.162.0" },
-    { name = "pydantic", extras = ["email"], specifier = ">=2.14.2" },
-    { name = "pydantic-settings", specifier = ">=2.16.2" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.7" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
-    { name = "veriditi-common", editable = "libs/python/common" },
-]
-
-[[package]]
 name = "uvicorn"
 version = "0.54.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1401,7 +1401,7 @@ name = "veriditi-workspace"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "users-service" },
+    { name = "auth-service" },
     { name = "veriditi-common" },
 ]
 
@@ -1417,7 +1417,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "users-service", editable = "services/users" },
+    { name = "auth-service", editable = "services/auth" },
     { name = "veriditi-common", editable = "libs/python/common" },
 ]
 

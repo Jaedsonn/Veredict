@@ -4,8 +4,8 @@ from alembic import context
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from users_service.config import get_settings
-from users_service.models import Base
+from auth_service.config import get_settings
+from auth_service.models import Base
 
 config = context.config
 target_metadata = Base.metadata
