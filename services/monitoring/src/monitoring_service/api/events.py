@@ -1,6 +1,7 @@
 from typing import Annotated, Final
 
-from fastapi import Query, status
+from fastapi import Depends, Query, status
+from fastapi.exceptions import RequestValidationError
 from pydantic import AwareDatetime
 
 from monitoring_service.dependencies import IngestDep, ListDep
@@ -28,23 +29,39 @@ async def ingest_event(event: AuditEventIn, use_case: IngestDep) -> AcceptedResp
     return AcceptedResponse()
 
 
-@router.get("/events", response_model=AuditEventsPage)
-async def list_events(
-    use_case: ListDep,
+def _filters(
     actor_id: Annotated[int | None, Query(ge=1, le=_MAX_BIGINT)] = None,
     action: Annotated[str | None, Query(min_length=1, max_length=80)] = None,
     occurred_from: Annotated[AwareDatetime | None, Query(alias="from")] = None,
     occurred_to: Annotated[AwareDatetime | None, Query(alias="to")] = None,
-    after_id: Annotated[int | None, Query(ge=0, le=_MAX_BIGINT)] = None,
-    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
-) -> AuditEventsPage:
-    """Ordem do id com cursor after_id; use Z ou %2B no fuso, um + cru vira espaço"""
-    filters = AuditEventFilter(
+) -> AuditEventFilter:
+    """Janela invertida é erro de entrada, no mesmo formato dos demais 422"""
+    if occurred_from is not None and occurred_to is not None and occurred_from > occurred_to:
+        raise RequestValidationError(
+            [
+                {
+                    "type": "invalid_time_range",
+                    "loc": ("query", "from"),
+                    "msg": "from precisa ser anterior ou igual a to",
+                }
+            ]
+        )
+    return AuditEventFilter(
         actor_id=actor_id,
         action=action,
         occurred_from=occurred_from,
         occurred_to=occurred_to,
     )
+
+
+@router.get("/events", response_model=AuditEventsPage)
+async def list_events(
+    use_case: ListDep,
+    filters: Annotated[AuditEventFilter, Depends(_filters)],
+    after_id: Annotated[int | None, Query(ge=0, le=_MAX_BIGINT)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+) -> AuditEventsPage:
+    """Ordem do id com cursor after_id; use Z ou %2B no fuso, um + cru vira espaço"""
     page = await use_case.execute(filters, after_id=after_id, limit=limit)
     return AuditEventsPage(
         items=[AuditEventOut.model_validate(item) for item in page.items],

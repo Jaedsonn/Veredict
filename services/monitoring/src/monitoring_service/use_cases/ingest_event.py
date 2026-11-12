@@ -1,8 +1,7 @@
 from typing import Any
 
-from monitoring_service.ports import AuditEventRepository, Clock
+from monitoring_service.ports import AuditEventRepository, Clock, system_clock
 from veriditi_common.audit import AuditEvent
-from veriditi_common.db_types import utcnow
 from veriditi_common.logging import get_logger, redact
 
 log = get_logger(__name__)
@@ -11,7 +10,7 @@ log = get_logger(__name__)
 class IngestAuditEvent:
     """Grava o evento uma única vez, com o relógio do monitoring e sem segredos no metadata"""
 
-    def __init__(self, events: AuditEventRepository, clock: Clock = utcnow) -> None:
+    def __init__(self, events: AuditEventRepository, clock: Clock = system_clock) -> None:
         self._events = events
         self._clock = clock
 

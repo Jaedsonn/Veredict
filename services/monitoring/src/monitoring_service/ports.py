@@ -1,11 +1,15 @@
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol
 
 from monitoring_service.domain import AuditEventFilter, StoredAuditEvent
 from veriditi_common.audit import AuditEvent
 
 Clock = Callable[[], datetime]
+
+
+def system_clock() -> datetime:
+    return datetime.now(UTC)
 
 
 class AuditEventRepository(Protocol):

@@ -356,7 +356,15 @@ async def test_get_rejects_inverted_time_range(client: AsyncClient, auth_headers
     resp = await client.get(URL, params=params, headers=auth_headers)
 
     assert resp.status_code == 422
-    assert resp.json()["detail"]["code"] == "invalid_time_range"
+    assert resp.json() == {
+        "detail": [
+            {
+                "type": "invalid_time_range",
+                "loc": ["query", "from"],
+                "msg": "from precisa ser anterior ou igual a to",
+            }
+        ]
+    }
 
 
 @pytest.mark.parametrize(

@@ -1,12 +1,9 @@
-from datetime import UTC, datetime, timedelta
-
-import pytest
+from datetime import UTC, datetime
 
 from monitoring_service.adapters.memory_repo import InMemoryAuditEventRepository
 from monitoring_service.domain import AuditEventFilter, StoredAuditEvent
 from monitoring_service.use_cases.list_events import ListAuditEvents
 from veriditi_common.audit import AuditEvent, AuditOutcome
-from veriditi_common.errors import AppError
 
 
 async def _repo_with(count: int, received_at: datetime) -> InMemoryAuditEventRepository:
@@ -65,16 +62,6 @@ async def test_filters_reach_the_repository_with_one_extra_row() -> None:
     await ListAuditEvents(spy).execute(filters, after_id=7, limit=10)
 
     assert spy.calls == [(filters, 7, 11)]
-
-
-async def test_from_after_to_is_rejected() -> None:
-    start = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
-    filters = AuditEventFilter(occurred_from=start, occurred_to=start - timedelta(seconds=1))
-
-    with pytest.raises(AppError) as exc:
-        await ListAuditEvents(_SpyRepository()).execute(filters, after_id=None, limit=10)
-
-    assert (exc.value.status_code, exc.value.code) == (422, "invalid_time_range")
 
 
 async def test_empty_window_is_valid() -> None:

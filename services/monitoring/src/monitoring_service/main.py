@@ -6,9 +6,8 @@ from fastapi import FastAPI
 from monitoring_service.api import events
 from monitoring_service.config import Settings, get_settings
 from monitoring_service.dependencies import get_session
-from monitoring_service.ports import Clock
+from monitoring_service.ports import Clock, system_clock
 from veriditi_common.db import Database
-from veriditi_common.db_types import utcnow
 from veriditi_common.errors import install_error_handlers
 from veriditi_common.health import build_health_router
 from veriditi_common.logging import configure_logging
@@ -32,7 +31,7 @@ def create_app(
         await app.state.db.dispose()
 
     app = FastAPI(title=f"{settings.service_name} service", lifespan=lifespan)
-    app.state.clock = clock or utcnow
+    app.state.clock = clock or system_clock
     install_error_handlers(app)
     # Fail-fast: sem INTERNAL_API_TOKEN o serviço não sobe
     install_internal_auth(app, settings.internal_token)
