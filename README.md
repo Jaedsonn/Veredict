@@ -127,7 +127,8 @@ acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`. Chaves que contêm
 `password`, `secret`, `token`, `cookie`, `authorization`, `private_key`,
 `api_key` ou `otp`, e `code`/`*_code`, saem como `[redacted]`, inclusive em
 pares de headers. Por isso o código de erro de negócio vai em `error_code`
-(`status_code` e `error_code` não são redigidos).
+(`status_code` e `error_code` não são redigidos). A redação é por nome de
+chave: não logue `str(exc)` nem interpole valores no evento.
 
 Os erros seguem `{"detail": {"code": "...", "message": "...", ...extras}}`, o
 formato lido por `apps/web/src/lib/errors.ts`; o 422 de validação mantém o

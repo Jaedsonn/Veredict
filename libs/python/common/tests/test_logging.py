@@ -145,6 +145,41 @@ def test_redact_sensitive_compares_case_and_separator_insensitively() -> None:
         "code",
         "verification_code",
         b"authorization",
+        # Falsos negativos da 2ª revisão
+        "apikey",
+        "apiKey",
+        "privateKey",
+        "private-key",
+        "passphrase",
+        "pwd",
+        "pass",
+        "senha",
+        "codigo",
+        "code_hash",
+        "verification_code_hash",
+        "verificationCode",
+        "otpCode",
+        "totp",
+        "pin",
+        "credentials",
+        "credential",
+        "jwt",
+        "bearer",
+        "database_url",
+        "databaseUrl",
+        "dsn",
+        "signature",
+        "session_key",
+        "x-amz-security-token",
+        "proxy-authorization",
+        "access_key",
+        "secret_key",
+        "hmac_key",
+        "signing_key",
+        "encryption_key",
+        "pepper",
+        "x-csrf-token",
+        "mfa_code",
     ],
 )
 def test_sensitive_key_variants(key: str | bytes) -> None:
@@ -382,3 +417,10 @@ def test_redaction_inside_exception_groups(json_logs: JsonLogs) -> None:
     output = json.dumps(json_logs())
     assert "hunter2" not in output
     assert "visivel" in output
+
+
+def test_header_pair_with_list_value_is_redacted(json_logs: JsonLogs) -> None:
+    get_logger("t").info("x", headers=[("authorization", ["Bearer zz"])])
+
+    [line] = json_logs()
+    assert line["headers"] == [["authorization", REDACTED]]

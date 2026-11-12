@@ -1,6 +1,7 @@
 """Logs JSON de structlog, uvicorn e libs de terceiros no mesmo formato (ADR-012)"""
 
 import logging
+import re
 import sys
 from collections.abc import Mapping
 from typing import Any, Final, TextIO
@@ -20,10 +21,34 @@ SENSITIVE_KEY_PARTS: Final[frozenset[str]] = frozenset(
         "cookie",
         "private_key",
         "api_key",
+        "apikey",
+        "passphrase",
+        "credential",
+        "signature",
+        "signing_key",
+        "encryption_key",
+        "access_key",
+        "session_key",
+        "database_url",
     }
 )
 # Sensíveis quando são um segmento inteiro do nome (otp, mas não footprint)
-_SENSITIVE_SEGMENTS: Final = frozenset({"otp"})
+_SENSITIVE_SEGMENTS: Final = frozenset(
+    {
+        "otp",
+        "totp",
+        "pin",
+        "pwd",
+        "pass",
+        "senha",
+        "codigo",
+        "jwt",
+        "bearer",
+        "dsn",
+        "hmac",
+        "pepper",
+    }
+)
 # *_code só é segredo com um destes prefixos; status_code, zip_code, error_code não são
 _SECRET_CODE_PREFIXES: Final = frozenset(
     {"verification", "otp", "mfa", "auth", "reset", "confirmation", "recovery", "pin"}
@@ -49,8 +74,12 @@ _HANDLER_NAME: Final = "veriditi"
 _UNTOUCHED_KEYS: Final = frozenset({"exc_info", "stack_info", "_record", "_from_structlog"})
 
 
+_CAMEL_BOUNDARY: Final = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
 def _normalize(key: str) -> str:
-    return key.lower().replace("-", "_")
+    """apiKey, privateKey e X-Api-Key viram api_key, private_key e x_api_key"""
+    return _CAMEL_BOUNDARY.sub("_", key).lower().replace("-", "_")
 
 
 def _is_secret_code(segments: list[str]) -> bool:
@@ -90,7 +119,7 @@ def _is_sensitive_pair(value: list[Any] | tuple[Any, ...], in_headers: bool) -> 
         return False
     if not (isinstance(value[0], bytes) or in_headers):
         return False
-    return isinstance(value[1], str | bytes) and is_sensitive_key(value[0])
+    return isinstance(value[1], str | bytes | list | tuple) and is_sensitive_key(value[0])
 
 
 def _redact(value: Any, in_headers: bool = False) -> Any:
