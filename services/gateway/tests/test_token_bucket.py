@@ -113,3 +113,16 @@ async def test_default_clock_is_monotonic() -> None:
     bucket = InMemoryTokenBucket()
 
     assert (await bucket.hit("k", LOGIN_LIMIT)).allowed
+
+
+async def test_max_keys_is_per_policy(fake_clock: FakeClock) -> None:
+    bucket = InMemoryTokenBucket(clock=fake_clock, max_keys=3)
+    await _burst(bucket, "vitima", REGISTER_LIMIT, 10)
+    await _burst(bucket, "vitima", RESEND_LIMIT, 10)
+
+    for n in range(50):
+        await bucket.hit(f"ip|email-{n}", LOGIN_LIMIT)
+
+    assert len(bucket) == 3 + 1 + 1
+    assert not (await bucket.hit("vitima", REGISTER_LIMIT)).allowed
+    assert not (await bucket.hit("vitima", RESEND_LIMIT)).allowed

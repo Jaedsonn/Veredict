@@ -24,19 +24,21 @@ class InMemoryTokenBucket:
 
     def __init__(self, *, clock: Clock = time.monotonic, max_keys: int = DEFAULT_MAX_KEYS) -> None:
         self._clock = clock
+        # Teto por política: uma rajada de logins não despeja os buckets do cadastro
         self._max_keys = max_keys
-        # Ordenado pela última atualização: o início é o candidato a limpeza e a despejo
-        self._buckets: OrderedDict[tuple[str, str], _Bucket] = OrderedDict()
+        # Ordenados pela última atualização: o início é o candidato a limpeza e a despejo
+        self._policies: dict[str, OrderedDict[str, _Bucket]] = {}
 
     def __len__(self) -> int:
-        return len(self._buckets)
+        return sum(len(buckets) for buckets in self._policies.values())
 
     async def hit(self, key: str, limit: RateLimit) -> RateDecision:
         now = self._clock()
-        self._drop_refilled(now)
-        bucket_key = (limit.name, key)
+        for policy_buckets in self._policies.values():
+            _drop_refilled(policy_buckets, now)
+        buckets = self._policies.setdefault(limit.name, OrderedDict())
         rate = limit.capacity / limit.period_seconds
-        bucket = self._buckets.get(bucket_key)
+        bucket = buckets.get(key)
         tokens = float(limit.capacity)
         if bucket is not None:
             tokens = min(tokens, bucket.tokens + (now - bucket.updated_at) * rate)
@@ -50,16 +52,17 @@ class InMemoryTokenBucket:
             decision = RateDecision(allowed=False, retry_after=max(1, math.ceil(wait - _EPSILON)))
 
         full_at = now + (limit.capacity - tokens) / rate
-        self._buckets[bucket_key] = _Bucket(tokens, now, full_at)
-        self._buckets.move_to_end(bucket_key)
-        while len(self._buckets) > self._max_keys:
-            self._buckets.popitem(last=False)
+        buckets[key] = _Bucket(tokens, now, full_at)
+        buckets.move_to_end(key)
+        while len(buckets) > self._max_keys:
+            buckets.popitem(last=False)
         return decision
 
-    def _drop_refilled(self, now: float) -> None:
-        """Bucket cheio equivale a não existir; amortizado O(1)"""
-        while self._buckets:
-            oldest = next(iter(self._buckets.values()))
-            if oldest.full_at > now:
-                return
-            self._buckets.popitem(last=False)
+
+def _drop_refilled(buckets: OrderedDict[str, _Bucket], now: float) -> None:
+    """Bucket cheio equivale a não existir; amortizado O(1)"""
+    while buckets:
+        oldest = next(iter(buckets.values()))
+        if oldest.full_at > now:
+            return
+        buckets.popitem(last=False)
