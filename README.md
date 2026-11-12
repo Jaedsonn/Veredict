@@ -48,6 +48,19 @@ make dev-web     # terminal 2
 
 `make help` lista todos os comandos.
 
+### Web sem o backend (gateway mock)
+
+Enquanto o API Gateway (#11) não existe, a web roda contra um mock em memória
+que implementa os contratos da Sprint 1 (cadastro, verificação, login, refresh,
+logout e perfil):
+
+```bash
+npm run mock:gateway   # terminal 1 — http://localhost:8080 (códigos de verificação aparecem no console)
+npm run dev:web        # terminal 2 — http://localhost:3000 (usa GATEWAY_URL, padrão http://localhost:8080)
+```
+
+`MOCK_ACCESS_TTL_S=20 npm run mock:gateway` encurta o access token para testar a renovação de sessão.
+
 ## Criando um novo serviço ( Leia isso se você é backend ou está trabalhando no backend)
 
 1. Copie `services/users` para `services/<nome>` e renomeie o pacote
