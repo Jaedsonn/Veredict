@@ -37,6 +37,7 @@ def _smtp_sender(settings: Settings) -> SmtpEmailSender:
         username=settings.smtp_user,
         password=settings.smtp_password,
         start_tls=settings.smtp_starttls,
+        use_tls=settings.smtp_use_tls,
         timeout=settings.smtp_timeout_seconds,
     )
 

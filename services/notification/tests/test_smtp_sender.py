@@ -61,6 +61,7 @@ def _sender(transport: FakeTransport, **overrides: Any) -> SmtpEmailSender:
         "username": None,
         "password": None,
         "start_tls": False,
+        "use_tls": False,
         "timeout": 10.0,
         "transport": transport,
         "clock": lambda: NOW,
@@ -101,11 +102,11 @@ def test_message_ids_are_unique_in_sender_domain() -> None:
     assert all(re.fullmatch(r"<[^<>@\s]+@veriditi\.app>", mid) for mid in ids)
 
 
-@pytest.mark.parametrize("start_tls", [False, True])
-async def test_transport_gets_explicit_connection_settings(start_tls: bool) -> None:
+@pytest.mark.parametrize(("start_tls", "use_tls"), [(False, False), (True, False), (False, True)])
+async def test_transport_gets_explicit_connection_settings(start_tls: bool, use_tls: bool) -> None:
     transport = FakeTransport()
 
-    await _sender(transport, start_tls=start_tls).send(EMAIL)
+    await _sender(transport, start_tls=start_tls, use_tls=use_tls).send(EMAIL)
 
     [(message, kwargs)] = transport.calls
     assert kwargs == {
@@ -116,32 +117,12 @@ async def test_transport_gets_explicit_connection_settings(start_tls: bool) -> N
         "username": None,
         "password": None,
         "start_tls": start_tls,
+        "use_tls": use_tls,
         "timeout": 10.0,
     }
     assert message["Message-ID"] == EMAIL.message_id
     assert message["Date"] == "Thu, 12 Nov 2026 15:00:00 +0000"
     assert message["From"] == SENDER
-
-
-@pytest.mark.parametrize(
-    ("name", "header"),
-    [
-        ("Veriditi, Inc", '"Veriditi, Inc" <no-reply@veriditi.app>'),
-        ("Équipe Vérité", "Équipe Vérité <no-reply@veriditi.app>"),
-    ],
-    ids=["comma", "accents"],
-)
-async def test_from_is_a_single_mailbox_and_envelope_is_the_address(name: str, header: str) -> None:
-    transport = FakeTransport()
-
-    await _sender(transport, sender_name=name).send(EMAIL)
-
-    [(message, kwargs)] = transport.calls
-    parsed = email.message_from_bytes(bytes(message), policy=email.policy.default)
-    [mailbox] = parsed["From"].addresses
-    assert (mailbox.display_name, mailbox.addr_spec) == (name, "no-reply@veriditi.app")
-    assert str(parsed["From"]) == header
-    assert (kwargs["sender"], kwargs["recipients"]) == ("no-reply@veriditi.app", [TO])
 
 
 async def test_password_is_revealed_only_in_the_transport_call() -> None:

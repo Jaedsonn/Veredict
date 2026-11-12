@@ -231,9 +231,10 @@ serviço, e um snapshot em `tests/snapshots/` fixa o corpo renderizado.
 | Variável | Uso |
 | -------- | --- |
 | `SMTP_HOST`, `SMTP_PORT` | Só no `make dev` (padrão `localhost:1025`, o Mailpit publicado); o compose fixa `mailpit:1025` |
-| `SMTP_USER`, `SMTP_PASSWORD` | Vazios no Mailpit; usuário sem senha impede a subida |
+| `SMTP_USER`, `SMTP_PASSWORD` | Vazios no Mailpit; usuário sem senha impede a subida, e usuário sem `SMTP_USE_TLS` nem `SMTP_STARTTLS` também, exceto no SMTP local (`localhost`, `127.0.0.1`, `::1`, `mailpit`) |
 | `SMTP_FROM` | Remetente, padrão `Veriditi <no-reply@veriditi.app>`; o domínio dele vai no `Message-ID` |
 | `SMTP_STARTTLS` | `false` no Mailpit; `true` num provedor na porta 587 (#17) |
+| `SMTP_USE_TLS` | TLS implícito, para um provedor na porta 465; excludente com o `SMTP_STARTTLS` |
 | `SMTP_TIMEOUT_SECONDS` | Timeout total de cada tentativa (conexão, TLS, AUTH e DATA juntos), padrão 10 (máximo 60) |
 | `WEB_URL` | Base dos links `/verificar-email` e `/entrar` dos e-mails |
 

@@ -173,6 +173,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-Veriditi <no-reply@veriditi.app>}
       SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
     # 3 × 10 s (timeout total da tentativa) + 3 s de espera + 2 s da auditoria = 35 s; menos que isso deixa a linha pending
     stop_grace_period: 45s

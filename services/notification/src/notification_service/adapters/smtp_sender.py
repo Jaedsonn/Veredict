@@ -76,6 +76,7 @@ class SmtpEmailSender:
         username: str | None,
         password: SecretStr | None,
         start_tls: bool,
+        use_tls: bool,
         timeout: float,
         transport: Callable[..., Awaitable[Any]] = aiosmtplib.send,
         clock: Clock = utcnow,
@@ -88,6 +89,7 @@ class SmtpEmailSender:
         self._username = username
         self._password = password
         self._start_tls = start_tls
+        self._use_tls = use_tls
         self._timeout = timeout
         self._transport = transport
         self._clock = clock
@@ -109,6 +111,7 @@ class SmtpEmailSender:
                     password=password,
                     # Explícito: None faria o aiosmtplib tentar o STARTTLS sozinho
                     start_tls=self._start_tls,
+                    use_tls=self._use_tls,
                     timeout=self._timeout,
                 )
         # TimeoutError é OSError: o estouro do total cai como transitório

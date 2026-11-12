@@ -19,6 +19,7 @@ def test_smtp_defaults_point_to_local_mailpit() -> None:
     assert settings.smtp_from_domain == "veriditi.app"
     assert (settings.smtp_host, settings.smtp_port) == ("localhost", 1025)
     assert settings.smtp_starttls is False
+    assert settings.smtp_use_tls is False
     assert settings.smtp_timeout_seconds == 10.0
     assert (settings.smtp_user, settings.smtp_password) == (None, None)
     assert settings.web_url == "http://localhost:3000"
@@ -102,3 +103,43 @@ def test_password_never_shows_in_repr_or_dump() -> None:
 
     assert SECRET not in repr(settings)
     assert SECRET not in settings.model_dump_json()
+
+
+def test_implicit_tls_comes_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SMTP_USE_TLS", "true")
+    monkeypatch.setenv("SMTP_PORT", "465")
+
+    settings = _settings()
+
+    assert (settings.smtp_use_tls, settings.smtp_starttls, settings.smtp_port) == (True, False, 465)
+
+
+def test_implicit_tls_and_starttls_are_exclusive() -> None:
+    with pytest.raises(ValidationError, match="excludentes"):
+        _settings(smtp_use_tls=True, smtp_starttls=True)
+
+
+@pytest.mark.parametrize("host", ["smtp.exemplo.com", "10.0.0.5"])
+def test_credentials_over_plaintext_to_remote_host_are_rejected(host: str) -> None:
+    with pytest.raises(ValidationError, match="SMTP_USE_TLS ou SMTP_STARTTLS"):
+        _settings(smtp_host=host, smtp_user="apikey", smtp_password=SECRET)
+
+
+@pytest.mark.parametrize("host", ["localhost", "LOCALHOST", "127.0.0.1", "::1", "mailpit"])
+def test_credentials_over_plaintext_are_allowed_on_local_smtp(host: str) -> None:
+    settings = _settings(smtp_host=host, smtp_user="apikey", smtp_password=SECRET)
+
+    assert settings.smtp_user == "apikey"
+
+
+@pytest.mark.parametrize("tls", [{"smtp_use_tls": True}, {"smtp_starttls": True}])
+def test_credentials_with_tls_are_allowed_on_remote_host(tls: dict[str, bool]) -> None:
+    settings = _settings(
+        smtp_host="smtp.exemplo.com", smtp_user="apikey", smtp_password=SECRET, **tls
+    )
+
+    assert settings.smtp_user == "apikey"
+
+
+def test_remote_host_without_credentials_needs_no_tls() -> None:
+    assert _settings(smtp_host="smtp.exemplo.com").smtp_starttls is False

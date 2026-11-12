@@ -1,10 +1,13 @@
 from functools import lru_cache
-from typing import Self
+from typing import Final, Self
 from urllib.parse import urlsplit
 
 from pydantic import Field, NameEmail, SecretStr, field_validator, model_validator
 
 from veriditi_common.settings import ServiceSettings
+
+# Onde a credencial em claro não sai da máquina ou da rede do compose
+LOCAL_SMTP_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1", "mailpit"})
 
 
 class Settings(ServiceSettings):
@@ -19,6 +22,8 @@ class Settings(ServiceSettings):
     smtp_from: NameEmail = NameEmail("Veriditi", "no-reply@veriditi.app")
     # Mailpit em dev; o provedor do deploy (#17) na 587 exige true
     smtp_starttls: bool = False
+    # TLS implícito, porta 465; excludente com o STARTTLS
+    smtp_use_tls: bool = False
     smtp_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     web_url: str = "http://localhost:3000"
 
@@ -41,6 +46,21 @@ class Settings(ServiceSettings):
     def _user_requires_password(self) -> Self:
         if self.smtp_user is not None and self.smtp_password is None:
             raise ValueError("SMTP_USER exige SMTP_PASSWORD")
+        return self
+
+    @model_validator(mode="after")
+    def _one_tls_mode(self) -> Self:
+        if self.smtp_use_tls and self.smtp_starttls:
+            raise ValueError("SMTP_USE_TLS e SMTP_STARTTLS são excludentes")
+        return self
+
+    @model_validator(mode="after")
+    def _no_plaintext_credentials(self) -> Self:
+        """AUTH sem TLS manda a senha em claro; só o SMTP local (Mailpit) dispensa"""
+        encrypted = self.smtp_use_tls or self.smtp_starttls
+        local = self.smtp_host.lower() in LOCAL_SMTP_HOSTS
+        if self.smtp_user is not None and not encrypted and not local:
+            raise ValueError("SMTP_USER exige SMTP_USE_TLS ou SMTP_STARTTLS fora do SMTP local")
         return self
 
     @property

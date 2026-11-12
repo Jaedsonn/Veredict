@@ -128,3 +128,15 @@ def test_smtp_from_with_comma_is_wired_as_one_quoted_mailbox() -> None:
 
     assert sender._from_header == '"Veriditi, Inc" <no-reply@veriditi.app>'
     assert sender._sender_address == "no-reply@veriditi.app"
+
+
+def test_implicit_tls_is_wired_to_the_sender(settings: Settings) -> None:
+    tls = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        db_user="test",
+        internal_api_token="test-internal-token-0123456789",  # type: ignore[arg-type]
+        smtp_use_tls=True,
+    )
+
+    assert create_app(tls).state.email_sender._use_tls is True
+    assert create_app(settings).state.email_sender._use_tls is False
