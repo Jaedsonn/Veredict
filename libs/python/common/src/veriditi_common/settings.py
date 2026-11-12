@@ -1,5 +1,6 @@
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 
 class BaseServiceSettings(BaseSettings):
@@ -23,11 +24,17 @@ class ServiceSettings(BaseServiceSettings):
     db_migrator_password: SecretStr | None = None
 
     def _url(self, user: str, password: SecretStr) -> str:
-        pwd = password.get_secret_value()
-        return (
-            f"mysql+aiomysql://{user}:{pwd}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
+        """URL.create escapa @, %, / e : da senha, que quebrariam uma f-string"""
+        url = URL.create(
+            drivername="mysql+aiomysql",
+            username=user,
+            password=password.get_secret_value(),
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+            query={"charset": "utf8mb4"},
         )
+        return url.render_as_string(hide_password=False)
 
     @property
     def database_url(self) -> str:
