@@ -1,4 +1,4 @@
-"""Migrations 0001-0004 do auth contra MySQL real: DDL físico, GRANT sem DELETE e REVOKE"""
+"""Migration 0001 do auth contra MySQL real: DDL físico, GRANT sem DELETE e REVOKE"""
 
 import os
 from collections.abc import Iterator
@@ -66,10 +66,7 @@ def test_users_has_contract_ddl(migrated: Config) -> None:
 
 def test_runtime_user_has_dml_without_delete(migrated: Config) -> None:
     with _connect("auth_svc", AUTH_PASSWORD) as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO users (email, name, password_hash) "
-            "VALUES ('ana@example.com', 'Ana', '$argon2id$v=19$m=65536,t=3,p=4$test')"
-        )
+        cur.execute("INSERT INTO users (email, name) VALUES ('ana@example.com', 'Ana')")
         cur.execute("UPDATE users SET name = 'Ana B' WHERE email = 'ana@example.com'")
         cur.execute("SELECT name FROM users")
         assert cur.fetchone() == ("Ana B",)

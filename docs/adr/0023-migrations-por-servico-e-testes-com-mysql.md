@@ -10,24 +10,26 @@ Vários serviços criam tabelas no mesmo servidor MySQL. Com a tabela de versão
 
 ## Decisão
 
-- **Uma pasta `migrations/` e uma `version_table` por serviço** (`alembic_version_<serviço>`), com histórico linear (1 head).
+- **Uma pasta `migrations/` e uma `version_table` por serviço** (`alembic_version_<serviço>`), com histórico linear: no máximo 1 head (0 enquanto o serviço ainda não tem revisão).
 - **Migrations não importam models**: usam tipos físicos explícitos. **A tabela e o GRANT nascem na mesma revisão**, e o `downgrade` revoga antes do `DROP`.
 - **Revisão mergeada é imutável.** A única exceção é o rebaseline do #3 (`users` → `auth`), feito antes de existir qualquer ambiente implantado.
 - **Duas camadas de teste**:
   - SQLite (`uv run pytest`): comportamento dos tipos, convenção de nomes e helpers. É rápido e roda em todo PR.
-  - MySQL real (marcador `mysql`, `make db-test-contract`): privilégios (erros 1142 e 1044), sessão em UTC, collation e DDL físico. Sobe um `mysql:8.4` descartável com `docker/mysql/init`.
-- **CI** (job `database`, a criar no #3): para cada serviço, `alembic heads` → `upgrade head` → `alembic check` → `downgrade base` → `upgrade head`, e depois os testes `mysql`.
+  - MySQL real (`make db-test`), num `mysql:8.4` descartável com `docker/mysql/init`, em duas etapas:
+    1. `make db-test-contract`: testes com o marcador `mysql` (privilégios com os erros 1142 e 1044, sessão em UTC, collation, DDL físico e as migrations com GRANT/REVOKE);
+    2. `make db-test-migrations`: para cada serviço com `alembic.ini`, `alembic heads` (no máximo 1 linha) → `upgrade head` → `alembic check` → `downgrade base` → `upgrade head`, e confere que a `alembic_version_<serviço>` existe no banco do serviço.
+- **CI**: o job `database` (criado no #3) roda o mesmo `make db-test`.
 
 ## Consequências (positivas / negativas)
 
 - (+) Os critérios de segurança do #41 são testes automatizados, não só documentação.
 - (+) Um `downgrade` quebrado ou um segundo head são detectados antes do merge.
-- (−) Os testes `mysql` precisam de Docker e ficam fora do `pytest` padrão; é preciso lembrar de rodá-los localmente até o CI do #3 existir.
+- (−) Os testes `mysql` precisam de Docker e ficam fora do `pytest` padrão; localmente é preciso lembrar do `make db-test`, e o job `database` cobre o PR.
 - (−) Dois PRs que criam revisões em paralelo no mesmo serviço exigem rebase e renumeração.
 
 ## Alternativas consideradas
 
-- **Testcontainers no pytest**: subiria o MySQL a partir do próprio teste, mas traz mais uma dependência e fica mais lento por sessão. O `docker run` do Makefile basta e é o mesmo comando que o CI vai usar.
+- **Testcontainers no pytest**: subiria o MySQL a partir do próprio teste, mas traz mais uma dependência e fica mais lento por sessão. O `docker run` do Makefile basta e é o mesmo comando que o CI usa.
 - **Só SQLite**: não prova nenhum critério de privilégio nem o DDL físico.
 - **Uma única pasta de migrations para todos os serviços**: acopla o deploy dos serviços e contraria a posse por serviço.
 

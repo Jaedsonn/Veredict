@@ -1,7 +1,7 @@
 [project]
 name = "veriditi-common"
 version = "0.1.0"
-description = "Infraestrutura compartilhada entre os serviços (config, banco, health)."
+description = "Infraestrutura compartilhada entre os serviços (config, banco, health, logging, segurança interna e clientes internos)."
 requires-python = ">=3.12"
 dependencies = [
     "aiomysql>=0.3.2",
@@ -9,9 +9,9 @@ dependencies = [
     "fastapi>=0.162.0",
     "httpx>=0.28.1",
     "pydantic-settings>=2.16.2",
+    "pydantic[email]>=2.14.2",
     "sqlalchemy[asyncio]>=2.1.7",
-    "structlog>=25.1.0",
-    "tzdata>=2025.1",
+    "structlog>=26.1.0",
 ]
 
 [build-system]

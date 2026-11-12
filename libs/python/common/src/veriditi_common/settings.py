@@ -1,19 +1,51 @@
-from pydantic import SecretStr
+from typing import Literal
+
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
+
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+
+_MIN_TOKEN_LENGTH = 16
 
 
-class ServiceSettings(BaseSettings):
-    """Configuração base de qualquer serviço, lida de variáveis de ambiente
+class BaseServiceSettings(BaseSettings):
+    """Configuração comum a todo serviço, inclusive os que não usam banco (gateway)"""
 
-    Cada serviço conecta com dois usuários MySQL: o de runtime (DB_USER), só com
-    DML nas próprias tabelas, e o `migrator` (DB_MIGRATOR_USER), com DDL, usado
-    apenas pelo Alembic
-    """
-
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # O erro de validação não repete senhas e tokens lidos do ambiente
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     service_name: str
     debug: bool = False
+    log_level: LogLevel = "INFO"
+    # Opcional aqui porque os *-migrate e o Alembic não o recebem; o create_app o exige
+    internal_api_token: SecretStr | None = None
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _upper_log_level(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
+
+    @field_validator("internal_api_token", mode="before")
+    @classmethod
+    def _empty_token_is_missing(cls, value: object) -> object:
+        """INTERNAL_API_TOKEN= vazio conta como ausente, não como token curto"""
+        return None if value == "" else value
+
+    @property
+    def internal_token(self) -> SecretStr:
+        """Valida aqui, e não no campo, para o Alembic não quebrar com um token curto no .env"""
+        if self.internal_api_token is None:
+            raise RuntimeError("INTERNAL_API_TOKEN não definido")
+        if len(self.internal_api_token.get_secret_value()) < _MIN_TOKEN_LENGTH:
+            raise RuntimeError(
+                f"INTERNAL_API_TOKEN precisa de ao menos {_MIN_TOKEN_LENGTH} caracteres"
+            )
+        return self.internal_api_token
+
+
+class ServiceSettings(BaseServiceSettings):
+    """Serviço com banco: runtime (DB_USER) só com DML e `migrator` com DDL para o Alembic"""
 
     db_host: str = "localhost"
     db_port: int = 3306
@@ -24,11 +56,17 @@ class ServiceSettings(BaseSettings):
     db_migrator_password: SecretStr | None = None
 
     def _url(self, user: str, password: SecretStr) -> str:
-        pwd = password.get_secret_value()
-        return (
-            f"mysql+aiomysql://{user}:{pwd}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
+        """URL.create escapa @, %, / e : da senha, que quebrariam uma f-string"""
+        url = URL.create(
+            drivername="mysql+aiomysql",
+            username=user,
+            password=password.get_secret_value(),
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+            query={"charset": "utf8mb4"},
         )
+        return url.render_as_string(hide_password=False)
 
     @property
     def database_url(self) -> str:

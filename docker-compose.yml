@@ -1,63 +1,243 @@
 name: veriditi
 
-x-db-env: &db-env
+# Só mysql, mailpit, gateway e web publicam porta; o resto fica na rede do compose
+# mysql e mailpit (UI e SMTP) ficam presos a 127.0.0.1
+# Nenhum serviço usa env_file: o DB_PORT do .env é o do host, aqui dentro é 3306
+# Cada par <svc>-migrate/<svc> declara a mesma image para o build acontecer uma vez só;
+# pull_policy: build impede o compose pull de procurar essas imagens no Docker Hub
+
+x-secrets:
+  root-password: &root-password "${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env (make install copia o .env.example)}"
+  migrator-password: &migrator-password "${DB_MIGRATOR_PASSWORD:?defina DB_MIGRATOR_PASSWORD no .env (make install copia o .env.example)}"
+  auth-db-password: &auth-db-password "${AUTH_DB_PASSWORD:?defina AUTH_DB_PASSWORD no .env (make install copia o .env.example)}"
+  notification-db-password: &notification-db-password "${NOTIFICATION_DB_PASSWORD:?defina NOTIFICATION_DB_PASSWORD no .env (make install copia o .env.example)}"
+  logs-db-password: &logs-db-password "${LOGS_DB_PASSWORD:?defina LOGS_DB_PASSWORD no .env (make install copia o .env.example)}"
+  internal-api-token: &internal-api-token "${INTERNAL_API_TOKEN:?defina INTERNAL_API_TOKEN no .env (make install copia o .env.example)}"
+
+x-db: &db
   DB_HOST: mysql
   DB_PORT: 3306
-  DB_NAME: ${DB_NAME:-veriditi}
-  DB_USER: ${DB_USER:-veriditi}
-  DB_PASSWORD: ${DB_PASSWORD:?defina no .env}
+
+x-migrator: &migrator
+  DB_MIGRATOR_USER: migrator
+  DB_MIGRATOR_PASSWORD: *migrator-password
+
+x-ready: &ready
+  test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+  start_period: 10s
 
 services:
   mysql:
     image: mysql:8.4
     restart: unless-stopped
+    command: ["--default-time-zone=+00:00"]
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?defina no .env}
-      MYSQL_DATABASE: ${DB_NAME:-veriditi}
-      MYSQL_USER: ${DB_USER:-veriditi}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: *root-password
+      MYSQL_DATABASE: veriditi
+      # Lidas pelo docker/mysql/init/02-service-users.sh
+      DB_MIGRATOR_PASSWORD: *migrator-password
+      AUTH_DB_PASSWORD: *auth-db-password
+      NOTIFICATION_DB_PASSWORD: *notification-db-password
+      LOGS_DB_PASSWORD: *logs-db-password
     ports:
-      - "${DB_PORT:-3307}:3306"
+      - "127.0.0.1:${DB_PORT:-3307}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      # Exige os usuários do init: se o 02-service-users.sh falhou, o restart pula o init
+      # e um ping daria healthy sem o migrator (corrija o .env e rode make reset)
+      test:
+        - CMD-SHELL
+        - >-
+          MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h127.0.0.1 -uroot -N -e
+          "SELECT COUNT(*) FROM mysql.user WHERE user IN
+          ('migrator','auth_svc','notification_svc','veriditi_logs_writer')"
+          | grep -qx 4
       interval: 5s
       timeout: 3s
       retries: 20
       start_period: 20s
 
+  mailpit:
+    image: axllent/mailpit:v1.33
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+      # SMTP só para o make dev s=notification fora do Docker
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   auth-migrate:
+    image: veriditi-auth
+    pull_policy: build
     build: &auth-build
       context: .
       dockerfile: services/auth/Dockerfile
-    environment: *db-env
     command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: [*db, *migrator]
+      DB_NAME: veriditi
+      DB_USER: auth_svc
+    healthcheck:
+      disable: true
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  notification-migrate:
+    image: veriditi-notification
+    pull_policy: build
+    build: &notification-build
+      context: .
+      dockerfile: services/notification/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: [*db, *migrator]
+      DB_NAME: veriditi
+      DB_USER: notification_svc
+    healthcheck:
+      disable: true
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  monitoring-migrate:
+    image: veriditi-monitoring
+    pull_policy: build
+    build: &monitoring-build
+      context: .
+      dockerfile: services/monitoring/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: [*db, *migrator]
+      DB_NAME: veriditi_logs
+      DB_USER: veriditi_logs_writer
+    healthcheck:
+      disable: true
     depends_on:
       mysql:
         condition: service_healthy
 
   auth:
+    image: veriditi-auth
+    pull_policy: build
     build: *auth-build
     restart: unless-stopped
-    environment: *db-env
-    ports:
-      - "${AUTH_PORT:-8001}:8000"
+    environment:
+      <<: *db
+      DB_NAME: veriditi
+      DB_USER: auth_svc
+      DB_PASSWORD: *auth-db-password
+      INTERNAL_API_TOKEN: *internal-api-token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Fixos: o MONITORING_URL/NOTIFICATION_URL do .env são os do make dev
+      # Sem depends_on: o envio é fire-and-forget (ADR-016)
+      MONITORING_URL: http://monitoring:8000
+      NOTIFICATION_URL: http://notification:8000
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+    healthcheck: *ready
     depends_on:
       auth-migrate:
         condition: service_completed_successfully
 
+  notification:
+    image: veriditi-notification
+    pull_policy: build
+    build: *notification-build
+    restart: unless-stopped
+    environment:
+      <<: *db
+      DB_NAME: veriditi
+      DB_USER: notification_svc
+      DB_PASSWORD: *notification-db-password
+      INTERNAL_API_TOKEN: *internal-api-token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Fixo: o MONITORING_URL do .env é o do make dev
+      MONITORING_URL: http://monitoring:8000
+      # Fixos: o SMTP_HOST/SMTP_PORT do .env são os do notification rodando fora do Docker
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-Veriditi <no-reply@veriditi.app>}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      WEB_URL: ${WEB_URL:-http://localhost:3000}
+    healthcheck: *ready
+    depends_on:
+      notification-migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+
+  monitoring:
+    image: veriditi-monitoring
+    pull_policy: build
+    build: *monitoring-build
+    restart: unless-stopped
+    environment:
+      <<: *db
+      DB_NAME: veriditi_logs
+      DB_USER: veriditi_logs_writer
+      DB_PASSWORD: *logs-db-password
+      INTERNAL_API_TOKEN: *internal-api-token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck: *ready
+    depends_on:
+      monitoring-migrate:
+        condition: service_completed_successfully
+
+  gateway:
+    image: veriditi-gateway
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    restart: unless-stopped
+    environment:
+      AUTH_URL: http://auth:8000
+      INTERNAL_API_TOKEN: *internal-api-token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      WEB_URL: ${WEB_URL:-http://localhost:3000}
+    ports:
+      - "${GATEWAY_PORT:-8080}:8000"
+    healthcheck: *ready
+    depends_on:
+      auth:
+        condition: service_healthy
+
   web:
+    image: veriditi-web
+    pull_policy: build
     build:
       context: .
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     environment:
+      # Fixo: o GATEWAY_URL do .env é o da web rodando fora do Docker
       GATEWAY_URL: http://gateway:8000
     ports:
       - "${WEB_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
     depends_on:
-      auth:
+      gateway:
         condition: service_healthy
 
 volumes:

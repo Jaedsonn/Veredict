@@ -1,137 +1,189 @@
-"""Contratos e clientes de auditoria estruturada (ADR-001, ADR-012, ADR-016)."""
+"""Eventos de auditoria desacoplados do transporte (ADR-016); o monitoring os grava no #5"""
 
-import enum
-import uuid
-from collections.abc import Mapping
-from datetime import datetime
-from typing import Any, Protocol, runtime_checkable
+from datetime import UTC, datetime
+from enum import StrEnum
+from ipaddress import IPv4Address, IPv6Address
+from typing import Annotated, Any, Final, Protocol
+from uuid import UUID, uuid4
 
 import httpx
-import structlog
-from pydantic import BaseModel, Field, field_validator
-
-from veriditi_common.db_types import utcnow
-
-log = structlog.get_logger(__name__)
-
-SENSITIVE_KEYS: frozenset[str] = frozenset(
-    {
-        "password",
-        "current_password",
-        "new_password",
-        "password_hash",
-        "token",
-        "refresh_token",
-        "access_token",
-        "code",
-        "secret",
-        "totp_secret",
-    }
+from fastapi import Depends, Request
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    IPvAnyAddress,
+    JsonValue,
+    SecretStr,
+    field_validator,
+    model_validator,
 )
 
+from veriditi_common.logging import get_logger
+from veriditi_common.middleware import (
+    MAX_IP_LENGTH,
+    REQUEST_ID_HEADER,
+    current_request_id,
+    try_defer,
+)
+from veriditi_common.security import INTERNAL_TOKEN_HEADER
 
-def sanitize_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    """Remove recursivamente chaves sensíveis de metadados antes de gravar ou enviar."""
-    if metadata is None:
+AUDIT_EVENTS_PATH: Final = "/internal/events"
+
+_SEGMENT = r"[a-z][a-z0-9_]*"
+
+log = get_logger(__name__)
+
+
+def _request_id_from_context() -> UUID | None:
+    """O evento carrega o request_id da requisição sem o caso de uso precisar passá-lo"""
+    rid = current_request_id()
+    if rid is None:
         return None
-    cleaned: dict[str, Any] = {}
-    for key, value in metadata.items():
-        normalized_key = str(key).lower()
-        if normalized_key in SENSITIVE_KEYS or any(
-            secret in normalized_key for secret in ("password", "token", "secret", "code")
-        ):
-            continue
-        if isinstance(value, Mapping):
-            cleaned[str(key)] = sanitize_metadata(value)
-        else:
-            cleaned[str(key)] = value
-    return cleaned
+    try:
+        return UUID(rid)
+    except ValueError:
+        return None
 
 
-class AuditOutcome(enum.StrEnum):
+class AuditOutcome(StrEnum):
     SUCCESS = "success"
     FAILURE = "failure"
 
 
 class AuditEvent(BaseModel):
-    """Evento imutável de auditoria emitido pelos serviços (ADR-001 / RF18)."""
+    """Espelha o DDL de veriditi_logs.audit_events (docs/banco-de-dados.md §5.5)"""
 
-    event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    occurred_at: datetime = Field(default_factory=utcnow)
-    service: str = Field(min_length=1, max_length=40)
-    action: str = Field(min_length=1, max_length=80)
+    # O erro de validação não repete o metadata, que pode trazer senha
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+    event_id: UUID = Field(default_factory=uuid4)
+    occurred_at: AwareDatetime = Field(default_factory=lambda: datetime.now(UTC))
+    service: str = Field(min_length=1, max_length=40, pattern=rf"^{_SEGMENT}$")
+    # <serviço>.<entidade>.<verbo_passado>, ex.: auth.user.registered
+    action: str = Field(max_length=80, pattern=rf"^{_SEGMENT}\.{_SEGMENT}\.{_SEGMENT}$")
     outcome: AuditOutcome
-    actor_id: int | None = None
-    actor_ip: str | None = Field(default=None, max_length=45)
-    request_id: uuid.UUID | None = None
-    resource_type: str | None = Field(default=None, max_length=40)
-    resource_id: str | None = Field(default=None, max_length=64)
-    metadata: dict[str, Any] | None = None
+    actor_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
+    actor_ip: IPvAnyAddress | None = None
+    # Modelo de produtor: o #5 valida a entrada com request_id obrigatório (nulo explícito),
+    # senão um corpo sem a chave herdaria o request_id do próprio POST /internal/events
+    request_id: UUID | None = Field(default_factory=_request_id_from_context)
+    resource_type: str | None = Field(default=None, min_length=1, max_length=40)
+    resource_id: str | None = Field(default=None, min_length=1, max_length=64)
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
-    @field_validator("metadata", mode="before")
+    @field_validator("occurred_at")
     @classmethod
-    def _strip_sensitive_fields(cls, value: Any) -> dict[str, Any] | None:
-        if isinstance(value, Mapping):
-            return sanitize_metadata(value)
-        return None
+    def _to_utc(cls, value: datetime) -> datetime:
+        return value.astimezone(UTC)
+
+    @field_validator("actor_ip")
+    @classmethod
+    def _ip_fits_column(
+        cls, value: IPv4Address | IPv6Address | None
+    ) -> IPv4Address | IPv6Address | None:
+        """IPv6 com scope id (fe80::1%eth0) pode passar de VARCHAR(45)"""
+        if value is not None and len(str(value)) > MAX_IP_LENGTH:
+            raise ValueError(f"actor_ip passa de {MAX_IP_LENGTH} caracteres")
+        return value
+
+    @model_validator(mode="after")
+    def _action_belongs_to_service(self) -> "AuditEvent":
+        if self.action.split(".", 1)[0] != self.service:
+            raise ValueError("action precisa começar com o service que emite o evento")
+        return self
 
 
-@runtime_checkable
 class AuditLogger(Protocol):
-    """Porta de saída (DIP/ISP) para emissão de eventos de auditoria."""
-
-    async def record(self, event: AuditEvent) -> None:
-        """Registra um evento de auditoria sem interromper o fluxo de negócio."""
+    async def record(self, event: AuditEvent) -> None: ...
 
 
 class HttpAuditLogger:
-    """Adaptador HTTP para o serviço de Monitoramento (ADR-016).
-
-    Respeita RNF02 (Confiabilidade): falhas de rede ou indisponibilidade do
-    Monitoramento nunca derrubam a requisição do usuário; o evento é gravado
-    no log estruturado com `audit_fallback=True`.
-    """
+    """Fire-and-forget: falha nunca sobe, o evento vai inteiro para o log (replay no #37)"""
 
     def __init__(
         self,
         client: httpx.AsyncClient,
         base_url: str,
-        token: str,
+        token: SecretStr,
         *,
         timeout: float = 2.0,
     ) -> None:
         self._client = client
-        self._base_url = base_url.rstrip("/")
+        self._url = f"{base_url.rstrip('/')}{AUDIT_EVENTS_PATH}"
         self._token = token
         self._timeout = timeout
 
     async def record(self, event: AuditEvent) -> None:
-        payload = event.model_dump(mode="json")
         try:
+            # frozen não congela o dict de metadata: o dump pode falhar
+            payload = event.model_dump(mode="json")
+            headers = {INTERNAL_TOKEN_HEADER: self._token.get_secret_value()}
+            if request_id := payload["request_id"] or current_request_id():
+                headers[REQUEST_ID_HEADER] = request_id
             response = await self._client.post(
-                f"{self._base_url}/internal/events",
-                json=payload,
-                headers={"X-Internal-Token": self._token},
-                timeout=self._timeout,
+                self._url, json=payload, headers=headers, timeout=self._timeout
             )
             response.raise_for_status()
-        except httpx.HTTPError as exc:
+        # Também cobre client fechado no shutdown; CancelledError continua propagando
+        except Exception as exc:
+            extra: dict[str, Any] = {}
+            if isinstance(exc, httpx.HTTPStatusError):
+                extra["status_code"] = exc.response.status_code
+            # Aninhado: espalhado, colidiria com service, request_id e event do próprio log
             log.error(
                 "audit_delivery_failed",
                 audit_fallback=True,
-                error=str(exc),
-                **payload,
+                error_type=type(exc).__name__,
+                audit_event=_fallback_dump(event),
+                **extra,
             )
 
 
-class InMemoryAuditLogger:
-    """Adaptador em memória (LSP) para testes unitários e de integração rápida."""
+def _fallback_dump(event: AuditEvent) -> dict[str, Any]:
+    """Nunca levanta: metadata circular ou exótico cai num resumo com o event_id"""
+    try:
+        return event.model_dump(mode="json", fallback=repr, warnings=False)
+    except Exception:
+        return {
+            "event_id": str(event.event_id),
+            "service": event.service,
+            "action": event.action,
+            "outcome": event.outcome.value,
+            "occurred_at": event.occurred_at.isoformat(),
+        }
 
+
+class InMemoryAuditLogger:
     def __init__(self) -> None:
         self.events: list[AuditEvent] = []
 
     async def record(self, event: AuditEvent) -> None:
         self.events.append(event)
 
-    def find(self, action: str) -> list[AuditEvent]:
-        return [event for event in self.events if event.action == action]
+    def actions(self) -> list[str]:
+        return [event.action for event in self.events]
+
+
+class BackgroundAuditLogger:
+    """Adia o envio para depois da resposta, mesmo de erro, sem o caso de uso saber disso"""
+
+    def __init__(self, inner: AuditLogger, request: Request) -> None:
+        self._inner = inner
+        self._request = request
+
+    async def record(self, event: AuditEvent) -> None:
+        # Chamado depois da drenagem (ex.: task solta), envia já: o inner nunca levanta
+        if not try_defer(self._request, self._inner.record, event):
+            await self._inner.record(event)
+
+
+def get_audit_logger(request: Request) -> AuditLogger:
+    inner: AuditLogger | None = getattr(request.app.state, "audit_logger", None)
+    if inner is None:
+        raise RuntimeError("app.state.audit_logger não foi definido no lifespan")
+    return BackgroundAuditLogger(inner, request)
+
+
+AuditLoggerDep = Annotated[AuditLogger, Depends(get_audit_logger)]

@@ -42,6 +42,8 @@ def create_service_engine(url: str, *, echo: bool = False, **kwargs: Any) -> Asy
         echo=echo,
         pool_pre_ping=True,  # descarta conexões mortas (MySQL fecha após wait_timeout)
         pool_recycle=1800,
+        # O IntegrityError não repete os parâmetros (e-mail, hash) na mensagem
+        hide_parameters=True,
         connect_args=connect_args_for(url),
         **kwargs,
     )

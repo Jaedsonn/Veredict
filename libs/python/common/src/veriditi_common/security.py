@@ -1,75 +1,91 @@
-"""Segurança de comunicação interna entre o API Gateway e os serviços (RNF01, RF06)."""
+"""Autenticação das chamadas internas: token compartilhado e usuário injetado pelo gateway"""
 
 import hmac
+import re
+import uuid
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Final
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, FastAPI, Header, Request
+from pydantic import SecretStr
+
+from veriditi_common.errors import UnauthorizedError
+from veriditi_common.logging import get_logger
+
+INTERNAL_TOKEN_HEADER: Final = "X-Internal-Token"
+USER_ID_HEADER: Final = "X-User-Id"
+USER_EMAIL_HEADER: Final = "X-User-Email"
+SESSION_ID_HEADER: Final = "X-Session-Id"
+# O gateway (#11) remove estes headers do cliente e injeta os próprios
+INTERNAL_HEADERS: Final[frozenset[str]] = frozenset(
+    h.lower() for h in (INTERNAL_TOKEN_HEADER, USER_ID_HEADER, USER_EMAIL_HEADER, SESSION_ID_HEADER)
+)
+
+_USER_ID: Final = re.compile(r"[1-9][0-9]{0,18}")
+_MAX_BIGINT: Final = 2**63 - 1
+_MAX_EMAIL_LENGTH: Final = 255
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class AuthenticatedUser:
-    """Identidade propagada pelo API Gateway após validação do JWT."""
-
+class CurrentUser:
     id: int
-    email: str | None = None
+    email: str
+    session_id: str | None
 
 
-def _expected_internal_token(request: Request) -> str:
-    settings = getattr(request.app.state, "settings", None)
-    if settings is not None and hasattr(settings, "internal_api_token"):
-        token_attr = settings.internal_api_token
-        return (
-            token_attr.get_secret_value()
-            if hasattr(token_attr, "get_secret_value")
-            else str(token_attr)
-        )
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"code": "internal_config_error", "message": "Token interno não configurado."},
-    )
+def install_internal_auth(app: FastAPI, token: SecretStr) -> None:
+    if not token.get_secret_value():
+        raise ValueError("Token interno vazio")
+    app.state.internal_api_token = token
 
 
-def require_internal_token(
+async def require_internal_token(
     request: Request,
-    x_internal_token: Annotated[str | None, Header(alias="X-Internal-Token")] = None,
+    x_internal_token: Annotated[str | None, Header(alias=INTERNAL_TOKEN_HEADER)] = None,
 ) -> None:
-    """Valida o header `X-Internal-Token` em tempo constante (`hmac.compare_digest`)."""
-    expected = _expected_internal_token(request)
-    if not x_internal_token or not hmac.compare_digest(
-        x_internal_token.encode("utf-8"),
-        expected.encode("utf-8"),
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "unauthorized", "message": "Token interno ausente ou inválido."},
-        )
+    """Fail closed: sem install_internal_auth a rota responde 500, nunca libera"""
+    expected: SecretStr | None = getattr(request.app.state, "internal_api_token", None)
+    if expected is None:
+        raise RuntimeError("install_internal_auth não foi chamado no create_app")
+    if not x_internal_token:
+        log.warning("internal_token_rejected", reason="missing")
+        raise UnauthorizedError()
+    # Em bytes: compare_digest com str não ASCII levanta TypeError (500)
+    if not hmac.compare_digest(x_internal_token.encode(), expected.get_secret_value().encode()):
+        log.warning("internal_token_rejected", reason="invalid")
+        raise UnauthorizedError()
 
 
-def get_current_user(
-    _: Annotated[None, Depends(require_internal_token)],
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-    x_user_email: Annotated[str | None, Header(alias="X-User-Email")] = None,
-) -> AuthenticatedUser:
-    """Lê `X-User-Id` e `X-User-Email` injetados exclusivamente pelo API Gateway (#10, #11)."""
-    if not x_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "unauthorized", "message": "Identidade do usuário não informada."},
-        )
-    try:
-        user_id = int(x_user_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "unauthorized", "message": "Identificador de usuário inválido."},
-        ) from exc
-    if user_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "unauthorized", "message": "Identificador de usuário inválido."},
-        )
-    return AuthenticatedUser(
-        id=user_id,
-        email=x_user_email.strip().lower() if x_user_email else None,
+async def get_current_user(
+    _token: Annotated[None, Depends(require_internal_token)],
+    user_id: Annotated[str | None, Header(alias=USER_ID_HEADER)] = None,
+    email: Annotated[str | None, Header(alias=USER_EMAIL_HEADER)] = None,
+    session_id: Annotated[str | None, Header(alias=SESSION_ID_HEADER)] = None,
+) -> CurrentUser:
+    """Só confia nos headers de usuário quando o token prova que vieram do gateway"""
+    if user_id is None or not _USER_ID.fullmatch(user_id) or int(user_id) > _MAX_BIGINT:
+        raise UnauthorizedError()
+    if not email or len(email) > _MAX_EMAIL_LENGTH:
+        raise UnauthorizedError()
+    sid: str | None = None
+    if session_id:
+        try:
+            sid = str(uuid.UUID(session_id))
+        except ValueError:
+            raise UnauthorizedError() from None
+    return CurrentUser(id=int(user_id), email=email, session_id=sid)
+
+
+InternalTokenDep = Annotated[None, Depends(require_internal_token)]
+CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
+
+
+def internal_router(prefix: str = "/internal", *, tags: list[str] | None = None) -> APIRouter:
+    """Exige o token em toda rota de API (@router.get/post); add_route e mount ficam de fora"""
+    return APIRouter(
+        prefix=prefix,
+        tags=list(tags or ["internal"]),
+        dependencies=[Depends(require_internal_token)],
     )
