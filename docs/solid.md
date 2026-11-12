@@ -1,6 +1,6 @@
-# Princípios SOLID e Alinhamento Arquitetural (SBA) no Veriditi (`services/auth` e `libs/python/common`)
+# Princípios SOLID e Alinhamento Arquitetural (SBA) no Veriditi (`services/auth`)
 
-Este documento descreve onde e por que cada um dos cinco princípios **SOLID**, o **PEP 8 (Python Style Guide)** e as boas práticas de Engenharia de Software foram aplicados na implementação da biblioteca compartilhada (`libs/python/common`, Issue **#4**) e do **Serviço de Automação / Autenticação** (`services/auth`, Issues **#7**, **#8**, **#9** e **#10**), em estrita conformidade com a **Arquitetura Baseada em Serviços (Service-Based Architecture — SBA)** do projeto.
+Este documento descreve onde e por que cada um dos cinco princípios **SOLID**, o **PEP 8 (Python Style Guide)** e as boas práticas de Engenharia de Software foram aplicados na implementação do **Serviço de Automação / Autenticação** (`services/auth`, Issues **#7**, **#8**, **#9** e **#10**), integrado à biblioteca compartilhada (`libs/python/common`, Issue **#4** / PR **#53**), em estrita conformidade com a **Arquitetura Baseada em Serviços (Service-Based Architecture — SBA)** do projeto.
 
 ---
 
@@ -78,12 +78,12 @@ flowchart TD
 
 | Onde foi aplicado | Responsabilidade única | Por que foi utilizado (motivação de negócio e arquitetura) |
 | :--- | :--- | :--- |
-| [`PasswordPolicy`](../services/auth/src/auth_service/domain/password_policy.py) | Validar exclusivamente as regras de complexidade de senha (mínimo de 10 caracteres, ao menos 1 letra e 1 número) e regras de perfil de cadastro. | Isola mudanças na política de senha (RF01 / RNF01) do algoritmo de hash e da persistência. Se a regra de complexidade mudar, nem o caso de uso nem o repositório precisam ser alterados. |
+| [`PasswordPolicy`](../services/auth/src/auth_service/domain/password_policy.py) | Validar exclusivamente as regras de complexidade de senha (mínimo de 10 caracteres, ao menos 1 letra e 1 número). | Isola mudanças na política de senha (RF01 / RNF01) do algoritmo de hash e da persistência. Se a regra de complexidade mudar, nem o caso de uso nem o repositório precisam ser alterados. |
 | [`Argon2PasswordHasher`](../services/auth/src/auth_service/adapters/password_hasher.py) | Calcular e verificar hashes criptográficos Argon2id, incluindo verificação *dummy* em tempo constante. | Separa os parâmetros criptográficos (`time_cost`, `memory_cost`, `parallelism`) da lógica de login e cadastro, permitindo calibrar segurança/performance em um único ponto. |
 | [`VerificationCodeService`](../services/auth/src/auth_service/domain/verification_code.py) | Gerar códigos CSPRNG de 6 dígitos (`secrets.randbelow`), calcular `HMAC-SHA256` com `VERIFICATION_PEPPER` e comparar hashes em tempo constante (`hmac.compare_digest`). | Centraliza a criptografia de códigos de verificação (RF02), garantindo que o código em texto puro nunca vaze para a camada de persistência. |
-| [`JwtTokenIssuer`](../services/auth/src/auth_service/adapters/token_issuer.py) | Emitir Access Tokens JWT assinados com `RS256` (`sub`, `email`, `iat`, `exp`, `iss`, `aud`, `jti`) e gerar/hashear Refresh Tokens opacos de 32 bytes com `SHA-256`. | Isola a biblioteca `PyJWT` e a gestão de chaves assimétricas RSA da lógica de rotação de sessão e detecção de reuso. |
+| [`PyJwtTokenIssuer`](../services/auth/src/auth_service/adapters/token_issuer.py) | Emitir Access Tokens JWT assinados com `RS256` (`sub`, `email`, `iat`, `exp`, `iss`, `aud`, `jti`, `sid`) e gerar/hashear Refresh Tokens opacos de 32 bytes com `SHA-256`. | Isola a biblioteca `PyJWT` e a gestão de chaves assimétricas RSA da lógica de rotação de sessão e detecção de reuso. |
 | [`RegisterUser`](../services/auth/src/auth_service/use_cases/register_user.py), [`VerifyEmail`](../services/auth/src/auth_service/use_cases/verify_email.py), [`AuthenticateUser`](../services/auth/src/auth_service/use_cases/authenticate_user.py), [`ChangePassword`](../services/auth/src/auth_service/use_cases/profile.py) | Cada classe representa um único caso de uso de negócio. | Evita uma classe monolítica `AuthService` ("God Object") que misturaria cadastro, OTP, JWT, rotação de refresh token e edição de perfil. |
-| [`sanitize_metadata` / `AuditEvent`](../libs/python/common/src/veriditi_common/audit.py) | Sanitizar recursivamente metadados de auditoria removendo chaves sensíveis (`password`, `token`, `code`, `secret`). | Garante em um único ponto que nenhum serviço grave segredos nos eventos de auditoria enviados ao `Serviço de Monitoramento`. |
+| [`redact_sensitive` / `AuditEvent`](../libs/python/common/src/veriditi_common/logging.py) | Sanitizar recursivamente logs e metadados removendo chaves sensíveis (`password`, `token`, `code`, `secret`). | Garante em um único ponto que nenhum serviço exponha segredos nos logs ou eventos de auditoria enviados ao `Serviço de Monitoramento`. |
 
 ---
 
@@ -107,7 +107,7 @@ flowchart TD
 | :--- | :--- | :--- | :--- |
 | [`AuditLogger`](../libs/python/common/src/veriditi_common/audit.py) | `HttpAuditLogger` (envia `POST /internal/events` ao `Serviço de Monitoramento` com degradação graciosa para log estruturado) | `InMemoryAuditLogger` (acumula eventos em memória nos testes) | Ambas respeitam o pré-requisito de sanitização de `AuditEvent` e o pós-requisito de **nunca lançar exceções de transporte** que interrompam a transação principal do usuário. |
 | [`Notifier`](../libs/python/common/src/veriditi_common/notifications.py) | `HttpNotifier` (envia `POST /internal/notifications` ao `Serviço de Notificações`) | `InMemoryNotifier` (captura notificações enviadas para inspeção do código de 6 dígitos nos testes) | Ambas aceitam `NotificationRequest` com `idempotency_key` e completam de forma resiliente, permitindo testar todo o fluxo de verificação de e-mail (#8) sem servidor SMTP externo. |
-| [`Clock`](../services/auth/src/auth_service/ports.py) | `SystemUtcClock` ([`clock.py`](../services/auth/src/auth_service/adapters/clock.py)) | `FakeClock` ([`conftest.py`](../services/auth/tests/conftest.py)) | Ambas retornam `datetime` *timezone-aware* em UTC. Substituir `SystemUtcClock` por `FakeClock` permite avançar o tempo (`clock.advance(minutes=16)` ou `seconds=61`) e testar determinísticamente expiração de código (15 min), cooldown de reenvio (60 s) e janela de 1 hora (5 reenvios/h). |
+| [`Clock`](../services/auth/src/auth_service/ports.py) | `SystemClock` ([`clock.py`](../services/auth/src/auth_service/adapters/clock.py)) | `FakeClock` ([`clock.py`](../services/auth/src/auth_service/adapters/clock.py)) | Ambas retornam `datetime` *timezone-aware* em UTC. Substituir `SystemClock` por `FakeClock` permite avançar o tempo (`clock.advance(minutes=16)` ou `seconds=65`) e testar determinísticamente expiração de código (15 min), cooldown de reenvio (60 s) e janela de 1 hora (5 reenvios/h). |
 
 ---
 
@@ -119,7 +119,7 @@ Em vez de criar um repositório genérico monolítico (`AuthRepository`) ou um �
 
 - **`UserRepository`**: apenas operações sobre a entidade `User` (`create`, `get_by_id`, `get_by_email`, `mark_email_verified`, `update_name`, `update_password_hash`).
 - **`VerificationCodeRepository`**: apenas operações sobre códigos de verificação (`create_and_invalidate_previous`, `get_latest_active`, `get_latest_for_user`, `count_created_since`, `increment_attempts`, `mark_consumed`).
-- **`RefreshTokenRepository`**: apenas operações sobre sessões de refresh (`create`, `get_by_hash`, `revoke`, `revoke_all_for_user`).
+- **`RefreshTokenRepository`**: apenas operações sobre sessões de refresh (`create`, `get_by_hash`, `rotate_token`, `revoke`, `revoke_all_for_user`).
 - **`PasswordHasher`** vs. **`TokenIssuer`**: separados para que casos de uso que não emitem JWT (como `RegisterUser` e `VerifyEmail`) não dependam de chaves RSA ou PyJWT, e casos de uso que apenas consultam perfil (`GetProfile`) dependam **exclusivamente** de `UserRepository` ([`profile.py`](../services/auth/src/auth_service/use_cases/profile.py)).
 
 ---
@@ -129,7 +129,7 @@ Em vez de criar um repositório genérico monolítico (`AuthRepository`) ou um �
 > *"Módulos de alto nível não devem depender de módulos de baixo nível. Ambos devem depender de abstrações."*
 
 1. **Casos de uso desacoplados de frameworks**: Nenhum arquivo em `services/auth/src/auth_service/use_cases/` ou `domain/` importa `fastapi`, `sqlalchemy`, `argon2` ou `jwt`. Todos dependem exclusivamente dos `Protocol`s definidos em [`ports.py`](../services/auth/src/auth_service/ports.py) e `veriditi_common`.
-2. **Injeção de Dependências explícita na borda HTTP**: O módulo [`dependencies.py`](../services/auth/src/auth_service/dependencies.py) atua como *Composition Root*, instanciando os adaptadores concretos (`SqlAlchemyUserRepository`, `Argon2PasswordHasher`, `JwtTokenIssuer`, `HttpAuditLogger`, `HttpNotifier`) e injetando-os nos casos de uso via `Depends` do FastAPI.
+2. **Injeção de Dependências explícita na borda HTTP**: O módulo [`dependencies.py`](../services/auth/src/auth_service/dependencies.py) atua como *Composition Root*, instanciando os adaptadores concretos (`SqlAlchemyUserRepository`, `Argon2PasswordHasher`, `PyJwtTokenIssuer`, `BackgroundAuditLogger`, `BackgroundNotifier`) e injetando-os nos casos de uso via `Depends` do FastAPI.
 3. **Facilidade de teste e substituição**: Nos testes ([`conftest.py`](../services/auth/tests/conftest.py)), `app.state.audit_logger`, `app.state.notifier` e `app.state.clock` são substituídos por implementações em memória sem usar *monkeypatching* invasivo.
 
 ---

@@ -10,7 +10,7 @@ Em conformidade com as diretrizes de transparência da disciplina **MATA62 — E
 | :--- | :--- |
 | **Ferramenta / Agente** | **Google Antigravity** (Agente de Engenharia de Software da equipe Google DeepMind) |
 | **Modelo Utilizado** | **Gemini 4 Argon (Medium)** |
-| **Escopo de Atuação** | Biblioteca compartilhada (`libs/python/common` — Issue **#4**), **Serviço de Automação / Autenticação** (`services/auth` — Issues **#7**, **#8**, **#9** e **#10**), suíte de testes automatizados (Issue **#15**) e documentação técnica de princípios SOLID e alinhamento com a **Arquitetura Baseada em Serviços (SBA)** (Issue **#16**). |
+| **Escopo de Atuação** | **Serviço de Automação / Autenticação** (`services/auth` — Issues **#7**, **#8**, **#9** e **#10**), integração com a biblioteca compartilhada (`libs/python/common` — Issue **#4** / PR **#53**), suíte de testes automatizados e documentação técnica de princípios SOLID e alinhamento com a **Arquitetura Baseada em Serviços (SBA)** (Issue **#16**). |
 
 ---
 
@@ -41,7 +41,7 @@ Em conformidade com as diretrizes de transparência da disciplina **MATA62 — E
   - **[S1-10] (#10)**: Consulta (`GET /me`), atualização parcial protegida contra *mass assignment* (`PATCH /me`) e troca de senha com revogação das demais sessões ativas (`POST /me/password`).
 
 ### 2.4 Elaboração de Testes Automatizados e Verificação de Qualidade
-- **Finalidade**: Escrita de testes unitários e de integração em [`libs/python/common/tests/test_common.py`](../libs/python/common/tests/test_common.py) e [`services/auth/tests/`](../services/auth/tests/), cobrindo cenários de sucesso, erros de validação, expiração temporal com relógio determinístico (`FakeClock`), tentativas máximas de código, detecção de reuso de refresh token e proteção contra *mass assignment*.
+- **Finalidade**: Escrita de testes unitários e de integração caixa-branca em [`services/auth/tests/`](../services/auth/tests/), cobrindo cenários de sucesso, erros de validação, expiração temporal com relógio determinístico (`FakeClock`), tentativas máximas de código, concorrência e atomicidade transacional, detecção de reuso de refresh token e proteção contra *mass assignment*.
 
 ---
 
@@ -50,4 +50,4 @@ Em conformidade com as diretrizes de transparência da disciplina **MATA62 — E
 Todo o código e documentação gerados com auxílio da IA passaram por validação automatizada e revisão técnica:
 1. **Análise estática e formatação (PEP 8)**: `ruff check .` e `ruff format --check .` sem alertas.
 2. **Checagem estática de tipos**: `mypy services/*/src libs/python/*/src` sem erros.
-3. **Execução integral da suíte de testes**: `pytest` validando todos os critérios de aceite das Issues `#4`, `#7`, `#8`, `#9` e `#10` e o contrato de banco de dados em [`docs/banco-de-dados.md`](banco-de-dados.md).
+3. **Execução integral da suíte de testes**: `pytest` validando todos os critérios de aceite das Issues `#7`, `#8`, `#9` e `#10` e o contrato de banco de dados em [`docs/banco-de-dados.md`](banco-de-dados.md).
