@@ -214,5 +214,132 @@ def test_no_route_accepts_edit_methods(app: FastAPI) -> None:
     paths = app.openapi()["paths"]
     methods = {method for operations in paths.values() for method in operations}
 
-    assert set(paths[URL]) == {"post"}
+    assert set(paths[URL]) == {"get", "post"}
     assert not methods & {"put", "patch", "delete"}
+
+
+async def _post_all(client: AsyncClient, headers: Headers, *bodies: dict[str, Any]) -> None:
+    for body in bodies:
+        assert (await client.post(URL, json=body, headers=headers)).status_code == 202
+
+
+async def test_get_returns_the_stored_event(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory
+) -> None:
+    body = make_event(
+        occurred_at="2026-11-12T09:00:00.123456-03:00",
+        actor_id=42,
+        actor_ip="203.0.113.7",
+        request_id="3f2b8c1e-8a4e-4a39-9a2b-1f1e0c9d7a55",
+        resource_type="user",
+        resource_id="42",
+        metadata={"email_masked": "a***@example.com", "password": "x"},
+    )
+    await _post_all(client, auth_headers, body)
+
+    resp = await client.get(URL, headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "items": [
+            {
+                "id": 1,
+                "event_id": body["event_id"],
+                "occurred_at": "2026-11-12T12:00:00.123456Z",
+                "received_at": "2026-11-12T15:00:00.654321Z",
+                "service": "auth",
+                "action": "auth.user.registered",
+                "outcome": "success",
+                "actor_id": 42,
+                "actor_ip": "203.0.113.7",
+                "request_id": "3f2b8c1e-8a4e-4a39-9a2b-1f1e0c9d7a55",
+                "resource_type": "user",
+                "resource_id": "42",
+                "metadata": {"email_masked": "a***@example.com", "password": REDACTED},
+            }
+        ],
+        "next_cursor": None,
+    }
+
+
+async def test_get_without_metadata_returns_empty_object(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory
+) -> None:
+    await _post_all(client, auth_headers, make_event())
+
+    [item] = (await client.get(URL, headers=auth_headers)).json()["items"]
+
+    assert item["metadata"] == {}
+
+
+async def test_get_requires_internal_token(client: AsyncClient) -> None:
+    resp = await client.get(URL)
+
+    assert resp.status_code == 401
+    assert resp.json() == UNAUTHORIZED
+
+
+async def test_get_filters(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory
+) -> None:
+    await _post_all(
+        client,
+        auth_headers,
+        make_event(actor_id=1, occurred_at="2026-11-12T12:00:00Z"),
+        make_event(actor_id=2, occurred_at="2026-11-12T13:00:00Z"),
+        make_event(actor_id=1, action="auth.user.logged_in", occurred_at="2026-11-12T14:00:00Z"),
+    )
+
+    async def ids(**params: Any) -> list[int]:
+        resp = await client.get(URL, params=params, headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        return [item["id"] for item in resp.json()["items"]]
+
+    assert await ids(actor_id=1) == [1, 3]
+    assert await ids(action="auth.user.logged_in") == [3]
+    # 10:00-03:00 = 13:00Z inclusivo; 14:00Z exclusivo
+    assert await ids(**{"from": "2026-11-12T10:00:00-03:00", "to": "2026-11-12T14:00:00Z"}) == [2]
+
+
+async def test_get_paginates_by_id(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory
+) -> None:
+    await _post_all(client, auth_headers, make_event(), make_event(), make_event())
+
+    first = (await client.get(URL, params={"limit": 2}, headers=auth_headers)).json()
+    cursor = first["next_cursor"]
+    last = await client.get(URL, params={"limit": 2, "after_id": cursor}, headers=auth_headers)
+
+    assert [item["id"] for item in first["items"]] == [1, 2]
+    assert cursor == 2
+    assert [item["id"] for item in last.json()["items"]] == [3]
+    assert last.json()["next_cursor"] is None
+
+
+async def test_get_rejects_inverted_time_range(client: AsyncClient, auth_headers: Headers) -> None:
+    params = {"from": "2026-11-13T00:00:00Z", "to": "2026-11-12T00:00:00Z"}
+
+    resp = await client.get(URL, params=params, headers=auth_headers)
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "invalid_time_range"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"limit": 0},
+        {"limit": 201},
+        {"actor_id": 0},
+        {"after_id": -1},
+        {"from": "2026-11-12T00:00:00"},
+        {"action": ""},
+    ],
+    ids=["limit-0", "limit-201", "actor_id-0", "after_id-negative", "naive-from", "empty-action"],
+)
+async def test_get_rejects_invalid_query(
+    client: AsyncClient, auth_headers: Headers, params: dict[str, Any]
+) -> None:
+    resp = await client.get(URL, params=params, headers=auth_headers)
+
+    assert resp.status_code == 422

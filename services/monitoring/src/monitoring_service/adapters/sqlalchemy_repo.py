@@ -1,9 +1,11 @@
 from datetime import datetime
 from typing import Final
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from monitoring_service.domain import AuditEventFilter, StoredAuditEvent
 from monitoring_service.models import EVENT_ID_UNIQUE, AuditEventRecord
 from veriditi_common.audit import AuditEvent
 
@@ -50,3 +52,37 @@ class SqlAlchemyAuditEventRepository:
                 return False
             raise
         return True
+
+    async def search(
+        self, filters: AuditEventFilter, *, after_id: int | None, limit: int
+    ) -> list[StoredAuditEvent]:
+        stmt = select(AuditEventRecord).order_by(AuditEventRecord.id).limit(limit)
+        if after_id is not None:
+            stmt = stmt.where(AuditEventRecord.id > after_id)
+        if filters.actor_id is not None:
+            stmt = stmt.where(AuditEventRecord.actor_id == filters.actor_id)
+        if filters.action is not None:
+            stmt = stmt.where(AuditEventRecord.action == filters.action)
+        if filters.occurred_from is not None:
+            stmt = stmt.where(AuditEventRecord.occurred_at >= filters.occurred_from)
+        if filters.occurred_to is not None:
+            stmt = stmt.where(AuditEventRecord.occurred_at < filters.occurred_to)
+        return [_to_domain(record) for record in await self._session.scalars(stmt)]
+
+
+def _to_domain(record: AuditEventRecord) -> StoredAuditEvent:
+    return StoredAuditEvent(
+        id=record.id,
+        event_id=record.event_id,
+        occurred_at=record.occurred_at,
+        received_at=record.received_at,
+        service=record.service,
+        action=record.action,
+        outcome=record.outcome,
+        actor_id=record.actor_id,
+        actor_ip=record.actor_ip,
+        request_id=record.request_id,
+        resource_type=record.resource_type,
+        resource_id=record.resource_id,
+        metadata=record.metadata_ or {},
+    )

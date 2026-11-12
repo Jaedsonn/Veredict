@@ -24,3 +24,19 @@ class StoredAuditEvent:
     resource_type: str | None
     resource_id: str | None
     metadata: dict[str, JsonValue]
+
+
+@dataclass(frozen=True, slots=True)
+class AuditEventFilter:
+    """Janela semiaberta [occurred_from, occurred_to) para janelas vizinhas não repetirem evento"""
+
+    actor_id: int | None = None
+    action: str | None = None
+    occurred_from: datetime | None = None
+    occurred_to: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AuditEventPage:
+    items: list[StoredAuditEvent]
+    next_cursor: int | None

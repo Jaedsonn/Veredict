@@ -14,10 +14,13 @@ from monitoring_service.adapters.sqlalchemy_repo import (
     SqlAlchemyAuditEventRepository,
     is_duplicate_event_id,
 )
+from monitoring_service.domain import AuditEventFilter, StoredAuditEvent
 from monitoring_service.models import AuditEventRecord
 from monitoring_service.ports import AuditEventRepository
 from veriditi_common.audit import AuditEvent, AuditOutcome
 from veriditi_common.db import Database
+
+BRT = timezone(timedelta(hours=-3))
 
 
 def _event(**overrides: Any) -> AuditEvent:
@@ -51,10 +54,107 @@ async def test_add_returns_false_for_known_event_id(
     assert await repo.add(_event(), received_at=received_at) is True
 
 
+async def _search(
+    repo: AuditEventRepository,
+    filters: AuditEventFilter | None = None,
+    *,
+    after_id: int | None = None,
+    limit: int = 50,
+) -> list[StoredAuditEvent]:
+    return await repo.search(filters or AuditEventFilter(), after_id=after_id, limit=limit)
+
+
+async def test_roundtrip_keeps_microseconds_utc_and_empty_metadata(
+    repo: AuditEventRepository, received_at: datetime
+) -> None:
+    occurred = datetime(2026, 11, 12, 9, 0, 0, 123456, tzinfo=BRT)
+    event = _event(occurred_at=occurred, actor_id=42, actor_ip="203.0.113.7", request_id=uuid4())
+    await repo.add(event, received_at=received_at)
+
+    [stored] = await _search(repo)
+
+    assert stored.id == 1
+    assert stored.event_id == event.event_id
+    assert stored.occurred_at == datetime(2026, 11, 12, 12, 0, 0, 123456, tzinfo=UTC)
+    assert stored.occurred_at.tzinfo is UTC
+    assert stored.received_at == received_at
+    assert stored.outcome is AuditOutcome.SUCCESS
+    assert (stored.actor_id, stored.actor_ip) == (42, "203.0.113.7")
+    assert stored.request_id == event.request_id
+    assert stored.metadata == {}
+
+
+async def _seed(repo: AuditEventRepository, received_at: datetime) -> None:
+    hour = timedelta(hours=1)
+    base = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
+    for occurred, actor_id, action in [
+        (base, 1, "auth.user.registered"),
+        (base + hour, 2, "auth.user.registered"),
+        (base + 2 * hour, 1, "auth.user.logged_in"),
+        # Fora de ordem: a ordem do resultado é a do id, não a de occurred_at
+        (base - hour, 1, "auth.user.logged_in"),
+    ]:
+        event = _event(occurred_at=occurred, actor_id=actor_id, action=action)
+        await repo.add(event, received_at=received_at)
+
+
+@pytest.mark.parametrize(
+    ("filters", "after_id", "limit", "expected_ids"),
+    [
+        (AuditEventFilter(), None, 50, [1, 2, 3, 4]),
+        (AuditEventFilter(actor_id=1), None, 50, [1, 3, 4]),
+        (AuditEventFilter(action="auth.user.logged_in"), None, 50, [3, 4]),
+        (
+            AuditEventFilter(
+                occurred_from=datetime(2026, 11, 12, 12, 0, tzinfo=UTC),
+                occurred_to=datetime(2026, 11, 12, 14, 0, tzinfo=UTC),
+            ),
+            None,
+            50,
+            [1, 2],
+        ),
+        (
+            AuditEventFilter(occurred_from=datetime(2026, 11, 12, 10, 0, tzinfo=BRT)),
+            None,
+            50,
+            [2, 3],
+        ),
+        (AuditEventFilter(actor_id=1, action="auth.user.logged_in"), None, 50, [3, 4]),
+        (AuditEventFilter(), 2, 50, [3, 4]),
+        (AuditEventFilter(), None, 2, [1, 2]),
+        (AuditEventFilter(actor_id=99), None, 50, []),
+    ],
+    ids=[
+        "all",
+        "actor",
+        "action",
+        "from-inclusive-to-exclusive",
+        "from-offset",
+        "combined",
+        "after_id",
+        "limit",
+        "none",
+    ],
+)
+async def test_search(
+    repo: AuditEventRepository,
+    received_at: datetime,
+    filters: AuditEventFilter,
+    after_id: int | None,
+    limit: int,
+    expected_ids: list[int],
+) -> None:
+    await _seed(repo, received_at)
+
+    found = await _search(repo, filters, after_id=after_id, limit=limit)
+
+    assert [row.id for row in found] == expected_ids
+
+
 async def test_sqlite_roundtrip_keeps_microseconds_in_utc(
     db: Database, received_at: datetime
 ) -> None:
-    occurred = datetime(2026, 11, 12, 9, 0, 0, 123456, tzinfo=timezone(timedelta(hours=-3)))
+    occurred = datetime(2026, 11, 12, 9, 0, 0, 123456, tzinfo=BRT)
     event = _event(occurred_at=occurred, actor_ip="2001:db8::1", request_id=uuid4())
     async with db.session_factory() as session:
         await SqlAlchemyAuditEventRepository(session).add(event, received_at=received_at)

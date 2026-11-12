@@ -1,7 +1,7 @@
 import copy
 from datetime import datetime
 
-from monitoring_service.domain import StoredAuditEvent
+from monitoring_service.domain import AuditEventFilter, StoredAuditEvent
 from veriditi_common.audit import AuditEvent
 
 
@@ -32,3 +32,19 @@ class InMemoryAuditEventRepository:
             )
         )
         return True
+
+    async def search(
+        self, filters: AuditEventFilter, *, after_id: int | None, limit: int
+    ) -> list[StoredAuditEvent]:
+        found = [row for row in self.rows if _matches(row, filters, after_id)]
+        return sorted(found, key=lambda row: row.id)[:limit]
+
+
+def _matches(row: StoredAuditEvent, filters: AuditEventFilter, after_id: int | None) -> bool:
+    return (
+        (after_id is None or row.id > after_id)
+        and (filters.actor_id is None or row.actor_id == filters.actor_id)
+        and (filters.action is None or row.action == filters.action)
+        and (filters.occurred_from is None or row.occurred_at >= filters.occurred_from)
+        and (filters.occurred_to is None or row.occurred_at < filters.occurred_to)
+    )

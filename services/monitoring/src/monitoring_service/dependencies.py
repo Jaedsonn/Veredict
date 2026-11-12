@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from monitoring_service.adapters.sqlalchemy_repo import SqlAlchemyAuditEventRepository
 from monitoring_service.ports import AuditEventRepository
 from monitoring_service.use_cases.ingest_event import IngestAuditEvent
+from monitoring_service.use_cases.list_events import ListAuditEvents
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -30,3 +31,10 @@ def get_ingest_audit_event(request: Request, events: AuditEventRepositoryDep) ->
 
 
 IngestDep = Annotated[IngestAuditEvent, Depends(get_ingest_audit_event)]
+
+
+def get_list_audit_events(events: AuditEventRepositoryDep) -> ListAuditEvents:
+    return ListAuditEvents(events)
+
+
+ListDep = Annotated[ListAuditEvents, Depends(get_list_audit_events)]
