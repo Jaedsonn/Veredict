@@ -158,6 +158,27 @@ quebram a requisição: aparecem no log com `audit_fallback=true` e
 | `INTERNAL_API_TOKEN` | Mínimo de 16 caracteres; auth, notification e monitoring não sobem sem ele |
 | `MONITORING_URL`, `NOTIFICATION_URL` | Só no `make dev`; o compose fixa `http://monitoring:8000` e `http://notification:8000` |
 
+### Trilha de auditoria
+
+O monitoring grava os eventos do `HttpAuditLogger` em `veriditi_logs.audit_events`,
+append-only: o `veriditi_logs_writer` só tem `SELECT` e `INSERT`
+([ADR-015](docs/adr/0015-log-storage-em-database-mysql-separada.md)). As rotas são
+internas, exigem `X-Internal-Token` e não passam pelo gateway:
+
+- `POST /internal/events` responde `202 {"status":"accepted"}`, inclusive no reenvio
+  do mesmo `event_id`, que não duplica;
+- `GET /internal/events` filtra por `actor_id`, `action` e `[from, to)` e pagina por
+  `after_id` (`limit` até 200, `next_cursor` nulo na última página). No fuso, use `Z` ou
+  `%2B00:00`: um `+` cru na URL vira espaço e dá 422.
+
+```bash
+docker compose exec monitoring python -c "import os, urllib.request as u; r = u.Request('http://127.0.0.1:8000/internal/events?actor_id=42&from=2026-11-12T00:00:00Z&limit=20', headers={'X-Internal-Token': os.environ['INTERNAL_API_TOKEN']}); print(u.urlopen(r).read().decode())"
+```
+
+O `metadata` passa pela mesma redação dos logs antes de ser gravado: o valor de chave
+sensível vira `[redacted]` e a chave fica. A redação é por nome de chave, então o
+produtor não deve pôr segredo no valor de chaves neutras (`note`, `detail`).
+
 ### Web sem o backend (gateway mock)
 
 Enquanto o roteamento do API Gateway (#11) não existe, a web roda contra um mock em memória
