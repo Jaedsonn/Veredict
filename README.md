@@ -322,8 +322,17 @@ Starlette lê em latin-1, então quem precisar do e-mail Unicode faz
 `TRUSTED_PROXIES` (CIDRs separados por vírgula), lido da direita para a
 esquerda. Vazio (padrão do `make dev`): o XFF é ignorado. No compose, o padrão
 são as faixas privadas da rede do Docker, porque a web (BFF) é quem chama o
-gateway e repassa o XFF que recebeu. Isso só é confiável porque, em dev, web e
-gateway escutam só no loopback do host: ninguém de fora fala com eles. Em
+gateway e repassa o XFF que recebeu. Isso só é confiável porque, no compose, web
+e gateway escutam só no loopback do host: ninguém de fora fala com eles.
+
+Fora do Docker essa garantia não existe: o `next dev` do `make dev-web` escuta em
+`0.0.0.0` e repassa o `X-Forwarded-For` do cliente. Com `TRUSTED_PROXIES=127.0.0.1`,
+uma máquina da LAN chamaria `http://<host>:3000` com um XFF forjado e o gateway
+adotaria esse IP. No `make dev`, deixe `TRUSTED_PROXIES` vazio (o gateway usa o IP
+da conexão) ou suba a web presa ao loopback
+(`npm run dev -w @veriditi/web -- -H 127.0.0.1`) antes de confiar em `127.0.0.1`.
+
+Em
 produção, a borda (Caddy, #17) precisa **sobrescrever** o `X-Forwarded-For` com
 o IP da conexão, nunca anexar ao que o cliente mandou, senão o valor forjado
 chega intacto ao gateway através da web. O uvicorn roda com `--no-proxy-headers`
