@@ -95,6 +95,32 @@ async def test_auth_payload_with_tab_in_name_is_accepted_and_sent(
     assert b"\t" not in body
 
 
+@pytest.mark.parametrize("name", ["", " \t\r\n "], ids=["empty", "only-whitespace"])
+async def test_blank_name_is_accepted_and_greets_without_it(
+    client: AsyncClient, auth_headers: dict[str, str], sender: InMemoryEmailSender, name: str
+) -> None:
+    data = {"name": name, "code": "042137", "expires_in_minutes": 15}
+
+    resp = await client.post(URL, json=_body(data=data), headers=auth_headers)
+
+    assert resp.status_code == 202
+    [email] = sender.sent
+    assert email.text.startswith("Olá!\n")
+    assert ">Olá!</p>" in email.html
+
+
+async def test_missing_name_is_still_422(
+    client: AsyncClient, auth_headers: dict[str, str], db: Database
+) -> None:
+    data = {"code": "042137", "expires_in_minutes": 15}
+
+    resp = await client.post(URL, json=_body(data=data), headers=auth_headers)
+
+    assert resp.status_code == 422
+    assert [error["loc"] for error in resp.json()["detail"]] == [["body", "data", "name"]]
+    assert await _count(db) == 0
+
+
 async def test_email_goes_out_after_the_response(
     client: AsyncClient, auth_headers: dict[str, str], json_logs: Any
 ) -> None:

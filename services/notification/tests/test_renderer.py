@@ -22,17 +22,22 @@ def _render(template: str, data: dict[str, JsonValue], web_url: str = WEB_URL) -
 
 
 @pytest.mark.parametrize(
-    ("template", "data"),
-    [("email_verification", VERIFICATION), ("welcome", {"name": "João"})],
+    ("snapshot", "template", "data"),
+    [
+        ("email_verification", "email_verification", VERIFICATION),
+        ("welcome", "welcome", {"name": "João"}),
+        ("email_verification.no_name", "email_verification", {**VERIFICATION, "name": " \r\n "}),
+        ("welcome.no_name", "welcome", {"name": ""}),
+    ],
 )
 @pytest.mark.parametrize("part", ["txt", "html"])
 def test_bodies_match_reviewed_snapshots(
-    template: str, data: dict[str, JsonValue], part: str
+    snapshot: str, template: str, data: dict[str, JsonValue], part: str
 ) -> None:
     rendered = _render(template, data)
     body = rendered.text if part == "txt" else rendered.html
 
-    assert body == (SNAPSHOTS / f"{template}.body.{part}").read_text(encoding="utf-8")
+    assert body == (SNAPSHOTS / f"{snapshot}.body.{part}").read_text(encoding="utf-8")
 
 
 def test_subjects_are_exact() -> None:

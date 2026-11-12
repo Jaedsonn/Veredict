@@ -1,4 +1,4 @@
-Olá, {{ name }}!
+Olá{% if name %}, {{ name }}{% endif %}!
 
 Seu código de verificação do Veriditi é: {{ code }}
 

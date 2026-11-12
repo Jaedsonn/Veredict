@@ -216,7 +216,10 @@ POST /internal/notifications
   (`j***@exemplo.com`), a chave, o `message_id` ou o erro, sem o conteúdo.
 
 Templates disponíveis: `email_verification` (`name`, `code` com 6 dígitos em texto,
-`expires_in_minutes`) e `welcome` (`name`). Cada um fica em
+`expires_in_minutes`) e `welcome` (`name`). O `name` é obrigatório, mas não é recusado
+pelo conteúdo: quebras de linha e caracteres de controle viram espaço, os espaços
+repetidos colapsam e, se nada sobrar, a saudação vira "Olá!" em vez de 422 (que deixaria
+a chave do auth sem e-mail). Só acima de 120 caracteres ele dá 422. Cada um fica em
 `services/notification/src/notification_service/templates/<nome>/` com `subject.txt`,
 `body.txt` e `body.html` (este estende o `_layout.html` e é escapado). Para acrescentar
 um e-mail:

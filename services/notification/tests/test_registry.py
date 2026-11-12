@@ -82,13 +82,23 @@ def test_expires_in_minutes_is_strict_int_in_range(value: JsonValue) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["", "   ", "\r\n\t", "\x00\x7f", "\u2028", "a" * 121],
-    ids=["empty", "blank", "only-crlf-tab", "only-nul-del", "only-line-separator", "121-chars"],
+    ["", "   ", "\r\n\t", "\x00\x7f", "\u2028\u2029"],
+    ids=["empty", "blank", "only-crlf-tab", "only-nul-del", "only-line-separators"],
 )
-def test_names_empty_after_normalization_or_too_long_are_rejected(name: str) -> None:
-    [error] = _errors("email_verification", {**VALID, "name": name})
+@pytest.mark.parametrize("template", ["email_verification", "welcome"])
+def test_names_empty_after_normalization_are_accepted(template: str, name: str) -> None:
+    data = {**VALID, "name": name} if template == "email_verification" else {"name": name}
 
-    assert error["loc"] == ("name",)
+    # O template troca a saudação por "Olá!": 422 aqui deixaria a conta presa em pending
+    parsed = build_registry().parse(template, data)
+
+    assert parsed.model_dump()["name"] == ""
+
+
+def test_names_too_long_are_rejected() -> None:
+    [error] = _errors("email_verification", {**VALID, "name": "a" * 121})
+
+    assert (error["type"], error["loc"]) == ("string_too_long", ("name",))
 
 
 @pytest.mark.parametrize(

@@ -30,9 +30,10 @@ def _normalize_name(value: object) -> object:
 
 
 # 120 é o tamanho de users.name (docs/banco-de-dados.md §5.1); o BeforeValidator roda antes
+# Vazio depois de normalizar passa: o template cai no "Olá!" em vez de prender a conta em pending
 DisplayName = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=120),
+    StringConstraints(max_length=120),
     BeforeValidator(_normalize_name),
 ]
 

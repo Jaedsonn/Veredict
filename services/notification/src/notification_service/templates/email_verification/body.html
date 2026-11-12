@@ -1,7 +1,7 @@
 {% extends "_layout.html" %}
 {% block title %}Seu código de verificação Veriditi{% endblock %}
 {% block content %}
-<p style="margin:0 0 16px;font-size:16px;">Olá, {{ name }}!</p>
+<p style="margin:0 0 16px;font-size:16px;">Olá{% if name %}, {{ name }}{% endif %}!</p>
 <p style="margin:0 0 8px;font-size:16px;">Seu código de verificação do Veriditi é:</p>
 <p style="margin:0 0 16px;font-size:32px;font-weight:bold;letter-spacing:8px;font-family:'Courier New',monospace;">{{ code }}</p>
 <p style="margin:0 0 16px;font-size:14px;">O código expira em {{ expires_in_minutes }} {{ "minuto" if expires_in_minutes == 1 else "minutos" }}. Informe-o na página <a href="{{ web_url }}/verificar-email" style="color:#2563eb;">Verificar e-mail</a> para concluir o cadastro.</p>

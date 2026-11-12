@@ -1,4 +1,4 @@
-Olá, {{ name }}!
+Olá{% if name %}, {{ name }}{% endif %}!
 
 Seu e-mail foi confirmado e sua conta no Veriditi está ativa.
 
