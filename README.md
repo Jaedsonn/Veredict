@@ -49,22 +49,27 @@ web são acessíveis de fora da rede do compose.
 
 Os scripts de `docker/mysql/init` (bancos `veriditi` e `veriditi_logs`,
 usuário `migrator` e um usuário de runtime por serviço) **só rodam com o volume
-vazio**. Ao atualizar para esta versão, ou ao mudar o init, recrie o volume:
+vazio**. Ao atualizar para esta versão, ou ao mudar o init:
 
-```bash
-make reset     # docker compose down -v --remove-orphans
-make up
-```
+1. Atualize o `.env` a partir do `.env.example`. As senhas agora são por
+   usuário (`DB_MIGRATOR_PASSWORD`, `AUTH_DB_PASSWORD`,
+   `NOTIFICATION_DB_PASSWORD`, `LOGS_DB_PASSWORD`), e o compose recusa subir
+   sem elas. Quem não tinha `.env` pode rodar `make install`.
+2. Recrie o volume e suba de novo:
+
+   ```bash
+   make reset     # docker compose down -v --remove-orphans
+   make up
+   ```
+
+`make down`, `make reset` e `make logs` funcionam mesmo com o `.env` antigo
+(usam o `.env.example` como reserva), para dar para derrubar o stack anterior.
 
 Se o `mysql` ficar `unhealthy` logo na primeira subida, o init falhou (veja
-`docker compose logs mysql`, geralmente senha faltando ou com `'`/`\`): corrija
-o `.env` e rode `make reset`, porque o init não roda de novo sobre um volume já
-criado.
+`make logs`, geralmente senha faltando ou com `'`/`\`): corrija o `.env` e rode
+`make reset`, porque o init não roda de novo sobre um volume já criado.
 
-Quem já tinha `.env` precisa compará-lo com o `.env.example`: as senhas agora
-são por usuário (`DB_MIGRATOR_PASSWORD`, `AUTH_DB_PASSWORD`,
-`NOTIFICATION_DB_PASSWORD`, `LOGS_DB_PASSWORD`). O modelo de dados está em
-[`docs/banco-de-dados.md`](docs/banco-de-dados.md).
+O modelo de dados está em [`docs/banco-de-dados.md`](docs/banco-de-dados.md).
 
 ### Desenvolvimento com hot reload
 

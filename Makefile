@@ -47,14 +47,18 @@ install: ## Instala dependências e cria o .env a partir do .env.example
 up: ## Sobe o stack completo e espera todos ficarem saudáveis
 	docker compose up -d --build --wait
 
+# Parar e ler logs não depende das senhas: com o .env incompleto (ou sem .env), o compose
+# interpola com o .env.example em vez de falhar no ${VAR:?}
+compose_any = docker compose $$(docker compose config -q >/dev/null 2>&1 || echo --env-file .env.example)
+
 down: ## Para o stack (mantém o volume do MySQL)
-	docker compose down
+	$(compose_any) down
 
 reset: ## Apaga o volume do MySQL: reaplica docker/mysql/init e as migrations
-	docker compose down -v --remove-orphans
+	$(compose_any) down -v --remove-orphans
 
 logs: ## Acompanha os logs do stack
-	docker compose logs -f
+	$(compose_any) logs -f
 
 db: ## Sobe só o MySQL no Docker
 	docker compose up -d --wait mysql
