@@ -1,14 +1,12 @@
 """Casos de uso [S1-08]: Verificação de e-mail por código de 6 dígitos e reenvio (RF02, ADR-007)."""
 
-import math
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
-from auth_service.domain.entities import UserEntity
+from auth_service.domain.entities import RequestContext, UserEntity
 from auth_service.domain.errors import (
     InvalidVerificationCodeError,
-    ResendRateLimitError,
     VerificationCodeExpiredError,
     VerificationCodeTooManyAttemptsError,
 )
@@ -16,7 +14,6 @@ from auth_service.domain.verification_code import VerificationCodeService
 from auth_service.models import UserStatus, VerificationPurpose
 from auth_service.ports import Clock, UserRepository, VerificationCodeRepository
 from veriditi_common.audit import AuditEvent, AuditLogger, AuditOutcome
-from veriditi_common.middleware import RequestContext
 from veriditi_common.notifications import NotificationRequest, Notifier
 
 
@@ -64,7 +61,7 @@ class VerifyEmail:
         now = self._clock.now()
 
         user = await self._users.get_by_email(normalized_email)
-        if user is None:
+        if user is None or user.status != UserStatus.PENDING_VERIFICATION:
             raise VerificationCodeExpiredError()
 
         active_code = await self._codes.get_latest_active(
@@ -106,8 +103,8 @@ class VerifyEmail:
                     action="auth.email.verification_failed",
                     outcome=AuditOutcome.FAILURE,
                     actor_id=user.id,
-                    actor_ip=ctx.actor_ip,
-                    request_id=_parse_uuid(ctx.request_id),
+                    actor_ip=ctx.actor_ip_address,
+                    request_id=ctx.request_uuid,
                     resource_type="user",
                     resource_id=str(user.id),
                     metadata={"attempts": updated.attempts, "attempts_remaining": remaining},
@@ -117,8 +114,21 @@ class VerifyEmail:
                 raise VerificationCodeTooManyAttemptsError()
             raise InvalidVerificationCodeError(attempts_remaining=remaining)
 
-        await self._codes.mark_consumed(active_code.id, consumed_at=now)
-        verified_user = await self._users.mark_email_verified(user.id, verified_at=now)
+        # Consome o código e ativa o usuário atomicamente na mesma transação
+        consumed = await self._codes.mark_consumed(
+            active_code.id,
+            consumed_at=now,
+            max_attempts=self._code_service.max_attempts,
+            commit=False,
+        )
+        if not consumed:
+            raise VerificationCodeExpiredError()
+
+        verified_user = await self._users.mark_email_verified(
+            user.id,
+            verified_at=now,
+            commit=True,
+        )
 
         await self._notifier.send(
             NotificationRequest(
@@ -136,8 +146,8 @@ class VerifyEmail:
                 action="auth.email.verified",
                 outcome=AuditOutcome.SUCCESS,
                 actor_id=verified_user.id,
-                actor_ip=ctx.actor_ip,
-                request_id=_parse_uuid(ctx.request_id),
+                actor_ip=ctx.actor_ip_address,
+                request_id=ctx.request_uuid,
                 resource_type="user",
                 resource_id=str(verified_user.id),
             )
@@ -174,7 +184,8 @@ class ResendVerificationCode:
         normalized_email = cmd.email.strip().lower()
         now = self._clock.now()
 
-        user = await self._users.get_by_email(normalized_email)
+        # Bloqueia a linha do usuário para serializar reenvios concorrentes na mesma transação
+        user = await self._users.get_by_email(normalized_email, for_update=True)
         if user is None or user.status != UserStatus.PENDING_VERIFICATION:
             # Anti-enumeração: responde 202 sem revelar se o e-mail existe ou já está ativo (#8)
             return
@@ -186,8 +197,8 @@ class ResendVerificationCode:
         if latest is not None:
             elapsed = (now - latest.created_at).total_seconds()
             if elapsed < self._cooldown_seconds:
-                retry_after = max(1, math.ceil(self._cooldown_seconds - elapsed))
-                raise ResendRateLimitError(retry_after_seconds=retry_after)
+                # Anti-enumeração: suprime o envio mantendo 202 Accepted (#8)
+                return
 
         one_hour_ago = now - timedelta(hours=1)
         codes_last_hour = await self._codes.count_created_since(
@@ -196,7 +207,7 @@ class ResendVerificationCode:
             purpose=VerificationPurpose.EMAIL_VERIFICATION,
         )
         if codes_last_hour >= self._max_resends_per_hour:
-            raise ResendRateLimitError(retry_after_seconds=3600)
+            return
 
         raw_code = self._code_service.generate_code()
         code_hash = self._code_service.hash_code(raw_code)
@@ -230,8 +241,8 @@ class ResendVerificationCode:
                 action="auth.email.verification_resent",
                 outcome=AuditOutcome.SUCCESS,
                 actor_id=user.id,
-                actor_ip=ctx.actor_ip,
-                request_id=_parse_uuid(ctx.request_id),
+                actor_ip=ctx.actor_ip_address,
+                request_id=ctx.request_uuid,
                 resource_type="user",
                 resource_id=str(user.id),
             )
