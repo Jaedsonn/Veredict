@@ -1,6 +1,7 @@
 name: veriditi
 
-# Só mysql, mailpit (UI), gateway e web publicam porta; o resto fica na rede do compose
+# Só mysql, mailpit, gateway e web publicam porta; o resto fica na rede do compose
+# mysql e mailpit (UI e SMTP) ficam presos a 127.0.0.1
 # Nenhum serviço usa env_file: o DB_PORT do .env é o do host, aqui dentro é 3306
 # Cada par <svc>-migrate/<svc> declara a mesma image para o build acontecer uma vez só
 
@@ -66,9 +67,10 @@ services:
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
-    # SMTP 1025 só na rede interna
     ports:
       - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+      # SMTP só para o make dev s=notification fora do Docker
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 5s
@@ -150,8 +152,9 @@ services:
       DB_USER: notification_svc
       DB_PASSWORD: *notification-db-password
       INTERNAL_API_TOKEN: *internal-api-token
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      # Fixos: o SMTP_HOST/SMTP_PORT do .env são os do notification rodando fora do Docker
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-Veriditi <no-reply@veriditi.app>}
