@@ -10,6 +10,7 @@ resolution-markers = [
 members = [
     "auth-service",
     "gateway-service",
+    "monitoring-service",
     "notification-service",
     "veriditi-common",
     "veriditi-workspace",
@@ -842,6 +843,31 @@ wheels = [
 ]
 
 [[package]]
+name = "monitoring-service"
+version = "0.1.0"
+source = { editable = "services/monitoring" }
+dependencies = [
+    { name = "aiomysql" },
+    { name = "alembic" },
+    { name = "fastapi" },
+    { name = "pydantic-settings" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "veriditi-common" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiomysql", specifier = ">=0.3.2" },
+    { name = "alembic", specifier = ">=1.20.1" },
+    { name = "fastapi", specifier = ">=0.162.0" },
+    { name = "pydantic-settings", specifier = ">=2.16.2" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.7" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
+    { name = "veriditi-common", editable = "libs/python/common" },
+]
+
+[[package]]
 name = "mypy"
 version = "2.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1463,6 +1489,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "auth-service" },
     { name = "gateway-service" },
+    { name = "monitoring-service" },
     { name = "notification-service" },
     { name = "veriditi-common" },
 ]
@@ -1482,6 +1509,7 @@ dev = [
 requires-dist = [
     { name = "auth-service", editable = "services/auth" },
     { name = "gateway-service", editable = "services/gateway" },
+    { name = "monitoring-service", editable = "services/monitoring" },
     { name = "notification-service", editable = "services/notification" },
     { name = "veriditi-common", editable = "libs/python/common" },
 ]
