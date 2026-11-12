@@ -316,7 +316,7 @@ O destinatário **não** é gravado: deduplicar não precisa dele, e a auditoria
 
 O `failed` não reenvia porque a deduplicação é permanente (§14), o `HttpNotifier` não repete o POST e o reenvio do código no auth (#8/#13) gera um código novo, com chave nova. O reprocessamento fica para o outbox do #37; só um `welcome` que falhar se perde.
 
-**`pending` órfão.** Se o processo morrer entre o COMMIT da reserva e o fim do envio (SIGKILL, OOM, deploy), a linha fica `pending` para sempre e a chave fica bloqueada. Não há como retomar: destinatário e `data` não são gravados, por desenho. Mitigações: `stop_grace_period: 45s` no compose (o uvicorn espera o envio terminar), o reenvio do código no auth e esta consulta de detecção (sem índice: a tabela é pequena; o índice entra no #35/#37):
+**`pending` órfão.** Se o processo morrer entre o COMMIT da reserva e o fim do envio (SIGKILL, OOM, deploy), a linha fica `pending` para sempre e a chave fica bloqueada. Não há como retomar: destinatário e `data` não são gravados, por desenho. Mitigações: `stop_grace_period: 45s` no compose (o uvicorn espera o envio terminar, e 45 s cobrem o pior caso de 35 s: 3 tentativas × 10 s de timeout total + 3 s de espera + 2 s da auditoria), o reenvio do código no auth e esta consulta de detecção (sem índice: a tabela é pequena; o índice entra no #35/#37):
 
 ```sql
 SELECT id, idempotency_key, template, created_at

@@ -1,3 +1,4 @@
+import asyncio
 import email
 import email.policy
 import re
@@ -201,3 +202,27 @@ def test_outgoing_email_repr_hides_address_and_bodies() -> None:
     assert TO not in shown
     assert "042137" not in shown
     assert EMAIL.message_id in shown
+
+
+class SlowTransport(FakeTransport):
+    """Cada comando cabe no timeout do aiosmtplib, mas a soma não"""
+
+    async def __call__(self, message: EmailMessage, **kwargs: Any) -> None:
+        self.calls.append((message, kwargs))
+        await asyncio.sleep(1)
+
+
+async def test_whole_attempt_is_bounded_by_the_timeout() -> None:
+    transport = SlowTransport()
+
+    with pytest.raises(EmailDeliveryError) as exc:
+        await _sender(transport, timeout=0.05).send(EMAIL)
+
+    assert (exc.value.reason, exc.value.permanent, exc.value.smtp_code) == (
+        "TimeoutError",
+        False,
+        None,
+    )
+    assert exc.value.__context__ is None
+    [(_message, kwargs)] = transport.calls
+    assert kwargs["timeout"] == 0.05

@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from email.message import EmailMessage
@@ -83,16 +84,19 @@ class SmtpEmailSender:
         message = build_message(email, sender=self._sender, date=self._clock())
         password = self._password.get_secret_value() if self._username and self._password else None
         try:
-            await self._transport(
-                message,
-                hostname=self._host,
-                port=self._port,
-                username=self._username,
-                password=password,
-                # Explícito: None faria o aiosmtplib tentar o STARTTLS sozinho
-                start_tls=self._start_tls,
-                timeout=self._timeout,
-            )
+            # O timeout do aiosmtplib vale por comando; este limita a tentativa inteira
+            async with asyncio.timeout(self._timeout):
+                await self._transport(
+                    message,
+                    hostname=self._host,
+                    port=self._port,
+                    username=self._username,
+                    password=password,
+                    # Explícito: None faria o aiosmtplib tentar o STARTTLS sozinho
+                    start_tls=self._start_tls,
+                    timeout=self._timeout,
+                )
+        # TimeoutError é OSError: o estouro do total cai como transitório
         except (SMTPException, OSError) as exc:
             error = _delivery_error(exc)
         else:

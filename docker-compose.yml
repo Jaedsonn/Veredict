@@ -174,8 +174,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-Veriditi <no-reply@veriditi.app>}
       SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
-    # 3 tentativas × timeout de 10 s + 3 s de espera + auditoria;
-    # abaixo disso o SIGKILL deixa a linha pending
+    # 3 × 10 s (timeout total da tentativa) + 3 s de espera + 2 s da auditoria = 35 s; menos que isso deixa a linha pending
     stop_grace_period: 45s
     healthcheck: *ready
     depends_on:
