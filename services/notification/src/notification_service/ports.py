@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Protocol
 
@@ -7,7 +7,9 @@ from pydantic import BaseModel
 from notification_service.domain import OutgoingEmail, RenderedEmail, StoredNotification
 
 Clock = Callable[[], datetime]
+Sleep = Callable[[float], Awaitable[None]]
 MessageIdFactory = Callable[[], str]
+DeliveryTask = Callable[[], Awaitable[None]]
 
 
 class EmailRenderer(Protocol):
@@ -39,4 +41,10 @@ class NotificationRepository(Protocol):
 
     async def mark_failed(self, notification_id: int, *, attempts: int) -> bool:
         """Só sai de pending; False se a linha já não estava pending"""
+        ...
+
+
+class Scheduler(Protocol):
+    def schedule(self, task: DeliveryTask) -> None:
+        """Roda a tarefa depois da resposta; o caso de uso não sabe como"""
         ...
