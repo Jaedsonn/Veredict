@@ -135,8 +135,19 @@ async def app(
     settings: Settings,
     db: Database,
     audit: InMemoryAuditLogger,
+    sender: InMemoryEmailSender,
+    sleep: FakeSleep,
+    message_ids: MessageIdFactory,
 ) -> AsyncIterator[FastAPI]:
-    application = create_app(settings, db=db, audit_logger=audit)
+    application = create_app(
+        settings,
+        db=db,
+        audit_logger=audit,
+        email_sender=sender,
+        clock=lambda: FIXED_NOW,
+        sleep=sleep,
+        message_ids=message_ids,
+    )
 
     async with application.router.lifespan_context(application):
         yield application

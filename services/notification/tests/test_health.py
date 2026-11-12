@@ -2,10 +2,16 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from jinja2 import TemplateNotFound
 
+from notification_service import main
+from notification_service.adapters.smtp_sender import SmtpEmailSender
+from notification_service.adapters.sqlalchemy_repo import SqlAlchemyNotificationRepository
+from notification_service.catalog import WelcomeData, build_registry
 from notification_service.config import Settings
 from notification_service.main import create_app
 from notification_service.models import Base
+from notification_service.registry import TemplateRegistry, TemplateSpec
 from veriditi_common.audit import HttpAuditLogger, InMemoryAuditLogger
 from veriditi_common.db import Database
 
@@ -68,11 +74,13 @@ def test_monitoring_url_defaults_to_make_dev_port(settings: Settings) -> None:
     assert settings.monitoring_url == "http://localhost:8003"
 
 
-async def test_lifespan_creates_database_and_http_audit_logger(settings: Settings) -> None:
+async def test_lifespan_creates_database_smtp_and_http_audit_logger(settings: Settings) -> None:
     app = create_app(settings.model_copy(update={"monitoring_url": "http://monitoring.test"}))
 
+    assert isinstance(app.state.email_sender, SmtpEmailSender)
     async with app.router.lifespan_context(app):
         assert isinstance(app.state.db, Database)
+        assert isinstance(app.state.notifications, SqlAlchemyNotificationRepository)
         assert isinstance(app.state.audit_logger, HttpAuditLogger)
         assert not app.state.http.is_closed
 
@@ -88,3 +96,21 @@ async def test_injected_audit_logger_and_database_are_kept(
     async with app.router.lifespan_context(app):
         assert app.state.audit_logger is audit
         assert app.state.db is db
+
+
+def test_registered_template_without_files_fails_at_startup(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def registry_with_missing_folder() -> TemplateRegistry:
+        return TemplateRegistry([TemplateSpec("password_reset", WelcomeData)])
+
+    monkeypatch.setattr(main, "build_registry", registry_with_missing_folder)
+
+    with pytest.raises(TemplateNotFound, match="password_reset"):
+        create_app(settings)
+
+
+def test_default_registry_is_wired(settings: Settings) -> None:
+    app = create_app(settings)
+
+    assert app.state.registry.names == build_registry().names
