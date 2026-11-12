@@ -578,3 +578,23 @@ async def test_body_limit_error_is_not_upstream_error(
         await _forward(proxy, request)
 
     assert exc.value.status_code == 413
+
+
+class FailingStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b'{"detail":'
+        raise httpx.ReadError("caiu")
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def test_read_error_on_401_body_is_unavailable(
+    proxy: ReverseProxy, upstream: Recorder
+) -> None:
+    upstream.respond = lambda r: httpx.Response(401, stream=FailingStream())
+
+    with pytest.raises(UpstreamUnavailableError) as exc:
+        await _forward(proxy, _request())
+
+    assert exc.value.error_type == "ReadError"

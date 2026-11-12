@@ -1,25 +1,42 @@
+import io
+import json
+import logging
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import unquote
 
 import jwt
 import pytest
+import respx
+import structlog
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from starlette.types import Message
 
+from gateway_service.adapters.token_bucket import InMemoryTokenBucket
 from gateway_service.config import Settings
 from gateway_service.domain import InvalidTokenError, Principal, RateDecision, RateLimit
 from gateway_service.main import create_app
+from veriditi_common.logging import configure_logging
 
 ISSUER = "veriditi-auth"
 AUDIENCE = "veriditi"
 USER_ID = 42
 EMAIL = "ana@exemplo.com"
 
+TOKEN = "test-internal-token-0123456789"
+CLIENT_IP = "203.0.113.7"
+AUTH = "http://auth.test"
+
 TokenFactory = Callable[..., str]
+JsonLogs = Callable[[], list[dict[str, Any]]]
+ClientFactory = Callable[[str], AbstractAsyncContextManager[AsyncClient]]
 
 
 @dataclass(frozen=True)
@@ -129,11 +146,121 @@ def make_token(rsa_keys: RsaKeys) -> TokenFactory:
 
 
 @pytest.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    settings = Settings(_env_file=None, auth_url="http://auth.test")  # type: ignore[call-arg]
-    app = create_app(settings=settings)
+def settings(rsa_keys: RsaKeys) -> Settings:
+    return Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        auth_url=AUTH,
+        internal_api_token=TOKEN,  # type: ignore[arg-type]
+        jwt_public_key=rsa_keys.public_pem_escaped,
+        trusted_proxies="10.0.0.0/8",  # type: ignore[arg-type]
+        web_url="http://web.test",
+    )
 
-    async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
+
+@pytest.fixture
+async def app(settings: Settings, fake_clock: FakeClock) -> AsyncIterator[FastAPI]:
+    application = create_app(settings, rate_limiter=InMemoryTokenBucket(clock=fake_clock))
+    async with application.router.lifespan_context(application):
+        yield application
+
+
+@pytest.fixture
+def client_from(app: FastAPI) -> ClientFactory:
+    """Cliente com outro IP de origem (o peer da conexão)"""
+
+    def factory(ip: str) -> AbstractAsyncContextManager[AsyncClient]:
+        transport = ASGITransport(app=app, client=(ip, 50000))
+        return AsyncClient(transport=transport, base_url="http://gateway.test")
+
+    return factory
+
+
+@pytest.fixture
+async def client(client_from: ClientFactory) -> AsyncIterator[AsyncClient]:
+    async with client_from(CLIENT_IP) as ac:
+        yield ac
+
+
+@pytest.fixture
+def auth_mock() -> Iterator[respx.MockRouter]:
+    with respx.mock(base_url=AUTH, assert_all_called=False) as mock:
+        yield mock
+
+
+@dataclass(frozen=True)
+class RawResponse:
+    status: int
+    headers: dict[str, str]
+    body: bytes
+
+
+async def raw_request(
+    app: FastAPI,
+    method: str,
+    raw_path: bytes,
+    headers: Sequence[tuple[bytes, bytes]] = (),
+) -> RawResponse:
+    """Scope montado à mão: o httpx normalizaria .. e %2e no cliente"""
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": unquote(raw_path.decode("latin-1")),
+        "raw_path": raw_path,
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(b"host", b"gateway.test"), *headers],
+        "client": (CLIENT_IP, 50000),
+        "server": ("gateway.test", 80),
+        "state": {},
+    }
+    sent: list[Message] = []
+    done = False
+
+    async def receive() -> Message:
+        nonlocal done
+        if done:
+            return {"type": "http.disconnect"}
+        done = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await app(scope, receive, send)
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    return RawResponse(
+        start["status"],
+        {k.decode(): v.decode() for k, v in start["headers"]},
+        body,
+    )
+
+
+def _reset_logging() -> None:
+    root = logging.getLogger()
+    for handler in [h for h in root.handlers if h.name == "veriditi"]:
+        root.removeHandler(handler)
+    root.setLevel(logging.WARNING)
+    structlog.reset_defaults()
+
+
+@pytest.fixture
+def reset_logging() -> Iterator[None]:
+    """Desfaz o configure_logging, que mexe no root logger e no structlog"""
+    yield
+    _reset_logging()
+
+
+@pytest.fixture
+def json_logs(reset_logging: None) -> JsonLogs:
+    """Saída real com redação; peça depois do app, porque o create_app reconfigura o logging"""
+    stream = io.StringIO()
+    configure_logging("gateway", stream=stream, level="DEBUG")
+
+    def read() -> list[dict[str, Any]]:
+        return [json.loads(line) for line in stream.getvalue().splitlines()]
+
+    return read
