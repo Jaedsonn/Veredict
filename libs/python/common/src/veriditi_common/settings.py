@@ -1,6 +1,12 @@
-from pydantic import SecretStr
+from typing import Literal
+
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
+
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+
+_MIN_TOKEN_LENGTH = 16
 
 
 class BaseServiceSettings(BaseSettings):
@@ -10,6 +16,35 @@ class BaseServiceSettings(BaseSettings):
 
     service_name: str
     debug: bool = False
+    log_level: LogLevel = "INFO"
+    # Opcional aqui porque os *-migrate e o Alembic não o recebem; o create_app o exige
+    internal_api_token: SecretStr | None = None
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _upper_log_level(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
+
+    @field_validator("internal_api_token", mode="before")
+    @classmethod
+    def _empty_token_is_missing(cls, value: object) -> object:
+        """INTERNAL_API_TOKEN= vazio conta como ausente, não como token curto"""
+        return None if value == "" else value
+
+    @field_validator("internal_api_token")
+    @classmethod
+    def _token_min_length(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value()) < _MIN_TOKEN_LENGTH:
+            raise ValueError(
+                f"INTERNAL_API_TOKEN precisa de ao menos {_MIN_TOKEN_LENGTH} caracteres"
+            )
+        return value
+
+    @property
+    def internal_token(self) -> SecretStr:
+        if self.internal_api_token is None:
+            raise RuntimeError("INTERNAL_API_TOKEN não definido")
+        return self.internal_api_token
 
 
 class ServiceSettings(BaseServiceSettings):
