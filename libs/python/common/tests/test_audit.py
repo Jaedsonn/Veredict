@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from collections.abc import Callable
@@ -323,3 +324,27 @@ def test_request_id_defaults_to_current_request() -> None:
         assert _event(request_id=None).request_id is None
     with bound_contextvars(request_id="nao-e-uuid"):
         assert _event().request_id is None
+
+
+async def test_record_after_drain_is_delivered_directly() -> None:
+    audit = InMemoryAuditLogger()
+    app = FastAPI()
+    app.state.audit_logger = audit
+    spawned: list[asyncio.Task[None]] = []
+
+    @app.post("/n", status_code=202)
+    async def n(logger: AuditLoggerDep) -> dict[str, str]:
+        async def later() -> None:
+            await asyncio.sleep(0.01)
+            await logger.record(_event(action="auth.user.late", outcome="failure"))
+
+        spawned.append(asyncio.get_running_loop().create_task(later()))
+        return {}
+
+    app.add_middleware(RequestContextMiddleware)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        assert (await client.post("/n")).status_code == 202
+    await asyncio.gather(*spawned)
+
+    assert audit.actions() == ["auth.user.late"]

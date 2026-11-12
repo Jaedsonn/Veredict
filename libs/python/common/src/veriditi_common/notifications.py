@@ -8,7 +8,7 @@ from fastapi import Depends, Request
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, JsonValue, SecretStr
 
 from veriditi_common.logging import get_logger, mask_email
-from veriditi_common.middleware import REQUEST_ID_HEADER, current_request_id, defer
+from veriditi_common.middleware import REQUEST_ID_HEADER, current_request_id, try_defer
 from veriditi_common.security import INTERNAL_TOKEN_HEADER
 
 NOTIFICATIONS_PATH: Final = "/internal/notifications"
@@ -100,7 +100,9 @@ class BackgroundNotifier:
         self._http_request = http_request
 
     async def send(self, request: NotificationRequest) -> None:
-        defer(self._http_request, self._inner.send, request)
+        # Chamado depois da drenagem (ex.: task solta), envia já: o inner nunca levanta
+        if not try_defer(self._http_request, self._inner.send, request):
+            await self._inner.send(request)
 
 
 def get_notifier(request: Request) -> Notifier:

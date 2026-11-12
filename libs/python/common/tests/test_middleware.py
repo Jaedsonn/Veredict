@@ -21,6 +21,7 @@ from veriditi_common.middleware import (
     client_ip,
     current_request_id,
     defer,
+    try_defer,
 )
 
 JsonLogs = Callable[[], list[dict[str, Any]]]
@@ -273,3 +274,21 @@ async def test_complete_response_is_not_truncated(json_logs: JsonLogs) -> None:
 
     [access] = [e for e in json_logs() if e["event"] == "request_finished"]
     assert "truncated" not in access
+
+
+async def test_defer_after_drain_raises() -> None:
+    late: list[Request] = []
+    app = FastAPI()
+
+    @app.get("/x")
+    async def x(request: Request) -> None:
+        late.append(request)
+
+    app.add_middleware(RequestContextMiddleware)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        await client.get("/x")
+
+    with pytest.raises(RuntimeError, match="drenada"):
+        defer(late[0], asyncio.sleep, 0)
+    assert try_defer(late[0], asyncio.sleep, 0) is False

@@ -25,7 +25,7 @@ from veriditi_common.middleware import (
     MAX_IP_LENGTH,
     REQUEST_ID_HEADER,
     current_request_id,
-    defer,
+    try_defer,
 )
 from veriditi_common.security import INTERNAL_TOKEN_HEADER
 
@@ -158,7 +158,9 @@ class BackgroundAuditLogger:
         self._request = request
 
     async def record(self, event: AuditEvent) -> None:
-        defer(self._request, self._inner.record, event)
+        # Chamado depois da drenagem (ex.: task solta), envia já: o inner nunca levanta
+        if not try_defer(self._request, self._inner.record, event):
+            await self._inner.record(event)
 
 
 def get_audit_logger(request: Request) -> AuditLogger:

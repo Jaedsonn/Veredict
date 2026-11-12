@@ -23,6 +23,15 @@ _DEFERRED_KEY: Final = "veriditi_deferred"
 
 DeferredTask = Callable[[], Awaitable[None]]
 
+
+class _DeferredQueue:
+    """Fila da requisição; fechada depois de drenada, para nada entrar sem rodar"""
+
+    def __init__(self) -> None:
+        self.tasks: list[DeferredTask] = []
+        self.closed = False
+
+
 log = get_logger(__name__)
 
 
@@ -37,21 +46,33 @@ def _request_id_from(headers: Headers) -> str:
     return str(uuid.uuid4())
 
 
+def try_defer(request: Request, func: Callable[..., Awaitable[None]], *args: Any) -> bool:
+    """False se a fila já foi drenada; quem chama decide o que fazer com a tarefa"""
+    queue: _DeferredQueue | None = request.scope.get("state", {}).get(_DEFERRED_KEY)
+    if queue is None:
+        raise RuntimeError("RequestContextMiddleware ausente: a tarefa adiada nunca rodaria")
+    if queue.closed:
+        return False
+    queue.tasks.append(functools.partial(func, *args))
+    return True
+
+
 def defer(request: Request, func: Callable[..., Awaitable[None]], *args: Any) -> None:
     """Roda depois da resposta, inclusive de erro, porque o handler descarta as BackgroundTasks"""
-    pending: list[DeferredTask] | None = request.scope.get("state", {}).get(_DEFERRED_KEY)
-    if pending is None:
-        raise RuntimeError("RequestContextMiddleware ausente: a tarefa adiada nunca rodaria")
-    pending.append(functools.partial(func, *args))
+    if not try_defer(request, func, *args):
+        raise RuntimeError("A fila de tarefas adiadas desta requisição já foi drenada")
 
 
-async def _run_deferred(pending: list[DeferredTask]) -> None:
-    while pending:
-        task = pending.pop(0)
-        try:
-            await task()
-        except Exception:
-            log.exception("deferred_task_failed")
+async def _run_deferred(queue: _DeferredQueue) -> None:
+    try:
+        while queue.tasks:
+            task = queue.tasks.pop(0)
+            try:
+                await task()
+            except Exception:
+                log.exception("deferred_task_failed")
+    finally:
+        queue.closed = True
 
 
 # Precisa ser o último add_middleware do app, para ficar por fora do CORS e dos demais
@@ -72,7 +93,7 @@ class RequestContextMiddleware:
         response_started = False
         # Fim do corpo, não do app: as BackgroundTasks rodam depois e não contam na latência
         finished_at: float | None = None
-        pending: list[DeferredTask] = []
+        pending = _DeferredQueue()
         scope.setdefault("state", {})[_DEFERRED_KEY] = pending
 
         async def send_with_request_id(message: Message) -> None:
