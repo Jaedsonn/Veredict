@@ -66,6 +66,8 @@ class AuditEvent(BaseModel):
     outcome: AuditOutcome
     actor_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
     actor_ip: IPvAnyAddress | None = None
+    # Modelo de produtor: o #5 valida a entrada com request_id obrigatório (nulo explícito),
+    # senão um corpo sem a chave herdaria o request_id do próprio POST /internal/events
     request_id: UUID | None = Field(default_factory=_request_id_from_context)
     resource_type: str | None = Field(default=None, min_length=1, max_length=40)
     resource_id: str | None = Field(default=None, min_length=1, max_length=64)
