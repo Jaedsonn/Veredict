@@ -23,6 +23,14 @@ veriditi/
 └── pyproject.toml            # uv workspace (um único uv.lock)
 ```
 
+## Documentação
+
+| Documento | Conteúdo |
+| --------- | -------- |
+| [Requisitos e escopo](docs/requisitos.md) | RF01–RF21, RNF01–RNF08, escopo da Sprint 1 (30%) e rastreabilidade |
+| [ADRs](docs/adr/README.md) | Decisões de arquitetura e desvios em relação ao documento original |
+| [Banco de dados](docs/banco-de-dados.md) | Modelo de dados, posse por serviço e privilégios |
+
 ## Pré-requisitos
 
 Node 22+, [uv](https://docs.astral.sh/uv/), Docker com Compose.
@@ -118,22 +126,3 @@ npm run dev:web        # terminal 2 — http://localhost:3000 (usa GATEWAY_URL, 
 `MOCK_ACCESS_TTL_S=20 npm run mock:gateway` encurta o access token para testar a renovação de sessão.
 
 O mock usa a mesma porta 8080 do gateway do compose: pare o stack (`make down`) antes de rodá-lo.
-
-## Criando um novo serviço ( Leia isso se você é backend ou está trabalhando no backend)
-
-1. Copie `services/notification` (serviço com banco ainda sem tabela) ou
-   `services/gateway` (sem banco) para `services/<nome>` e renomeie o pacote
-   (`<nome>-service` / `<nome>_service`) no `pyproject.toml`, no `Dockerfile`
-   e nos imports.
-2. Com banco: em `migrations/env.py`, troque `VERSION_TABLE` para
-   `alembic_version_<nome>`. A migration que cria a primeira tabela também
-   faz o GRANT ao usuário de runtime, e só então o `/health/ready` passa a
-   receber a sessão (`build_health_router(get_session)`).
-3. Registre o serviço:
-   - `dependencies` e `[tool.uv.sources]` do `pyproject.toml` da raiz (`uv sync`);
-   - `SERVICES`, `PORT_<nome>` e, com banco, `DB_USER_<nome>`, `DB_PASS_<nome>`
-     (e `DB_NAME_<nome>` fora do `veriditi`) no `Makefile`;
-   - matriz `images` do `.github/workflows/ci.yml`;
-   - `<nome>-migrate` e `<nome>` no `docker-compose.yml`.
-4. Com banco: crie o usuário de runtime em `docker/mysql/init/02-service-users.sh`
-   e a senha no `.env.example`.
