@@ -38,6 +38,11 @@ def _app(seen: dict[str, Any] | None = None) -> FastAPI:
         background_tasks.add_task(lambda: seen.__setitem__("task", current_request_id()))
         return {"ok": "1"}
 
+    @app.get("/slow-task")
+    async def slow_task(background_tasks: BackgroundTasks) -> dict[str, str]:
+        background_tasks.add_task(asyncio.sleep, 0.3)
+        return {"ok": "1"}
+
     @app.get("/boom")
     async def boom() -> None:
         raise RuntimeError("explodiu")
@@ -232,3 +237,10 @@ async def test_client_ip_ignores_client_host_that_is_not_an_ip() -> None:
         resp = await client.get("/ip")
 
     assert resp.json() == {"ip": None}
+
+
+async def test_duration_stops_at_response_body_not_background_tasks(json_logs: JsonLogs) -> None:
+    await _get("/slow-task")
+
+    [line] = [e for e in json_logs() if e["event"] == "request_finished"]
+    assert line["duration_ms"] < 300

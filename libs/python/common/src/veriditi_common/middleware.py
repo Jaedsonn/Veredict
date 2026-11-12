@@ -70,16 +70,20 @@ class RequestContextMiddleware:
         started_at = time.perf_counter()
         status_code = 500
         response_started = False
+        # Fim do corpo, não do app: as BackgroundTasks rodam depois e não contam na latência
+        finished_at: float | None = None
         pending: list[DeferredTask] = []
         scope.setdefault("state", {})[_DEFERRED_KEY] = pending
 
         async def send_with_request_id(message: Message) -> None:
-            nonlocal status_code, response_started
+            nonlocal status_code, response_started, finished_at
             if message["type"] == "http.response.start":
                 response_started = True
                 status_code = message["status"]
                 MutableHeaders(scope=message)[REQUEST_ID_HEADER] = rid
             await send(message)
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                finished_at = time.perf_counter()
 
         with structlog.contextvars.bound_contextvars(request_id=rid):
             try:
@@ -98,7 +102,9 @@ class RequestContextMiddleware:
                     method=scope["method"],
                     path=path,
                     status_code=status_code,
-                    duration_ms=round((time.perf_counter() - started_at) * 1000, 2),
+                    duration_ms=round(
+                        ((finished_at or time.perf_counter()) - started_at) * 1000, 2
+                    ),
                 )
                 await _run_deferred(pending)
 
