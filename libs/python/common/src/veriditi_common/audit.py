@@ -38,7 +38,8 @@ class AuditOutcome(StrEnum):
 class AuditEvent(BaseModel):
     """Espelha o DDL de veriditi_logs.audit_events (docs/banco-de-dados.md §5.5)"""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # O erro de validação não repete o metadata, que pode trazer senha
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     event_id: UUID = Field(default_factory=uuid4)
     occurred_at: AwareDatetime = Field(default_factory=lambda: datetime.now(UTC))

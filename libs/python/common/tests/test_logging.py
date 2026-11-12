@@ -6,8 +6,13 @@ from datetime import datetime
 from typing import Any
 
 import pytest
+import sqlalchemy as sa
+from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from structlog.contextvars import bound_contextvars
 
+from veriditi_common.audit import AuditEvent
+from veriditi_common.db import Database
 from veriditi_common.logging import (
     REDACTED,
     SENSITIVE_KEYS,
@@ -142,3 +147,43 @@ def test_exception_does_not_leak_locals(json_logs: JsonLogs) -> None:
 )
 def test_mask_email(email: str, masked: str) -> None:
     assert mask_email(email) == masked
+
+
+def test_exception_message_is_hidden_but_type_and_frames_stay(json_logs: JsonLogs) -> None:
+    try:
+        AuditEvent(
+            service="auth",
+            action="notification.x.y",
+            outcome="success",
+            metadata={"password": "hunter2"},
+        )
+    except ValidationError:
+        get_logger("t").exception("deu_ruim")
+
+    output = json.dumps(json_logs())
+    assert "hunter2" not in output
+    [stack] = json_logs()[0]["exception"]
+    assert stack["exc_type"] == "ValidationError"
+    assert stack["exc_value"] == REDACTED
+    assert stack["frames"]
+
+
+async def test_sql_parameters_do_not_reach_the_log(json_logs: JsonLogs) -> None:
+    metadata = sa.MetaData()
+    table = sa.Table("t", metadata, sa.Column("email", sa.String(50), unique=True))
+    db = Database("sqlite+aiosqlite:///:memory:")
+    try:
+        async with db.engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
+            await conn.execute(table.insert().values(email="segredo@sql.test"))
+        try:
+            async with db.engine.begin() as conn:
+                await conn.execute(table.insert().values(email="segredo@sql.test"))
+        except IntegrityError:
+            get_logger("t").exception("insert_failed")
+    finally:
+        await db.dispose()
+
+    output = json.dumps([e for e in json_logs() if e["event"] == "insert_failed"])
+    assert "IntegrityError" in output
+    assert "segredo@sql.test" not in output

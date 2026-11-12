@@ -221,3 +221,11 @@ async def test_notification_is_delivered_when_route_fails() -> None:
 
     assert resp.status_code == 429
     assert len(app.state.notifier.sent) == 1
+
+
+def test_validation_error_does_not_repeat_data() -> None:
+    with pytest.raises(ValidationError) as caught:
+        _request(template="Invalido", data={"code": CODE})
+
+    assert CODE not in str(caught.value)
+    assert EMAIL not in str(caught.value)

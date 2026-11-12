@@ -26,7 +26,8 @@ class NotificationTemplate(StrEnum):
 class NotificationRequest(BaseModel):
     """Espelha veriditi.notifications_sent (§5.4); to e data ficam fora do repr"""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # O erro de validação não repete o data, que leva o código
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     idempotency_key: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     template: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")

@@ -62,6 +62,26 @@ def redact_sensitive(logger: WrappedLogger, method_name: str, event_dict: EventD
     return event_dict
 
 
+def _hide_exception_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            k: REDACTED if k in ("exc_value", "exc_notes") else _hide_exception_values(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_hide_exception_values(v) for v in value]
+    return value
+
+
+def hide_exception_messages(
+    logger: WrappedLogger, method_name: str, event_dict: EventDict
+) -> EventDict:
+    """Mantém tipo e frames, mas a mensagem pode trazer input do Pydantic ou parâmetros SQL"""
+    if "exception" in event_dict:
+        event_dict["exception"] = _hide_exception_values(event_dict["exception"])
+    return event_dict
+
+
 def _add_service(service_name: str) -> Processor:
     """Processor fixo: contextvars do create_app não chegam às tasks do uvicorn"""
 
@@ -104,6 +124,7 @@ def configure_logging(
             structlog.processors.ExceptionRenderer(
                 structlog.tracebacks.ExceptionDictTransformer(show_locals=False)
             ),
+            hide_exception_messages,
             structlog.processors.JSONRenderer(),
         ],
     )

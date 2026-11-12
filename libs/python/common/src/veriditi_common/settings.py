@@ -12,7 +12,8 @@ _MIN_TOKEN_LENGTH = 16
 class BaseServiceSettings(BaseSettings):
     """Configuração comum a todo serviço, inclusive os que não usam banco (gateway)"""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # O erro de validação não repete senhas e tokens lidos do ambiente
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     service_name: str
     debug: bool = False

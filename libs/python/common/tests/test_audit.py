@@ -288,3 +288,10 @@ async def test_event_is_delivered_exactly_once_even_on_error(path: str, status: 
 
     assert resp.status_code == status
     assert len(audit.events) == 1
+
+
+def test_validation_error_does_not_repeat_metadata() -> None:
+    with pytest.raises(ValidationError) as caught:
+        _event(action="notification.x.y", metadata={"password": "hunter2"})
+
+    assert "hunter2" not in str(caught.value)

@@ -83,3 +83,15 @@ async def test_sqlite_enforces_foreign_keys(db: Database) -> None:
     async with db.engine.begin() as conn:
         with pytest.raises(IntegrityError):
             await conn.execute(metadata.tables["t"].insert().values(id=1, u_id=999))
+
+
+async def test_integrity_error_does_not_repeat_parameters(db: Database) -> None:
+    metadata = _sample_metadata()
+    async with db.engine.begin() as conn:
+        await conn.run_sync(metadata.create_all)
+
+    async with db.engine.begin() as conn:
+        with pytest.raises(IntegrityError) as caught:
+            await conn.execute(metadata.tables["t"].insert().values(id=1, u_id=987654321))
+
+    assert "987654321" not in str(caught.value)
