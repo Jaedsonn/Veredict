@@ -6,7 +6,6 @@ from httpx import ASGITransport, AsyncClient
 
 from monitoring_service.config import Settings
 from monitoring_service.main import create_app
-from monitoring_service.models import Base
 
 TOKEN = "test-internal-token-0123456789"
 
@@ -42,10 +41,6 @@ async def test_ready_does_not_connect_to_database(client: AsyncClient) -> None:
 
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
-
-
-def test_metadata_has_no_tables_yet() -> None:
-    assert Base.metadata.tables == {}
 
 
 def test_database_defaults_to_logs_storage() -> None:
