@@ -22,8 +22,26 @@ SENSITIVE_KEY_PARTS: Final[frozenset[str]] = frozenset(
         "api_key",
     }
 )
-# code e *_code são sensíveis; o código de erro de negócio vai em error_code
-_NOT_SENSITIVE: Final = frozenset({"status_code", "error_code"})
+# Sensíveis quando são um segmento inteiro do nome (otp, mas não footprint)
+_SENSITIVE_SEGMENTS: Final = frozenset({"otp"})
+# *_code só é segredo com um destes prefixos; status_code, zip_code, error_code não são
+_SECRET_CODE_PREFIXES: Final = frozenset(
+    {"verification", "otp", "mfa", "auth", "reset", "confirmation", "recovery", "pin"}
+)
+# Metadados sobre o segredo (token_type, password_changed_at, has_password), não o segredo
+_METADATA_SUFFIXES: Final = (
+    "_type",
+    "_id",
+    "_at",
+    "_count",
+    "s_used",
+    "_name",
+    "_present",
+    "_rotation",
+    "_attempts",
+    "_requested",
+)
+_METADATA_PREFIXES: Final = ("has_", "max_")
 REDACTED: Final = "[redacted]"
 
 _HANDLER_NAME: Final = "veriditi"
@@ -31,39 +49,65 @@ _HANDLER_NAME: Final = "veriditi"
 _UNTOUCHED_KEYS: Final = frozenset({"exc_info", "stack_info", "_record", "_from_structlog"})
 
 
+def _normalize(key: str) -> str:
+    return key.lower().replace("-", "_")
+
+
+def _is_secret_code(segments: list[str]) -> bool:
+    """code sozinho ou com prefixo de segredo; o hash de um código é tão sensível quanto ele"""
+    if segments[-1] == "hash":
+        segments = segments[:-1]
+    if not segments or segments[-1] != "code":
+        return False
+    prefix = segments[:-1]
+    return (
+        not prefix
+        or any(s in _SECRET_CODE_PREFIXES for s in prefix)
+        or ("one_time" in "_".join(prefix))
+    )
+
+
 def is_sensitive_key(key: object) -> bool:
     """Por parte do nome, para pegar db_password, jwt_private_key, verification_code e afins"""
     if isinstance(key, bytes):
         key = key.decode("latin-1")
-    if not isinstance(key, str):
+    if not isinstance(key, str) or not key:
         return False
-    normalized = key.lower().replace("-", "_")
-    if normalized in _NOT_SENSITIVE:
-        return False
-    if normalized == "code" or normalized.endswith("_code"):
+    normalized = _normalize(key)
+    segments = normalized.split("_")
+    if _is_secret_code(segments):
         return True
-    if "otp" in normalized.split("_"):
+    if normalized.endswith(_METADATA_SUFFIXES) or normalized.startswith(_METADATA_PREFIXES):
+        return False
+    if _SENSITIVE_SEGMENTS.intersection(segments):
         return True
     return any(part in normalized for part in SENSITIVE_KEY_PARTS)
 
 
-def _is_sensitive_pair(value: list[Any] | tuple[Any, ...]) -> bool:
-    """Par (nome, valor) como os headers crus do ASGI e do httpx"""
-    return (
-        len(value) == 2
-        and all(isinstance(item, str | bytes) for item in value)
-        and is_sensitive_key(value[0])
-    )
+def _is_sensitive_pair(value: list[Any] | tuple[Any, ...], in_headers: bool) -> bool:
+    """Par (nome, valor) de header: nome em bytes (ASGI cru) ou dentro de uma chave *header*"""
+    if len(value) != 2 or not isinstance(value[0], str | bytes):
+        return False
+    if not (isinstance(value[0], bytes) or in_headers):
+        return False
+    return isinstance(value[1], str | bytes) and is_sensitive_key(value[0])
 
 
-def _redact(value: Any) -> Any:
+def _redact(value: Any, in_headers: bool = False) -> Any:
     if isinstance(value, Mapping):
-        return {k: REDACTED if is_sensitive_key(k) else _redact(v) for k, v in value.items()}
+        return {
+            k: REDACTED if is_sensitive_key(k) else _redact(v, _is_header_key(k))
+            for k, v in value.items()
+        }
     if isinstance(value, list | tuple):
-        sensitive = _is_sensitive_pair(value)
-        items = [value[0], REDACTED] if sensitive else [_redact(v) for v in value]
+        sensitive = _is_sensitive_pair(value, in_headers)
+        items = [value[0], REDACTED] if sensitive else [_redact(v, in_headers) for v in value]
         return tuple(items) if isinstance(value, tuple) else items
     return value
+
+
+def _is_header_key(key: object) -> bool:
+    return isinstance(key, str) and "header" in _normalize(key)
 
 
 def redact_sensitive(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
@@ -71,7 +115,7 @@ def redact_sensitive(logger: WrappedLogger, method_name: str, event_dict: EventD
     for key, value in event_dict.items():
         if key in _UNTOUCHED_KEYS:
             continue
-        event_dict[key] = REDACTED if is_sensitive_key(key) else _redact(value)
+        event_dict[key] = REDACTED if is_sensitive_key(key) else _redact(value, _is_header_key(key))
     return event_dict
 
 

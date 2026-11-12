@@ -153,10 +153,70 @@ def test_sensitive_key_variants(key: str | bytes) -> None:
 
 @pytest.mark.parametrize(
     "key",
-    ["status_code", "error_code", "idempotency_key", "template", "to_masked", "request_id", 42],
+    [
+        "status_code",
+        "error_code",
+        "idempotency_key",
+        "template",
+        "to_masked",
+        "request_id",
+        42,
+        # Metadados e códigos que não são segredo (falsos positivos da 2ª revisão)
+        "token_type",
+        "tokens_used",
+        "max_tokens",
+        "token_id",
+        "token_family_id",
+        "refresh_token_id",
+        "token_expires_at",
+        "token_count",
+        "code_expired",
+        "http_status_code",
+        "response_status_code",
+        "zip_code",
+        "country_code",
+        "exit_code",
+        "smtp_code",
+        "mysql_error_code",
+        "db_error_code",
+        "reason_code",
+        "sqlstate_code",
+        "cookie_name",
+        "password_changed_at",
+        "password_reset_requested",
+        "secret_rotation",
+        "authorization_header_present",
+        "code_length",
+        "code_attempts",
+        "attempts_remaining",
+        "has_password",
+        "otp_attempts",
+    ],
 )
 def test_non_sensitive_keys(key: object) -> None:
     assert not is_sensitive_key(key)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["auth_code", "reset_code", "mfa_code", "otp_code", "one_time_code", "pin_code", "code_hash"],
+)
+def test_secret_codes_by_prefix(key: str) -> None:
+    assert is_sensitive_key(key)
+
+
+def test_pairs_outside_headers_are_left_alone(json_logs: JsonLogs) -> None:
+    get_logger("t").info(
+        "x",
+        fields=["password", "email"],
+        loc=("code", "too_short"),
+        request_headers=[("Authorization", "Bearer abc")],
+    )
+
+    [line] = json_logs()
+    assert line["fields"] == ["password", "email"]
+    assert line["loc"] == ["code", "too_short"]
+    assert line["request_headers"] == [["Authorization", REDACTED]]
 
 
 def test_header_pairs_are_redacted_by_name(json_logs: JsonLogs) -> None:
