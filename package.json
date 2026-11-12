@@ -12,6 +12,7 @@
     "dev:web": "npm run dev -w @veriditi/web",
     "build:web": "npm run build -w @veriditi/web",
     "lint:web": "npm run lint -w @veriditi/web",
-    "typecheck:web": "npm run typecheck -w @veriditi/web"
+    "typecheck:web": "npm run typecheck -w @veriditi/web",
+    "mock:gateway": "npm run mock:gateway -w @veriditi/web"
   }
 }
