@@ -60,6 +60,16 @@ def test_occurred_at_must_be_aware_and_becomes_utc() -> None:
     assert _event(occurred_at=bahia).occurred_at.utcoffset() == timedelta(0)
 
 
+@pytest.mark.parametrize(
+    "raw", ["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"], ids=["below", "above"]
+)
+def test_occurred_at_overflowing_utc_is_a_validation_error(raw: str) -> None:
+    with pytest.raises(ValidationError) as exc:
+        _event(occurred_at=raw)
+
+    assert exc.value.errors()[0]["loc"] == ("occurred_at",)
+
+
 @pytest.mark.parametrize("action", ["auth.user.registered", "auth.session.login_failed"])
 def test_valid_actions(action: str) -> None:
     assert _event(action=action).action == action

@@ -2,7 +2,6 @@ from typing import Annotated, Final
 
 from fastapi import Depends, Query, status
 from fastapi.exceptions import RequestValidationError
-from pydantic import AwareDatetime
 
 from monitoring_service.dependencies import IngestDep, ListDep
 from monitoring_service.domain import AuditEventFilter
@@ -11,6 +10,7 @@ from monitoring_service.schemas import (
     AuditEventIn,
     AuditEventOut,
     AuditEventsPage,
+    StorableDatetime,
 )
 from veriditi_common.security import internal_router
 
@@ -32,8 +32,8 @@ async def ingest_event(event: AuditEventIn, use_case: IngestDep) -> AcceptedResp
 def _filters(
     actor_id: Annotated[int | None, Query(ge=1, le=_MAX_BIGINT)] = None,
     action: Annotated[str | None, Query(min_length=1, max_length=80)] = None,
-    occurred_from: Annotated[AwareDatetime | None, Query(alias="from")] = None,
-    occurred_to: Annotated[AwareDatetime | None, Query(alias="to")] = None,
+    occurred_from: Annotated[StorableDatetime | None, Query(alias="from")] = None,
+    occurred_to: Annotated[StorableDatetime | None, Query(alias="to")] = None,
 ) -> AuditEventFilter:
     """Janela invertida é erro de entrada, no mesmo formato dos demais 422"""
     if occurred_from is not None and occurred_to is not None and occurred_from > occurred_to:

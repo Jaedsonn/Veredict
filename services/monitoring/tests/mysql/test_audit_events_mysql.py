@@ -1,6 +1,7 @@
 """Migration 0001 do monitoring contra MySQL real: DDL físico, GRANT append-only e REVOKE"""
 
 import asyncio
+import json
 import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta, timezone
@@ -10,10 +11,12 @@ import pymysql
 import pytest
 from alembic import command
 from alembic.config import Config
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import URL, func, select
 
 from monitoring_service.adapters.sqlalchemy_repo import SqlAlchemyAuditEventRepository
-from monitoring_service.config import get_settings
+from monitoring_service.config import Settings, get_settings
+from monitoring_service.main import create_app
 from monitoring_service.models import AuditEventRecord
 from veriditi_common.audit import AuditEvent, AuditOutcome
 from veriditi_common.db import Database
@@ -205,3 +208,54 @@ def test_roundtrip_keeps_microseconds_in_utc(migrated: Config) -> None:
     assert record.occurred_at.tzinfo is UTC
     assert record.received_at == received_at
     assert record.event_id == event.event_id
+
+
+def _deep(levels: int) -> dict[str, object]:
+    value: dict[str, object] = {"leaf": 1}
+    for _ in range(levels - 1):
+        value = {"k": value}
+    return value
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"metadata": _deep(101)}, id="depth-above-mysql-limit"),
+        pytest.param({"metadata": {"x": "\ud800"}}, id="surrogate-value"),
+        pytest.param({"metadata": {"\udc00": "x"}}, id="surrogate-key"),
+        pytest.param({"metadata": {"x": float("nan")}}, id="nan"),
+        pytest.param({"metadata": {"x": 10**400}}, id="int-400-digits"),
+        pytest.param({"occurred_at": "0500-01-01T00:00:00Z"}, id="year-500"),
+    ],
+)
+def test_payload_mysql_would_refuse_is_422_not_500(
+    migrated: Config, overrides: dict[str, object]
+) -> None:
+    token = "test-internal-token-0123456789"
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        db_host=HOST,
+        db_port=PORT,
+        db_name=LOGS_DB,
+        db_user=WRITER,
+        db_password=WRITER_PASSWORD,  # type: ignore[arg-type]
+        internal_api_token=token,  # type: ignore[arg-type]
+    )
+    body = {**_event().model_dump(mode="json"), **overrides}
+
+    async def scenario() -> tuple[int, int]:
+        app = create_app(settings=settings)
+        async with (
+            app.router.lifespan_context(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client,
+        ):
+            resp = await client.post(
+                "/internal/events",
+                content=json.dumps(body).encode(),
+                headers={"X-Internal-Token": token, "content-type": "application/json"},
+            )
+            async with app.state.db.session_factory() as session:
+                count = await session.scalar(select(func.count()).select_from(AuditEventRecord))
+        return resp.status_code, int(count or 0)
+
+    assert asyncio.run(scenario()) == (422, 0)

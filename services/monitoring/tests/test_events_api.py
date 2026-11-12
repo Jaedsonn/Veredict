@@ -480,3 +480,78 @@ async def test_streamed_body_without_length_is_also_limited(
     resp = await client.post(URL, content=chunks(), headers=headers)
 
     assert resp.status_code == 413
+
+
+async def _post_raw(client: AsyncClient, headers: Headers, body: dict[str, Any]) -> int:
+    """json.dumps escreve NaN, inteiros enormes e \\ud800 como um produtor descuidado"""
+    resp = await client.post(
+        URL,
+        content=json.dumps(body).encode(),
+        headers={**headers, "content-type": "application/json"},
+    )
+    return resp.status_code
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"metadata": {"x": float("nan")}}, id="nan"),
+        pytest.param({"metadata": {"x": float("inf")}}, id="infinity"),
+        pytest.param({"metadata": {"x": [float("-inf")]}}, id="minus-infinity-in-list"),
+        pytest.param({"metadata": {"x": 2**63}}, id="int-above-bigint"),
+        pytest.param({"metadata": {"x": -(2**63) - 1}}, id="int-below-bigint"),
+        pytest.param({"metadata": {"x": 10**400}}, id="int-400-digits"),
+        pytest.param({"metadata": {"x": "\ud800"}}, id="surrogate-value"),
+        pytest.param({"metadata": {"\udc00": "x"}}, id="surrogate-key"),
+        pytest.param({"metadata": {"x": [{"y": "a\ud800"}]}}, id="surrogate-nested"),
+        pytest.param({"resource_id": "\ud800"}, id="surrogate-resource_id"),
+        pytest.param({"resource_type": "\udc00"}, id="surrogate-resource_type"),
+        pytest.param({"occurred_at": "0001-01-01T00:00:00+01:00"}, id="utc-overflow-low"),
+        pytest.param({"occurred_at": "9999-12-31T23:59:59-01:00"}, id="utc-overflow-high"),
+        pytest.param({"occurred_at": "0500-01-01T00:00:00Z"}, id="year-500"),
+        pytest.param({"occurred_at": "1000-01-01T00:30:00+01:00"}, id="year-999-in-utc"),
+    ],
+)
+async def test_values_the_database_would_refuse_are_422(
+    client: AsyncClient,
+    auth_headers: Headers,
+    make_event: EventFactory,
+    db: Database,
+    overrides: dict[str, Any],
+) -> None:
+    assert await _post_raw(client, auth_headers, {**make_event(), **overrides}) == 422
+    assert await _records(db) == []
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"metadata": {"x": 2**63 - 1, "y": -(2**63)}}, id="bigint-bounds"),
+        pytest.param({"metadata": {"x": 1e308, "ok": True}}, id="finite-float-and-bool"),
+        pytest.param({"metadata": {"emoji": "\U0001f600", "acento": "ção"}}, id="utf8"),
+        pytest.param({"occurred_at": "1000-01-01T00:00:00Z"}, id="first-datetime"),
+        pytest.param({"occurred_at": "9999-12-31T23:59:59.999999Z"}, id="last-datetime"),
+    ],
+)
+async def test_values_at_the_limits_are_accepted(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory, overrides: dict[str, Any]
+) -> None:
+    assert await _post_raw(client, auth_headers, {**make_event(), **overrides}) == 202
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"from": "0001-01-01T00:00:00+01:00"},
+        {"to": "9999-12-31T23:59:59-01:00"},
+        {"from": "0500-01-01T00:00:00Z"},
+    ],
+    ids=["from-overflow", "to-overflow", "from-year-500"],
+)
+async def test_get_rejects_dates_outside_datetime_range(
+    client: AsyncClient, auth_headers: Headers, params: dict[str, str]
+) -> None:
+    resp = await client.get(URL, params=params, headers=auth_headers)
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["query", next(iter(params))]

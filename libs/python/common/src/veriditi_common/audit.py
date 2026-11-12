@@ -76,7 +76,11 @@ class AuditEvent(BaseModel):
     @field_validator("occurred_at")
     @classmethod
     def _to_utc(cls, value: datetime) -> datetime:
-        return value.astimezone(UTC)
+        try:
+            return value.astimezone(UTC)
+        except OverflowError:
+            # 0001-01-01T00:00+01:00 cairia antes do ano 1 em UTC; sem isso o 422 vira 500
+            raise ValueError("occurred_at fica fora do intervalo de datas em UTC") from None
 
     @field_validator("actor_ip")
     @classmethod
