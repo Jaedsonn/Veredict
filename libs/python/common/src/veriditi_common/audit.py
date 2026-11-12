@@ -36,6 +36,17 @@ _SEGMENT = r"[a-z][a-z0-9_]*"
 log = get_logger(__name__)
 
 
+def _request_id_from_context() -> UUID | None:
+    """O evento carrega o request_id da requisição sem o caso de uso precisar passá-lo"""
+    rid = current_request_id()
+    if rid is None:
+        return None
+    try:
+        return UUID(rid)
+    except ValueError:
+        return None
+
+
 class AuditOutcome(StrEnum):
     SUCCESS = "success"
     FAILURE = "failure"
@@ -55,7 +66,7 @@ class AuditEvent(BaseModel):
     outcome: AuditOutcome
     actor_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
     actor_ip: IPvAnyAddress | None = None
-    request_id: UUID | None = None
+    request_id: UUID | None = Field(default_factory=_request_id_from_context)
     resource_type: str | None = Field(default=None, min_length=1, max_length=40)
     resource_id: str | None = Field(default=None, min_length=1, max_length=64)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)

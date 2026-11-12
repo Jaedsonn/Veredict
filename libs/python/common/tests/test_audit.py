@@ -314,3 +314,12 @@ async def test_unserializable_metadata_does_not_raise() -> None:
     assert entry["error_type"] == "PydanticSerializationError"
     assert entry["audit_event"]["event_id"] == str(event.event_id)
     assert entry["audit_event"]["metadata"]["x"].startswith("<object")
+
+
+def test_request_id_defaults_to_current_request() -> None:
+    assert _event().request_id is None
+    with bound_contextvars(request_id=RID):
+        assert _event().request_id == uuid.UUID(RID)
+        assert _event(request_id=None).request_id is None
+    with bound_contextvars(request_id="nao-e-uuid"):
+        assert _event().request_id is None
