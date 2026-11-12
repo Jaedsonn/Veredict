@@ -377,3 +377,26 @@ async def test_get_rejects_invalid_query(
     resp = await client.get(URL, params=params, headers=auth_headers)
 
     assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda b: _without(b, "event_id"), id="missing-field"),
+        pytest.param(lambda b: {**b, "action": "notification.user.registered"}, id="model"),
+        pytest.param(lambda b: {**b, "outcome": "ok", "unexpected": 1}, id="field-and-extra"),
+    ],
+)
+async def test_validation_error_does_not_echo_metadata(
+    client: AsyncClient,
+    auth_headers: Headers,
+    make_event: EventFactory,
+    mutate: Callable[[dict[str, Any]], dict[str, Any]],
+) -> None:
+    body = mutate(make_event(metadata={"password": "s3cr3t-in-echo"}))
+
+    resp = await client.post(URL, json=body, headers=auth_headers)
+
+    assert resp.status_code == 422
+    assert "s3cr3t-in-echo" not in resp.text
+    assert all(set(item) == {"type", "loc", "msg"} for item in resp.json()["detail"])

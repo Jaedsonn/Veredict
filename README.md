@@ -150,7 +150,8 @@ nome de chave: não logue `str(exc)` nem interpole valores no evento.
 
 Os erros seguem `{"detail": {"code": "...", "message": "...", ...extras}}`, o
 formato lido por `apps/web/src/lib/errors.ts`; o 422 de validação mantém o
-formato do FastAPI. Falhas de entrega ao monitoring e ao notification não
+formato do FastAPI (`loc`, `msg` e `type`), sem `input` nem `ctx`, que repetiriam a
+entrada. Falhas de entrega ao monitoring e ao notification não
 quebram a requisição: aparecem no log com `audit_fallback=true` e
 `notification_fallback=true`.
 

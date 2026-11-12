@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import httpx
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from veriditi_common.errors import (
     INTERNAL_ERROR_CODE,
@@ -19,6 +19,14 @@ REF = uuid.UUID("3f2b8c1e-8a4e-4a39-9a2b-1f1e0c9d7a55")
 
 class Payload(BaseModel):
     email: str
+    password: str = ""
+    age: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _no_same(self) -> "Payload":
+        if self.password and self.password == self.email:
+            raise ValueError("senha igual ao e-mail")
+        return self
 
 
 def _app() -> FastAPI:
@@ -156,6 +164,43 @@ async def test_validation_error_keeps_fastapi_format() -> None:
     [item] = resp.json()["detail"]
     assert {"loc", "msg", "type"} <= item.keys()
     assert item["loc"] == ["body", "email"]
+
+
+async def test_validation_error_does_not_echo_input_or_ctx() -> None:
+    body = {"password": "s3cr3t-echo", "age": -1}
+
+    resp = await _call("POST", "/items", json=body)
+
+    assert resp.status_code == 422
+    assert "s3cr3t-echo" not in resp.text
+    assert {tuple(item["loc"]) for item in resp.json()["detail"]} == {
+        ("body", "email"),
+        ("body", "age"),
+    }
+    for item in resp.json()["detail"]:
+        assert set(item) == {"type", "loc", "msg"}
+
+
+async def test_model_validator_error_does_not_echo_the_body() -> None:
+    body = {"email": "s3cr3t-echo", "password": "s3cr3t-echo"}
+
+    resp = await _call("POST", "/items", json=body)
+
+    assert resp.status_code == 422
+    assert "s3cr3t-echo" not in resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body"]
+
+
+async def test_malformed_json_does_not_echo_the_body() -> None:
+    resp = await _call(
+        "POST",
+        "/items",
+        content=b'{"password": "s3cr3t-echo"',
+        headers={"content-type": "application/json"},
+    )
+
+    assert resp.status_code == 422
+    assert "s3cr3t-echo" not in resp.text
 
 
 def test_internal_error_response() -> None:
