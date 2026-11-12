@@ -103,8 +103,9 @@ class HttpAuditLogger:
         self._timeout = timeout
 
     async def record(self, event: AuditEvent) -> None:
-        payload = event.model_dump(mode="json")
         try:
+            # frozen não congela o dict de metadata: o dump pode falhar
+            payload = event.model_dump(mode="json")
             headers = {INTERNAL_TOKEN_HEADER: self._token.get_secret_value()}
             if request_id := payload["request_id"] or current_request_id():
                 headers[REQUEST_ID_HEADER] = request_id
@@ -122,7 +123,7 @@ class HttpAuditLogger:
                 "audit_delivery_failed",
                 audit_fallback=True,
                 error_type=type(exc).__name__,
-                audit_event=payload,
+                audit_event=event.model_dump(mode="json", fallback=repr, warnings=False),
                 **extra,
             )
 

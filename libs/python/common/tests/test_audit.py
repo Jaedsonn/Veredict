@@ -296,3 +296,19 @@ def test_validation_error_does_not_repeat_metadata() -> None:
         _event(action="notification.x.y", metadata={"password": "hunter2"})
 
     assert "hunter2" not in str(caught.value)
+
+
+async def test_unserializable_metadata_does_not_raise() -> None:
+    event = _event()
+    event.metadata["x"] = object()
+
+    async with httpx.AsyncClient() as client, respx.mock(assert_all_called=False) as mock:
+        route = mock.post(EVENTS_URL).respond(202)
+        with capture_logs() as logs:
+            await HttpAuditLogger(client, BASE_URL, SecretStr(TOKEN)).record(event)
+
+    assert not route.called
+    [entry] = logs
+    assert entry["error_type"] == "PydanticSerializationError"
+    assert entry["audit_event"]["event_id"] == str(event.event_id)
+    assert entry["audit_event"]["metadata"]["x"].startswith("<object")

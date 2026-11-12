@@ -229,3 +229,14 @@ def test_validation_error_does_not_repeat_data() -> None:
 
     assert CODE not in str(caught.value)
     assert EMAIL not in str(caught.value)
+
+
+async def test_unserializable_data_does_not_raise() -> None:
+    request = _request()
+    request.data["x"] = object()
+
+    async with httpx.AsyncClient() as client, respx.mock():
+        with capture_logs() as logs:
+            await HttpNotifier(client, BASE_URL, SecretStr(TOKEN)).send(request)
+
+    assert logs[0]["error_type"] == "PydanticSerializationError"
