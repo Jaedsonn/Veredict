@@ -39,6 +39,8 @@ class RetryPolicy:
 
 # Constante de módulo: RetryPolicy() no default do __init__ dispararia o B008
 DEFAULT_RETRY: Final = RetryPolicy()
+# Teto do UPDATE final: entra na conta do stop_grace_period do compose
+STATUS_UPDATE_TIMEOUT: Final = 5.0
 
 
 class SendNotification:
@@ -57,6 +59,7 @@ class SendNotification:
         clock: Clock = utcnow,
         sleep: Sleep = asyncio.sleep,
         retry: RetryPolicy = DEFAULT_RETRY,
+        status_update_timeout: float = STATUS_UPDATE_TIMEOUT,
     ) -> None:
         self._registry = registry
         self._renderer = renderer
@@ -68,6 +71,7 @@ class SendNotification:
         self._clock = clock
         self._sleep = sleep
         self._retry = retry
+        self._status_update_timeout = status_update_timeout
 
     async def execute(self, request: NotificationRequest) -> bool:
         """True se reservou e agendou; False para chave já conhecida, em qualquer status"""
@@ -212,9 +216,11 @@ class SendNotification:
     async def _update_status(
         self, update: Callable[[], Awaitable[bool]], context: dict[str, Any]
     ) -> None:
-        """Falha do banco não impede a auditoria, que reflete o que aconteceu no SMTP"""
+        """Falha ou lentidão do banco não impede a auditoria, que reflete o que houve no SMTP"""
         try:
-            updated = await update()
+            # Pool esgotado ou lock preso não seguram o shutdown: estoura como TimeoutError
+            async with asyncio.timeout(self._status_update_timeout):
+                updated = await update()
         except Exception as exc:
             log.error("notification_status_update_failed", **context, error_type=type(exc).__name__)
             return

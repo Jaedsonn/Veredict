@@ -176,8 +176,8 @@ services:
       SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
       SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-10}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
-    # 3 × 10 s (timeout total da tentativa) + 3 s de espera + 2 s da auditoria = 35 s; menos que isso deixa a linha pending
-    stop_grace_period: 45s
+    # Pior caso, entrega na 3ª tentativa: 4 × 10 s (2 falhas, envio, QUIT) + 3 s de espera + 5 s do UPDATE + 8 s da auditoria = 56 s
+    stop_grace_period: 65s
     healthcheck: *ready
     depends_on:
       notification-migrate:

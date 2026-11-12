@@ -316,13 +316,27 @@ O destinatário **não** é gravado: deduplicar não precisa dele, e a auditoria
 
 O `failed` não reenvia porque a deduplicação é permanente (§14), o `HttpNotifier` não repete o POST e o reenvio do código no auth (#8/#13) gera um código novo, com chave nova. O reprocessamento fica para o outbox do #37; só um `welcome` que falhar se perde.
 
-**`pending` órfão.** Se o processo morrer entre o COMMIT da reserva e o fim do envio (SIGKILL, OOM, deploy), a linha fica `pending` para sempre e a chave fica bloqueada. Não há como retomar: destinatário e `data` não são gravados, por desenho. Mitigações: `stop_grace_period: 45s` no compose (o uvicorn espera o envio terminar, e 45 s cobrem o pior caso de 35 s: 3 tentativas × 10 s de timeout total + 3 s de espera + 2 s da auditoria), o reenvio do código no auth e esta consulta de detecção (sem índice: a tabela é pequena; o índice entra no #35/#37):
+**`pending` órfão.** Se o processo morrer entre o COMMIT da reserva e o fim do envio (SIGKILL, OOM, deploy), a linha fica `pending` para sempre e a chave fica bloqueada. Não há como retomar: destinatário e `data` não são gravados, por desenho. Mitigações: `stop_grace_period: 65s` no compose (o uvicorn espera o envio terminar), o reenvio do código no auth e esta consulta de detecção (sem índice: a tabela é pequena; o índice entra no #35/#37):
 
 ```sql
 SELECT id, idempotency_key, template, created_at
 FROM notifications_sent
 WHERE status = 'pending' AND created_at < UTC_TIMESTAMP(6) - INTERVAL 10 MINUTE;
 ```
+
+O `stop_grace_period` cobre o pior caso de um envio, com `SMTP_TIMEOUT_SECONDS = 10` (T). Envios simultâneos correm em paralelo, então o pior caso não soma entre eles:
+
+| Etapa | Teto | Entrega na 3ª tentativa | 3 tentativas falhas |
+|---|---|---|---|
+| Tentativa que falha (conexão, TLS, AUTH e envio, num `asyncio.timeout` só) | T | 2 × 10 s | 3 × 10 s |
+| Esperas entre tentativas | 1 s + 2 s | 3 s | 3 s |
+| Tentativa que entrega | T | 10 s | — |
+| `QUIT` depois da entrega, fora do timeout da tentativa e sem mudar o resultado | T | 10 s | — |
+| `UPDATE` final (conexão do pool e lock incluídos); estourado, vira `notification_status_update_failed` e a linha fica `pending` | 5 s | 5 s | 5 s |
+| Auditoria: o `timeout=2.0` do httpx vale por fase (pool, conexão, escrita e leitura) | 4 × 2 s | 8 s | 8 s |
+| **Total** | 4T + 16 s | **56 s** | **46 s** |
+
+Os 65 s deixam 9 s para o resto do shutdown. Com `SMTP_TIMEOUT_SECONDS` maior que 10, suba o `stop_grace_period` para pelo menos 4T + 16 s mais a folga.
 
 ### 5.5 `veriditi_logs.audit_events` (dono: monitoring)
 

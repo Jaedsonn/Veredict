@@ -39,6 +39,7 @@ class Harness:
         now: datetime,
         notifications: InMemoryNotificationRepository | None = None,
         retry: RetryPolicy | None = None,
+        status_update_timeout: float = 5.0,
     ) -> None:
         self.notifications = notifications or InMemoryNotificationRepository()
         self.audit = InMemoryAuditLogger()
@@ -54,6 +55,7 @@ class Harness:
             clock=lambda: now,
             sleep=sleep,
             **({"retry": retry} if retry else {}),
+            status_update_timeout=status_update_timeout,
         )
 
     def row(self) -> StoredNotification:
@@ -283,6 +285,33 @@ async def test_status_update_failure_still_audits(
     [line] = [line for line in logs if line["event"] == "notification_status_update_failed"]
     assert line["error_type"] == "ConnectionError"
     assert line["notification_id"] == 1
+
+
+class _StuckMarkFailed(InMemoryNotificationRepository):
+    """UPDATE preso num lock ou esperando conexão do pool"""
+
+    async def mark_failed(self, notification_id: int, **kwargs: Any) -> bool:
+        await asyncio.Event().wait()
+        return True
+
+
+async def test_stuck_status_update_is_bounded_and_still_audits(
+    harness_for: Any, make_request: Any
+) -> None:
+    harness = harness_for(
+        FailingEmailSender(fail_times=ALWAYS, error=EmailDeliveryError("x", permanent=True)),
+        notifications=_StuckMarkFailed(),
+        status_update_timeout=0.05,
+    )
+
+    with capture_logs() as logs:
+        await harness.use_case.execute(make_request())
+        await asyncio.wait_for(harness.scheduler.run_all(), timeout=2)
+
+    assert harness.audit.actions() == ["notification.email.failed"]
+    [line] = [line for line in logs if line["event"] == "notification_status_update_failed"]
+    assert line["error_type"] == "TimeoutError"
+    assert harness.row().status is NotificationStatus.PENDING
 
 
 async def test_status_conflict_is_logged_and_audited(

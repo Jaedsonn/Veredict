@@ -235,7 +235,7 @@ serviço, e um snapshot em `tests/snapshots/` fixa o corpo renderizado.
 | `SMTP_FROM` | Remetente, padrão `Veriditi <no-reply@veriditi.app>`; o domínio dele vai no `Message-ID` |
 | `SMTP_STARTTLS` | `false` no Mailpit; `true` num provedor na porta 587 (#17) |
 | `SMTP_USE_TLS` | TLS implícito, para um provedor na porta 465; excludente com o `SMTP_STARTTLS` |
-| `SMTP_TIMEOUT_SECONDS` | Timeout total de cada tentativa (conexão, TLS, AUTH e DATA juntos), padrão 10 (máximo 60) |
+| `SMTP_TIMEOUT_SECONDS` | Timeout total de cada tentativa (conexão, TLS, AUTH e envio juntos), padrão 10 (máximo 60); o `QUIT` depois da entrega tem um teto igual, fora dele. Acima de 10, suba o `stop_grace_period` do compose para pelo menos 4 × o valor + 16 s |
 | `WEB_URL` | Base dos links `/verificar-email` e `/entrar` dos e-mails |
 
 Em dev os e-mails chegam ao Mailpit, em http://localhost:8025. Para disparar um pelo
@@ -247,9 +247,10 @@ docker compose exec notification python -c "import json, os, urllib.request as u
 
 Troque a `idempotency_key` para enviar de novo. Um risco aceito na Sprint 1: se o
 processo morrer entre a reserva e o fim do envio, a linha fica `pending` e a chave
-fica bloqueada, porque o destinatário não é gravado. O `stop_grace_period: 45s` do
-compose deixa o envio terminar num `docker compose stop`, e a consulta de detecção
-está em `docs/banco-de-dados.md` §5.4.
+fica bloqueada, porque o destinatário não é gravado. O `stop_grace_period: 65s` do
+compose deixa o envio terminar num `docker compose stop` (pior caso de 56 s, com
+4 × `SMTP_TIMEOUT_SECONDS`), e a conta e a consulta de detecção estão em
+`docs/banco-de-dados.md` §5.4.
 
 ### Web sem o backend (gateway mock)
 
