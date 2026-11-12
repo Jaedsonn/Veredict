@@ -8,6 +8,7 @@ import respx
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr, ValidationError
+from starlette.types import Message, Receive, Scope, Send
 from structlog.contextvars import bound_contextvars
 from structlog.testing import capture_logs
 
@@ -173,15 +174,32 @@ def _app() -> FastAPI:
     return app
 
 
-async def test_background_notifier_sends_after_response() -> None:
-    app = _app()
-    app.state.notifier = InMemoryNotifier()
+class _OrderNotifier:
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+    async def send(self, request: NotificationRequest) -> None:
+        self.order.append("enviado")
+
+
+async def test_background_notifier_sends_after_response() -> None:
+    order: list[str] = []
+    app = _app()
+    app.state.notifier = _OrderNotifier(order)
+
+    async def outer(scope: Scope, receive: Receive, send: Send) -> None:
+        async def spy(message: Message) -> None:
+            if message["type"] == "http.response.body" and not message.get("more_body"):
+                order.append("resposta")
+            await send(message)
+
+        await app(scope, receive, spy)
+
+    async with AsyncClient(transport=ASGITransport(app=outer), base_url="http://t") as client:
         resp = await client.post("/x")
 
     assert resp.status_code == 202
-    assert len(app.state.notifier.sent) == 1
+    assert order == ["resposta", "enviado"]
 
 
 async def test_request_succeeds_when_notification_is_down(json_logs: JsonLogs) -> None:
