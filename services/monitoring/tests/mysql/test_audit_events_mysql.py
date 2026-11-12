@@ -259,3 +259,42 @@ def test_payload_mysql_would_refuse_is_422_not_500(
         return resp.status_code, int(count or 0)
 
     assert asyncio.run(scenario()) == (422, 0)
+
+
+def test_resends_waiting_on_a_rolled_back_insert_survive_the_deadlock(migrated: Config) -> None:
+    # Os reenvios esperam o lock da 1ª escrita; quando ela desfaz, o InnoDB escolhe vítimas 1213
+    event = _event()
+    received_at = datetime.now(UTC)
+
+    async def scenario() -> tuple[list[bool], int]:
+        db = _writer_database()
+        first = _connect()
+        first.autocommit(False)
+
+        async def add() -> bool:
+            async with db.session_factory() as session:
+                repo = SqlAlchemyAuditEventRepository(session)
+                return await repo.add(event, received_at=received_at)
+
+        try:
+            with first.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO audit_events (event_id, occurred_at, service, action, outcome) "
+                    "VALUES (%s, NOW(6), 'auth', 'auth.user.registered', 'success')",
+                    (str(event.event_id),),
+                )
+            tasks = [asyncio.create_task(add()) for _ in range(3)]
+            await asyncio.sleep(1.0)
+            first.rollback()
+            results = await asyncio.gather(*tasks)
+            async with db.session_factory() as session:
+                count = await session.scalar(select(func.count()).select_from(AuditEventRecord))
+        finally:
+            first.close()
+            await db.dispose()
+        return sorted(results), int(count or 0)
+
+    results, count = asyncio.run(scenario())
+
+    assert results == [False, False, True]
+    assert count == 1

@@ -359,7 +359,7 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 | `uq_refresh_tokens_token_hash` | Refresh e logout: `SELECT … FROM refresh_tokens WHERE token_hash = :h FOR UPDATE` | #9 |
 | `ix_refresh_tokens_user_id_revoked_at` | Reuso detectado revoga **todos** os tokens do usuário: `UPDATE refresh_tokens SET revoked_at = :now, revoke_reason = 'reuse_detected' WHERE user_id = :uid AND revoked_at IS NULL` | #9 |
 | `uq_notifications_sent_idempotency_key` | Reserva idempotente: `INSERT …`. A violação significa "já enviado ou em andamento", e então `SELECT status … WHERE idempotency_key = :k` | #6 |
-| `uq_audit_events_event_id` | Ingestão idempotente: `INSERT …`. `IntegrityError` → 202 sem duplicar | #5 |
+| `uq_audit_events_event_id` | Ingestão idempotente: `INSERT …`. `IntegrityError` → 202 sem duplicar. Deadlock (1213) ou lock wait timeout (1205) repete o INSERT uma vez | #5 |
 | `ix_audit_events_actor_id_occurred_at` | `GET /internal/events?actor_id=&from=&to=` e as atividades do usuário (RF20): `WHERE actor_id = :uid AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n`. O `ORDER BY id` faz filesort só das linhas filtradas | #5, #34 |
 | `ix_audit_events_action_occurred_at` | `GET /internal/events?action=&from=&to=`: `WHERE action = :a AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n` (filesort só das linhas filtradas) | #5 |
 

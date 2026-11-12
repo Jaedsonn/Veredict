@@ -7,7 +7,8 @@ from uuid import uuid4
 import pymysql.err
 import pytest
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
+from structlog.testing import capture_logs
 
 from monitoring_service.adapters.memory_repo import InMemoryAuditEventRepository
 from monitoring_service.adapters.sqlalchemy_repo import (
@@ -229,3 +230,74 @@ async def test_other_integrity_errors_are_raised_after_rollback(received_at: dat
 
     assert exc.value is error
     assert session.rolled_back is True
+
+
+class _ScriptedSession:
+    """Cada commit consome o próximo resultado: None é sucesso, exceção é levantada"""
+
+    def __init__(self, *outcomes: Exception | None) -> None:
+        self.outcomes = list(outcomes)
+        self.added = 0
+        self.rollbacks = 0
+
+    def add(self, record: object) -> None:
+        self.added += 1
+
+    async def commit(self) -> None:
+        if (outcome := self.outcomes.pop(0)) is not None:
+            raise outcome
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+def _operational(errno: int) -> OperationalError:
+    return OperationalError("INSERT ...", {}, pymysql.err.OperationalError(errno, "x"))
+
+
+DUPLICATE = _integrity_error(
+    pymysql.err.IntegrityError(
+        1062, "Duplicate entry 'x' for key 'audit_events.uq_audit_events_event_id'"
+    )
+)
+
+
+@pytest.mark.parametrize(
+    ("second", "expected"),
+    [(None, True), (DUPLICATE, False)],
+    ids=["retry-inserts", "retry-finds-duplicate"],
+)
+@pytest.mark.parametrize("errno", [1213, 1205], ids=["deadlock", "lock-wait-timeout"])
+async def test_deadlock_is_retried_once(
+    received_at: datetime, errno: int, second: Exception | None, expected: bool
+) -> None:
+    session = _ScriptedSession(_operational(errno), second)
+    repo = SqlAlchemyAuditEventRepository(session)  # type: ignore[arg-type]
+
+    with capture_logs() as logs:
+        assert await repo.add(_event(), received_at=received_at) is expected
+
+    assert session.added == 2
+    assert session.rollbacks == (1 if second is None else 2)
+    assert [line["event"] for line in logs] == ["audit_insert_retried"]
+    assert logs[0]["db_errno"] == errno
+
+
+async def test_second_deadlock_is_raised(received_at: datetime) -> None:
+    session = _ScriptedSession(_operational(1213), _operational(1213))
+    repo = SqlAlchemyAuditEventRepository(session)  # type: ignore[arg-type]
+
+    with pytest.raises(OperationalError):
+        await repo.add(_event(), received_at=received_at)
+
+    assert (session.added, session.rollbacks) == (2, 2)
+
+
+async def test_other_operational_errors_are_not_retried(received_at: datetime) -> None:
+    session = _ScriptedSession(_operational(2013))
+    repo = SqlAlchemyAuditEventRepository(session)  # type: ignore[arg-type]
+
+    with pytest.raises(OperationalError):
+        await repo.add(_event(), received_at=received_at)
+
+    assert (session.added, session.rollbacks) == (1, 1)

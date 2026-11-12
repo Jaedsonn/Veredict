@@ -2,14 +2,19 @@ from datetime import datetime
 from typing import Final
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from monitoring_service.domain import AuditEventFilter, StoredAuditEvent
 from monitoring_service.models import EVENT_ID_UNIQUE, AuditEventRecord
 from veriditi_common.audit import AuditEvent
+from veriditi_common.logging import get_logger
 
 MYSQL_DUPLICATE_ENTRY: Final = 1062
+# Deadlock e lock wait timeout: o InnoDB desfaz a transação e uma nova tentativa é segura
+_RETRYABLE_ERRNOS: Final = frozenset({1213, 1205})
+
+log = get_logger(__name__)
 _SQLITE_DUPLICATE: Final = "UNIQUE constraint failed: audit_events.event_id"
 
 
@@ -21,6 +26,29 @@ def is_duplicate_event_id(exc: IntegrityError) -> bool:
     return _SQLITE_DUPLICATE in str(exc.orig)
 
 
+def _retryable_errno(exc: OperationalError) -> int | None:
+    args: tuple[object, ...] = getattr(exc.orig, "args", ())
+    errno = args[0] if args else None
+    return errno if isinstance(errno, int) and errno in _RETRYABLE_ERRNOS else None
+
+
+def _record(event: AuditEvent, received_at: datetime) -> AuditEventRecord:
+    return AuditEventRecord(
+        event_id=event.event_id,
+        occurred_at=event.occurred_at,
+        received_at=received_at,
+        service=event.service,
+        action=event.action,
+        outcome=event.outcome,
+        actor_id=event.actor_id,
+        actor_ip=str(event.actor_ip) if event.actor_ip is not None else None,
+        request_id=event.request_id,
+        resource_type=event.resource_type,
+        resource_id=event.resource_id,
+        metadata_=event.metadata or None,
+    )
+
+
 class SqlAlchemyAuditEventRepository:
     """INSERT simples: IGNORE rebaixaria outros erros e ON DUPLICATE exigiria UPDATE"""
 
@@ -28,28 +56,26 @@ class SqlAlchemyAuditEventRepository:
         self._session = session
 
     async def add(self, event: AuditEvent, *, received_at: datetime) -> bool:
-        self._session.add(
-            AuditEventRecord(
-                event_id=event.event_id,
-                occurred_at=event.occurred_at,
-                received_at=received_at,
-                service=event.service,
-                action=event.action,
-                outcome=event.outcome,
-                actor_id=event.actor_id,
-                actor_ip=str(event.actor_ip) if event.actor_ip is not None else None,
-                request_id=event.request_id,
-                resource_type=event.resource_type,
-                resource_id=event.resource_id,
-                metadata_=event.metadata or None,
-            )
-        )
+        try:
+            return await self._insert(event, received_at)
+        except OperationalError as exc:
+            # Reenvios concorrentes esperando a 1ª escrita entram em deadlock se ela desfizer
+            if (errno := _retryable_errno(exc)) is None:
+                raise
+            log.warning("audit_insert_retried", event_id=str(event.event_id), db_errno=errno)
+            return await self._insert(event, received_at)
+
+    async def _insert(self, event: AuditEvent, received_at: datetime) -> bool:
+        self._session.add(_record(event, received_at))
         try:
             await self._session.commit()
         except IntegrityError as exc:
             await self._session.rollback()
             if is_duplicate_event_id(exc):
                 return False
+            raise
+        except OperationalError:
+            await self._session.rollback()
             raise
         return True
 
