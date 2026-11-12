@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from ipaddress import IPv4Address, IPv6Address
 from typing import Annotated, Any, Final, Protocol
 from uuid import UUID, uuid4
 
@@ -20,7 +21,12 @@ from pydantic import (
 )
 
 from veriditi_common.logging import get_logger
-from veriditi_common.middleware import REQUEST_ID_HEADER, current_request_id, defer
+from veriditi_common.middleware import (
+    MAX_IP_LENGTH,
+    REQUEST_ID_HEADER,
+    current_request_id,
+    defer,
+)
 from veriditi_common.security import INTERNAL_TOKEN_HEADER
 
 AUDIT_EVENTS_PATH: Final = "/internal/events"
@@ -58,6 +64,16 @@ class AuditEvent(BaseModel):
     @classmethod
     def _to_utc(cls, value: datetime) -> datetime:
         return value.astimezone(UTC)
+
+    @field_validator("actor_ip")
+    @classmethod
+    def _ip_fits_column(
+        cls, value: IPv4Address | IPv6Address | None
+    ) -> IPv4Address | IPv6Address | None:
+        """IPv6 com scope id (fe80::1%eth0) pode passar de VARCHAR(45)"""
+        if value is not None and len(str(value)) > MAX_IP_LENGTH:
+            raise ValueError(f"actor_ip passa de {MAX_IP_LENGTH} caracteres")
+        return value
 
     @model_validator(mode="after")
     def _action_belongs_to_service(self) -> "AuditEvent":

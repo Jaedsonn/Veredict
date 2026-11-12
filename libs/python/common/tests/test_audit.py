@@ -91,6 +91,7 @@ def test_invalid_actions(service: str, action: str) -> None:
         {"extra": 1},
         {"metadata": {"x": object()}},
         {"actor_ip": "999.1.1.1"},
+        {"actor_ip": "fe80::1%" + "a" * 80},
     ],
 )
 def test_constraints_from_ddl(overrides: dict[str, Any]) -> None:

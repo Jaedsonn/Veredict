@@ -164,6 +164,8 @@ async def test_non_http_scope_passes_through_unchanged() -> None:
         ("203.0.113.5, 10.0.0.1", "203.0.113.5"),
         ("2001:db8::1", "2001:db8::1"),
         ("nao-e-ip", "10.0.0.9"),
+        ("fe80::1%" + "a" * 80, "10.0.0.9"),
+        ("fe80::1%eth0", "fe80::1%eth0"),
         (None, "10.0.0.9"),
     ],
 )
@@ -221,3 +223,12 @@ async def test_defer_without_middleware_fails_loudly() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
         with pytest.raises(RuntimeError, match="RequestContextMiddleware"):
             await client.get("/x")
+
+
+async def test_client_ip_ignores_client_host_that_is_not_an_ip() -> None:
+    app = _app()
+    transport = ASGITransport(app=app, client=("testclient", 1234))
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/ip")
+
+    assert resp.json() == {"ip": None}

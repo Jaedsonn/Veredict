@@ -17,6 +17,7 @@ from veriditi_common.errors import internal_error_response
 from veriditi_common.logging import get_logger
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"
+MAX_IP_LENGTH: Final = 45  # actor_ip VARCHAR(45) em audit_events
 _QUIET_PREFIX: Final = "/health/"
 _DEFERRED_KEY: Final = "veriditi_deferred"
 
@@ -107,12 +108,18 @@ def current_request_id() -> str | None:
     return rid if isinstance(rid, str) else None
 
 
+def _valid_ip(raw: str) -> str | None:
+    """Normalizado e cabendo em actor_ip VARCHAR(45); scope id longo é recusado"""
+    try:
+        ip = str(ipaddress.ip_address(raw.strip()))
+    except ValueError:
+        return None
+    return ip if len(ip) <= MAX_IP_LENGTH else None
+
+
 def client_ip(request: Request) -> str | None:
     """O gateway (#11) sobrescreve o X-Forwarded-For com um único IP real"""
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        try:
-            return str(ipaddress.ip_address(forwarded.split(",")[0].strip()))
-        except ValueError:
-            pass
-    return request.client.host if request.client else None
+    if forwarded and (ip := _valid_ip(forwarded.split(",")[0])):
+        return ip
+    return _valid_ip(request.client.host) if request.client else None
