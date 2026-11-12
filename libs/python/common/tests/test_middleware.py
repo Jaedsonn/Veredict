@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import uuid
@@ -18,6 +19,7 @@ from veriditi_common.middleware import (
     RequestContextMiddleware,
     client_ip,
     current_request_id,
+    defer,
 )
 
 JsonLogs = Callable[[], list[dict[str, Any]]]
@@ -171,3 +173,51 @@ async def test_client_ip(forwarded: str | None, expected: str) -> None:
     resp = await _get("/ip", headers=headers)
 
     assert resp.json() == {"ip": expected}
+
+
+async def test_deferred_tasks_run_after_response_even_on_error(json_logs: JsonLogs) -> None:
+    order: list[str] = []
+    app = FastAPI()
+    install_error_handlers(app)
+
+    async def task(name: str) -> None:
+        order.append(name)
+
+    async def failing() -> None:
+        raise RuntimeError("tarefa quebrou")
+
+    @app.get("/x")
+    async def x(request: Request) -> None:
+        defer(request, failing)
+        defer(request, task, "depois")
+        raise AppError(400, "invalid_code", "Código incorreto.")
+
+    app.add_middleware(RequestContextMiddleware)
+
+    async def outer(scope: Scope, receive: Receive, send: Send) -> None:
+        async def spy(message: Message) -> None:
+            if message["type"] == "http.response.body" and not message.get("more_body"):
+                order.append("resposta")
+            await send(message)
+
+        await app(scope, receive, spy)
+
+    async with AsyncClient(transport=ASGITransport(app=outer), base_url="http://t") as client:
+        resp = await client.get("/x")
+
+    assert resp.status_code == 400
+    assert order == ["resposta", "depois"]
+    [failed] = [e for e in json_logs() if e["event"] == "deferred_task_failed"]
+    assert failed["request_id"] == resp.headers[REQUEST_ID_HEADER]
+
+
+async def test_defer_without_middleware_fails_loudly() -> None:
+    app = FastAPI()
+
+    @app.get("/x")
+    async def x(request: Request) -> None:
+        defer(request, asyncio.sleep, 0)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        with pytest.raises(RuntimeError, match="RequestContextMiddleware"):
+            await client.get("/x")

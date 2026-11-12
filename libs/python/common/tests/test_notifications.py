@@ -11,7 +11,7 @@ from pydantic import SecretStr, ValidationError
 from structlog.contextvars import bound_contextvars
 from structlog.testing import capture_logs
 
-from veriditi_common.errors import install_error_handlers
+from veriditi_common.errors import AppError, install_error_handlers
 from veriditi_common.middleware import REQUEST_ID_HEADER, RequestContextMiddleware
 from veriditi_common.notifications import (
     HttpNotifier,
@@ -201,4 +201,23 @@ def test_get_notifier_requires_app_state() -> None:
     request = Request({"type": "http", "app": FastAPI()})
 
     with pytest.raises(RuntimeError, match="notifier"):
-        get_notifier(request, background_tasks=None)  # type: ignore[arg-type]
+        get_notifier(request)
+
+
+async def test_notification_is_delivered_when_route_fails() -> None:
+    app = FastAPI()
+    install_error_handlers(app)
+    app.state.notifier = InMemoryNotifier()
+
+    @app.post("/x")
+    async def trigger(notifier: NotifierDep) -> None:
+        await notifier.send(_request())
+        raise AppError(429, "too_many_attempts", "Muitas tentativas.")
+
+    app.add_middleware(RequestContextMiddleware)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        resp = await client.post("/x")
+
+    assert resp.status_code == 429
+    assert len(app.state.notifier.sent) == 1

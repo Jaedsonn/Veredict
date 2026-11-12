@@ -21,7 +21,7 @@ from veriditi_common.audit import (
     InMemoryAuditLogger,
     get_audit_logger,
 )
-from veriditi_common.errors import install_error_handlers
+from veriditi_common.errors import AppError, install_error_handlers
 from veriditi_common.middleware import REQUEST_ID_HEADER, RequestContextMiddleware
 
 JsonLogs = Callable[[], list[dict[str, Any]]]
@@ -247,8 +247,44 @@ def test_get_audit_logger_requires_app_state() -> None:
     request = Request({"type": "http", "app": FastAPI()})
 
     with pytest.raises(RuntimeError, match="audit_logger"):
-        get_audit_logger(request, background_tasks=None)  # type: ignore[arg-type]
+        get_audit_logger(request)
 
 
 def test_event_id_is_uuid() -> None:
     assert isinstance(_event().event_id, uuid.UUID)
+
+
+def _audited_app(audit: InMemoryAuditLogger) -> FastAPI:
+    app = FastAPI()
+    install_error_handlers(app)
+    app.state.audit_logger = audit
+
+    @app.post("/ok")
+    async def ok(audit: AuditLoggerDep) -> dict[str, str]:
+        await audit.record(_event())
+        return {"ok": "1"}
+
+    @app.post("/login")
+    async def login(audit: AuditLoggerDep) -> None:
+        await audit.record(_event(action="auth.session.login_failed", outcome="failure"))
+        raise AppError(401, "invalid_credentials", "E-mail ou senha incorretos.")
+
+    @app.post("/boom")
+    async def boom(audit: AuditLoggerDep) -> None:
+        await audit.record(_event(action="auth.session.login_failed", outcome="failure"))
+        raise RuntimeError("explodiu")
+
+    app.add_middleware(RequestContextMiddleware)
+    return app
+
+
+@pytest.mark.parametrize(("path", "status"), [("/ok", 200), ("/login", 401), ("/boom", 500)])
+async def test_event_is_delivered_exactly_once_even_on_error(path: str, status: int) -> None:
+    audit = InMemoryAuditLogger()
+    app = _audited_app(audit)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        resp = await client.post(path)
+
+    assert resp.status_code == status
+    assert len(audit.events) == 1

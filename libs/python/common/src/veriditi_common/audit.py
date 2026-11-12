@@ -6,7 +6,7 @@ from typing import Annotated, Any, Final, Protocol
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import BackgroundTasks, Depends, Request
+from fastapi import Depends, Request
 from pydantic import (
     AwareDatetime,
     BaseModel,
@@ -20,7 +20,7 @@ from pydantic import (
 )
 
 from veriditi_common.logging import get_logger
-from veriditi_common.middleware import REQUEST_ID_HEADER, current_request_id
+from veriditi_common.middleware import REQUEST_ID_HEADER, current_request_id, defer
 from veriditi_common.security import INTERNAL_TOKEN_HEADER
 
 AUDIT_EVENTS_PATH: Final = "/internal/events"
@@ -122,21 +122,21 @@ class InMemoryAuditLogger:
 
 
 class BackgroundAuditLogger:
-    """Adia o envio para depois da resposta, sem o caso de uso saber de BackgroundTasks"""
+    """Adia o envio para depois da resposta, mesmo de erro, sem o caso de uso saber disso"""
 
-    def __init__(self, inner: AuditLogger, tasks: BackgroundTasks) -> None:
+    def __init__(self, inner: AuditLogger, request: Request) -> None:
         self._inner = inner
-        self._tasks = tasks
+        self._request = request
 
     async def record(self, event: AuditEvent) -> None:
-        self._tasks.add_task(self._inner.record, event)
+        defer(self._request, self._inner.record, event)
 
 
-def get_audit_logger(request: Request, background_tasks: BackgroundTasks) -> AuditLogger:
+def get_audit_logger(request: Request) -> AuditLogger:
     inner: AuditLogger | None = getattr(request.app.state, "audit_logger", None)
     if inner is None:
         raise RuntimeError("app.state.audit_logger não foi definido no lifespan")
-    return BackgroundAuditLogger(inner, background_tasks)
+    return BackgroundAuditLogger(inner, request)
 
 
 AuditLoggerDep = Annotated[AuditLogger, Depends(get_audit_logger)]

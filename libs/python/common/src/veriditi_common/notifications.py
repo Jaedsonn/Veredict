@@ -4,11 +4,11 @@ from enum import StrEnum
 from typing import Annotated, Any, Final, Protocol
 
 import httpx
-from fastapi import BackgroundTasks, Depends, Request
+from fastapi import Depends, Request
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, JsonValue, SecretStr
 
 from veriditi_common.logging import get_logger, mask_email
-from veriditi_common.middleware import REQUEST_ID_HEADER, current_request_id
+from veriditi_common.middleware import REQUEST_ID_HEADER, current_request_id, defer
 from veriditi_common.security import INTERNAL_TOKEN_HEADER
 
 NOTIFICATIONS_PATH: Final = "/internal/notifications"
@@ -92,21 +92,21 @@ class InMemoryNotifier:
 
 
 class BackgroundNotifier:
-    """Adia o envio para depois da resposta, sem o caso de uso saber de BackgroundTasks"""
+    """Adia o envio para depois da resposta, mesmo de erro, sem o caso de uso saber disso"""
 
-    def __init__(self, inner: Notifier, tasks: BackgroundTasks) -> None:
+    def __init__(self, inner: Notifier, http_request: Request) -> None:
         self._inner = inner
-        self._tasks = tasks
+        self._http_request = http_request
 
     async def send(self, request: NotificationRequest) -> None:
-        self._tasks.add_task(self._inner.send, request)
+        defer(self._http_request, self._inner.send, request)
 
 
-def get_notifier(request: Request, background_tasks: BackgroundTasks) -> Notifier:
+def get_notifier(request: Request) -> Notifier:
     inner: Notifier | None = getattr(request.app.state, "notifier", None)
     if inner is None:
         raise RuntimeError("app.state.notifier não foi definido no lifespan")
-    return BackgroundNotifier(inner, background_tasks)
+    return BackgroundNotifier(inner, request)
 
 
 NotifierDep = Annotated[Notifier, Depends(get_notifier)]
