@@ -175,7 +175,8 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
   - Injeta `X-User-Id`, `X-Request-ID`, `X-Forwarded-For` e o token interno, removendo esses cabeçalhos se vierem do cliente.
   - Notificação e Monitoramento não têm rota.
   - Timeout de upstream de 5 s.
-  - Rate limit de login e cadastro.
+  - Rate limit de login, cadastro e reenvio do código.
+- **Estado (#11):** gateway implementado em `services/gateway` (tabela de rotas, JWT RS256, rate limit, anti-spoofing, 502/503/504, `/health/ready` agregado), com testes de API para cada critério abaixo. O fluxo de ponta a ponta depende do auth com os endpoints (#7–#10).
 - **Critério de verificação:**
   1. `GET /api/me` sem token → `401`; com um token adulterado → `401`.
   2. `X-User-Id` forjado pelo cliente é ignorado.
@@ -222,8 +223,8 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 
 | ID | Como verificar | Situação na `main` |
 |---|---|---|
-| RNF01 | `password_hash` começa com `$argon2id$`; token adulterado → `401`; 6.º login no minuto → `429`; `docker compose ps` mostra porta publicada só no gateway, na web, no Mailpit e no MySQL (dev); no DevTools, os cookies `vrd_*` são `HttpOnly`; `make db-test-contract` prova o privilégio mínimo | Cookies `httpOnly` e anti *open redirect* na web; usuários MySQL por serviço e teste de contrato prontos; Argon2id, JWT e rate limit dependem de #7, #9 e #11 |
-| RNF02 | Com o serviço de autenticação parado, a web mostra "Serviço indisponível" e continua navegável, e o gateway responde `503` | Timeout de 8 s e mensagem de indisponibilidade na web; `/health/live` e `/health/ready` na lib comum; gateway pendente (#11) |
+| RNF01 | `password_hash` começa com `$argon2id$`; token adulterado → `401`; 6.º login no minuto → `429`; `docker compose ps` mostra porta publicada só no gateway, na web, no Mailpit e no MySQL (dev); no DevTools, os cookies `vrd_*` são `HttpOnly`; `make db-test-contract` prova o privilégio mínimo | Cookies `httpOnly` e anti *open redirect* na web; usuários MySQL por serviço e teste de contrato prontos; validação do JWT, rate limit (login, cadastro e reenvio) e porta do gateway só no loopback prontos no gateway (#11); Argon2id e emissão do JWT dependem de #7 e #9 |
+| RNF02 | Com o serviço de autenticação parado, a web mostra "Serviço indisponível" e continua navegável, e o gateway responde `503` | Timeout de 8 s e mensagem de indisponibilidade na web; `/health/live` e `/health/ready` na lib comum; gateway responde `503`/`504` e continua de pé com o auth parado (#11) |
 | RNF03 | Toda ação dos RFs da Sprint 1 aparece em `audit_events` com `actor_id`, `actor_ip` e `occurred_at` em UTC | A web repassa `X-Forwarded-For` e `User-Agent`; tabela modelada e database criada; serviço pendente (#5) |
 | RNF04 | Objeto em bucket com Object Lock; restaurar o backup do dia em outra máquina | Sprint 2 |
 | RNF05 | CI verde em todo PR; `pytest --cov` ≥ 70% em cada serviço | CI com lint, tipos, testes e build (jobs `backend`, `web`, `docker`); testes na lib comum e no template; meta de cobertura e matriz por serviço em #15 |
@@ -279,7 +280,7 @@ Nenhum RF fora da lista RF01–RF21. Uma funcionalidade nova entra primeiro aqui
 | RF06 | #10, #14 (PR #46) | `app/(app)/perfil/`, `lib/user.ts` | `services/auth` (a criar) | `users` (5.1) |
 | RF11 | #6 | — | `services/notification` | `notifications_sent` (5.4) |
 | RF18 | #4, #5, #41 (PR #49) | `lib/gateway.ts` (repassa IP e User-Agent) | `services/monitoring` (a criar); `docker/mysql/init/` | `veriditi_logs.audit_events` (5.5) |
-| RF21 | #11, #3 | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` (PR #44/#47) | `services/gateway` (a criar) | — |
+| RF21 | #11, #3 | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` (PR #44/#47) | `services/gateway` | — |
 
 As seções de banco referem-se a [`banco-de-dados.md`](banco-de-dados.md). Hoje, o único serviço Python no repositório é o template `services/users`, que vira `services/auth` no #3.
 

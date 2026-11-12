@@ -14,10 +14,10 @@ Além de rotear, o gateway precisa validar o JWT de toda chamada, aplicar rate l
 
 - **Previsto:** um componente API Gateway, sem tecnologia definida (seções 4 e 4.1).
 - **No repositório:**
-  - O gateway ainda não existe (#11; o esqueleto nasce no #3).
-  - A web só conhece `GATEWAY_URL` (`apps/web/src/lib/config.ts`).
-  - Os contratos das rotas são exercitados pelo mock `apps/web/mock/gateway.mjs` (PR #44).
-  - O `docker-compose.yml` já aponta a web para `http://gateway:8000`, um serviço ainda não definido.
+  - O gateway é o serviço `services/gateway` (esqueleto no #3, roteamento no #11).
+  - A web só conhece `GATEWAY_URL` (`apps/web/src/lib/config.ts`), que no compose é `http://gateway:8000`.
+  - A tabela de rotas, a validação do JWT RS256, o rate limit e a propagação de contexto estão descritos no README ("API Gateway").
+  - O mock `apps/web/mock/gateway.mjs` (PR #44) continua para desenvolver a web sem o auth.
 - **Motivação:** usar a mesma stack dos serviços (Python/FastAPI e `veriditi_common`) para validação de JWT, regras de autorização e logging estruturado.
 
 ## Decisão
@@ -26,7 +26,7 @@ Implementar a API Gateway como um **serviço FastAPI próprio** em `services/gat
 
 - proxy reverso para `/api/auth/*` e `/api/me` na Sprint 1 e para pagamento, captura e armazenamento na Sprint 2;
 - validação da assinatura e da expiração do JWT antes de repassar a chamada;
-- rate limit no login;
+- rate limit no login, no cadastro e no reenvio do código;
 - propagação de `X-User-Id`, `X-Request-ID` e do IP de origem;
 - `/health/ready` agregado, consumido por `apps/web/src/app/api/health/route.ts`.
 
@@ -38,7 +38,7 @@ TLS e a porta pública ficam num proxy de borda (Caddy, #17), não no gateway.
 - (+) Regras de autenticação ficam em código Python testável, não em configuração.
 - (−) É código a manter: cada rota nova exige mudança no gateway.
 - (−) Desempenho de proxy inferior a soluções dedicadas (Nginx, Envoy). Aceitável para o volume esperado, mas deve ser medido no teste de carga (#38).
-- (−) Até o #11 existir, a web depende do mock para desenvolvimento.
+- (−) Sem o auth com os endpoints (#7–#10), a web ainda depende do mock para desenvolvimento.
 
 ## Alternativas consideradas
 

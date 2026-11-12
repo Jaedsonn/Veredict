@@ -42,7 +42,7 @@ Nenhuma ADR de desvio pode ser marcada como **Aceita** sem o registro do aceite.
 | [015](0015-log-storage-em-database-mysql-separada.md) | Log Storage como database MySQL separada (`veriditi_logs`) | Proposta | 001, 010, 012 | Em uso: `audit_events` append-only (`SELECT, INSERT`); `operational_logs` na Sprint 2 | #3, #5 |
 | [016](0016-comunicacao-interna-http-fire-and-forget.md) | Comunicação interna por HTTP "fire-and-forget" na Sprint 1 | Proposta | 005, 012 | Em uso: consumidores no monitoring (#5) e no notification (#6); produtores a partir do #7 | #4, #5, #6 |
 | [017](0017-aplicacao-web-nextjs-com-bff.md) | Aplicação Web em Next.js com padrão BFF | Proposta | 006 | Em uso | #12 |
-| [018](0018-api-gateway-como-servico-fastapi.md) | API Gateway como serviço FastAPI próprio | Proposta | 005 | Planejada (mock em `apps/web/mock`) | #11 |
+| [018](0018-api-gateway-como-servico-fastapi.md) | API Gateway como serviço FastAPI próprio | Proposta | 005 | Em uso (#11) | #11 |
 | [019](0019-minio-como-object-storage.md) | MinIO como Object Storage | Proposta | 004, 010 | Planejada (Sprint 2) | #26 |
 | [020](0020-banco-central-compartilhado-com-posse-por-servico.md) | Banco Central compartilhado com posse por serviço e privilégio mínimo | Proposta | 005, 010, 015 | Em uso | #41 |
 | [021](0021-datas-utc-datetime6.md) | Datas em UTC com DATETIME(6) | Proposta | 001 | Em uso | #41 |
