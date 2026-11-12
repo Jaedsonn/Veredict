@@ -19,6 +19,14 @@ veriditi/
 └── pyproject.toml            # uv workspace (um único uv.lock)
 ```
 
+## Documentação
+
+| Documento | Conteúdo |
+| --------- | -------- |
+| [Requisitos e escopo](docs/requisitos.md) | RF01–RF21, RNF01–RNF08, escopo da Sprint 1 (30%) e rastreabilidade |
+| [ADRs](docs/adr/README.md) | Decisões de arquitetura e desvios em relação ao documento original |
+| [Banco de dados](docs/banco-de-dados.md) | Modelo de dados, posse por serviço e privilégios |
+
 ## Pré-requisitos
 
 Node 22+, [uv](https://docs.astral.sh/uv/), Docker com Compose.
@@ -60,14 +68,3 @@ npm run dev:web        # terminal 2 — http://localhost:3000 (usa GATEWAY_URL, 
 ```
 
 `MOCK_ACCESS_TTL_S=20 npm run mock:gateway` encurta o access token para testar a renovação de sessão.
-
-## Criando um novo serviço ( Leia isso se você é backend ou está trabalhando no backend)
-
-1. Copie `services/users` para `services/<nome>` e renomeie o pacote
-   (`<nome>-service` / `<nome>_service`) no `pyproject.toml` e nos imports.
-2. Em `migrations/env.py`, troque `VERSION_TABLE` para `alembic_version_<nome>`
-   e apague as migrations antigas de `migrations/versions/`.
-3. Adicione o pacote às `dependencies` e `[tool.uv.sources]` do `pyproject.toml`
-   da raiz e rode `uv sync`.
-4. Adicione `<nome>-migrate` e `<nome>` no `docker-compose.yml` e a URL em
-   `apps/web/src/lib/services.ts`.
