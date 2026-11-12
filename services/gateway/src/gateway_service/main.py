@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from gateway_service.adapters.jwt_verifier import RS256JwtVerifier
 from gateway_service.adapters.reverse_proxy import block_cookies, build_http_client
@@ -67,6 +68,16 @@ def create_app(
     )
     app.include_router(proxy.router)
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
+    # Bearer e não cookie: sem credenciais; o BFF chama server-to-server e nem manda Origin
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[settings.web_origin],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "Accept-Language"],
+        expose_headers=["Retry-After", "X-Request-ID"],
+        allow_credentials=False,
+        max_age=600,
+    )
     # Sempre o último add_middleware, para ficar por fora do CORS e do limite de corpo
     app.add_middleware(RequestContextMiddleware, trust_request_id=False)
     return app
