@@ -3,11 +3,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ServiceSettings(BaseSettings):
-    """Configuração base de qualquer serviço, lida de variáveis de ambiente.
+    """Configuração base de qualquer serviço, lida de variáveis de ambiente
 
-    Todos os serviços compartilham o MESMO banco, então as variáveis DB_*
-    são comuns (DB_HOST, DB_NAME, ...). Configs específicas de um serviço
-    são declaradas na subclasse dele.
+    Cada serviço conecta com dois usuários MySQL: o de runtime (DB_USER), só com
+    DML nas próprias tabelas, e o `migrator` (DB_MIGRATOR_USER), com DDL, usado
+    apenas pelo Alembic
     """
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -17,14 +17,27 @@ class ServiceSettings(BaseSettings):
 
     db_host: str = "localhost"
     db_port: int = 3306
+    db_name: str = "veriditi"  # o monitoring usa "veriditi_logs"
     db_user: str
-    db_password: SecretStr
-    db_name: str
+    db_password: SecretStr | None = None
+    db_migrator_user: str | None = None
+    db_migrator_password: SecretStr | None = None
+
+    def _url(self, user: str, password: SecretStr) -> str:
+        pwd = password.get_secret_value()
+        return (
+            f"mysql+aiomysql://{user}:{pwd}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
+        )
 
     @property
     def database_url(self) -> str:
-        pwd = self.db_password.get_secret_value()
-        return (
-            f"mysql+aiomysql://{self.db_user}:{pwd}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
-        )
+        if self.db_password is None:
+            raise RuntimeError("DB_PASSWORD não definido para o usuário de runtime")
+        return self._url(self.db_user, self.db_password)
+
+    @property
+    def migration_database_url(self) -> str:
+        if self.db_migrator_user is None or self.db_migrator_password is None:
+            raise RuntimeError("DB_MIGRATOR_USER e DB_MIGRATOR_PASSWORD são obrigatórios")
+        return self._url(self.db_migrator_user, self.db_migrator_password)
