@@ -226,6 +226,7 @@ async def test_deferred_tasks_run_after_response_even_on_error(json_logs: JsonLo
     assert order == ["resposta", "depois"]
     [failed] = [e for e in json_logs() if e["event"] == "deferred_task_failed"]
     assert failed["request_id"] == resp.headers[REQUEST_ID_HEADER]
+    assert failed["task"].endswith("failing")
 
 
 async def test_defer_without_middleware_fails_loudly() -> None:
@@ -292,3 +293,33 @@ async def test_defer_after_drain_raises() -> None:
     with pytest.raises(RuntimeError, match="drenada"):
         defer(late[0], asyncio.sleep, 0)
     assert try_defer(late[0], asyncio.sleep, 0) is False
+
+
+async def test_cancelled_drain_logs_dropped_tasks(json_logs: JsonLogs) -> None:
+    started = asyncio.Event()
+    app = FastAPI()
+
+    async def slow() -> None:
+        started.set()
+        await asyncio.sleep(10)
+
+    @app.get("/x")
+    async def x(request: Request) -> None:
+        defer(request, slow)
+        defer(request, asyncio.sleep, 0)
+
+    app.add_middleware(RequestContextMiddleware)
+
+    async def call() -> None:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+            await client.get("/x")
+
+    request_task = asyncio.create_task(call())
+    await started.wait()
+    request_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request_task
+
+    [dropped] = [e for e in json_logs() if e["event"] == "deferred_tasks_dropped"]
+    assert dropped["count"] == 2
+    assert dropped["level"] == "error"

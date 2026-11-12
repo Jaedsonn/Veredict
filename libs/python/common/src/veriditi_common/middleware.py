@@ -63,14 +63,26 @@ def defer(request: Request, func: Callable[..., Awaitable[None]], *args: Any) ->
         raise RuntimeError("A fila de tarefas adiadas desta requisição já foi drenada")
 
 
+def _task_name(task: DeferredTask) -> str:
+    func = task.func if isinstance(task, functools.partial) else task
+    return str(getattr(func, "__qualname__", repr(func)))
+
+
 async def _run_deferred(queue: _DeferredQueue) -> None:
+    running = False
     try:
         while queue.tasks:
             task = queue.tasks.pop(0)
+            running = True
             try:
                 await task()
             except Exception:
-                log.exception("deferred_task_failed")
+                log.exception("deferred_task_failed", task=_task_name(task))
+            running = False
+    except BaseException:
+        # Cancelamento no shutdown: registra o que se perdeu antes de propagar
+        log.error("deferred_tasks_dropped", count=len(queue.tasks) + int(running))
+        raise
     finally:
         queue.closed = True
 
