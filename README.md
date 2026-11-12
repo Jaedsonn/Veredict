@@ -40,14 +40,17 @@ make up        # sobe mysql + migrations + serviços + web
 | Health agregado (web)     | http://localhost:3000/api/health   |
 | Gateway                   | http://localhost:8080/health/ready |
 | Mailpit (e-mails de dev)  | http://localhost:8025              |
-| Mailpit SMTP              | localhost:1025                     |
+| Mailpit SMTP              | localhost:1025 (`MAILPIT_SMTP_PORT`) |
 | MySQL (host)              | localhost:3307                     |
 
-`auth`, `notification` e `monitoring` não publicam porta: só o gateway e a
-web são acessíveis de fora da rede do compose. MySQL e Mailpit ficam presos a
-`127.0.0.1`. O SMTP do Mailpit (1025) também é publicado, por decisão
-consciente: sem ele o `make dev s=notification` fora do Docker não teria onde
-entregar e-mail. Dentro do compose o notification usa sempre `mailpit:1025`.
+As portas do host vêm do `.env` (`WEB_PORT`, `GATEWAY_PORT`, `MAILPIT_UI_PORT`,
+`MAILPIT_SMTP_PORT`, `DB_PORT`). `auth`, `notification` e `monitoring` não
+publicam porta: só o gateway e a web são acessíveis de fora da rede do compose.
+MySQL e Mailpit ficam presos a `127.0.0.1`. O SMTP do Mailpit também é
+publicado, por decisão consciente: sem ele o `make dev s=notification` fora do
+Docker não teria onde entregar e-mail. Ao mudar o `MAILPIT_SMTP_PORT`, mude
+também o `SMTP_PORT` do `.env`, que é a porta usada pelo notification fora do
+Docker. Dentro do compose o notification usa sempre `mailpit:1025`.
 
 ### Banco
 
