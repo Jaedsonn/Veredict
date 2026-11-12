@@ -10,11 +10,16 @@ from veriditi_common.db import Database
 
 
 @pytest.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    db = Database("sqlite+aiosqlite:///:memory:")
-    async with db.engine.begin() as conn:
+async def db() -> AsyncIterator[Database]:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    async with database.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    yield database
+    await database.dispose()
 
+
+@pytest.fixture
+async def client(db: Database) -> AsyncIterator[AsyncClient]:
     settings = Settings(_env_file=None, db_user="test", db_password="test")  # type: ignore[call-arg, arg-type]
     app = create_app(settings=settings, db=db)
 
