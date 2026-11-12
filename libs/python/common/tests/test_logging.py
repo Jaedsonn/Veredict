@@ -203,6 +203,22 @@ def test_redact_sensitive_compares_case_and_separator_insensitively() -> None:
         "seed",
         "totp_seed",
         "ｐａｓｓｗｏｒｄ",
+        # 2ª revisão do #5: 2FA, passcode, novos prefixos e separadores : e /
+        "2FA_code",
+        "2FACode",
+        "user2faCode",
+        "2_fa_code",
+        "passcode",
+        "userPasscode",
+        "activation_code",
+        "verify_code",
+        "confirm_code",
+        "two_factor_code",
+        "twoFactorCode",
+        "tfa_code",
+        "magic_code",
+        "auth:code",
+        "auth/code",
     ],
 )
 def test_sensitive_key_variants(key: str | bytes) -> None:
@@ -270,6 +286,12 @@ def test_sensitive_key_variants(key: str | bytes) -> None:
         "codigo_ibge",
         "código_postal",
         "codigos_erro",
+        "activation_error_code",
+        "verify_status_code",
+        "magic_link_status_code",
+        "two_factor_error_code",
+        "2fa_enabled",
+        "api/status_code",
     ],
 )
 def test_non_sensitive_keys(key: object) -> None:

@@ -128,12 +128,13 @@ acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`.
 A redação troca por `[redacted]` o valor de chaves sensíveis, em qualquer
 nível do evento (`is_sensitive_key` em `veriditi_common/logging.py`):
 
-- o nome é normalizado: camelCase, acentos, `-`, `.` e espaço (`apiKey`, `X-Api-Key`,
-  `auth.code` e `código` viram `api_key`, `x_api_key`, `auth_code` e `codigo`);
+- o nome é normalizado: camelCase, acentos, `-`, `.`, `:`, `/`, espaço e `2FA`
+  (`apiKey`, `X-Api-Key`, `auth.code`, `código` e `2FACode` viram `api_key`, `x_api_key`,
+  `auth_code`, `codigo` e `2fa_code`);
 - é sensível o nome que contém `password`, `passphrase`, `secret`, `token`,
   `authorization`, `cookie`, `credential`, `signature`, `private_key`,
   `api_key`, `access_key`, `signing_key`, `encryption_key`, `session_key`,
-  `database_url` ou `otpauth`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`,
+  `database_url`, `otpauth` ou `passcode`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`,
   `jwt`, `dsn`, `hmac`, `seed` e afins;
 - `code`, `codes`, `codigo` e `codigos` sozinhos são sensíveis; com mais segmentos, só
   quando o segmento logo antes é prefixo de segredo (`verification_code`,

@@ -32,6 +32,7 @@ SENSITIVE_KEY_PARTS: Final[frozenset[str]] = frozenset(
         "session_key",
         "database_url",
         "otpauth",
+        "passcode",
     }
 )
 # Sensíveis quando são um segmento inteiro do nome (otp, mas não footprint)
@@ -56,6 +57,11 @@ _SENSITIVE_SEGMENTS: Final = frozenset(
 _SECRET_CODE_PREFIXES: Final = frozenset(
     {
         "verification",
+        "verify",
+        "activation",
+        "confirm",
+        "magic",
+        "tfa",
         "otp",
         "totp",
         "mfa",
@@ -111,7 +117,9 @@ _UNTOUCHED_KEYS: Final = frozenset({"exc_info", "stack_info", "_record", "_from_
 
 
 _CAMEL_BOUNDARY: Final = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
-_SEPARATORS: Final = re.compile(r"[\s.\-]+")
+_SEPARATORS: Final = re.compile(r"[\s.\-:/]+")
+# 2FA_code, 2FACode e user2faCode chegam como 2_fa, 2fa colado ou com o 2 separado
+_TWO_FA: Final = re.compile(r"_?2_?fa(?=_|$)")
 
 
 def _strip_accents(key: str) -> str:
@@ -119,8 +127,9 @@ def _strip_accents(key: str) -> str:
 
 
 def _normalize(key: str) -> str:
-    """apiKey, X-Api-Key, auth.code e código viram api_key, x_api_key, auth_code e codigo"""
-    return _SEPARATORS.sub("_", _CAMEL_BOUNDARY.sub("_", _strip_accents(key)).lower())
+    """apiKey, X-Api-Key, auth:code e código viram api_key, x_api_key, auth_code e codigo"""
+    normalized = _SEPARATORS.sub("_", _CAMEL_BOUNDARY.sub("_", _strip_accents(key)).lower())
+    return _TWO_FA.sub("_2fa", normalized).lstrip("_")
 
 
 def _is_secret_code(segments: list[str]) -> bool:
