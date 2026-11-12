@@ -173,7 +173,8 @@ internas, exigem `X-Internal-Token` e não passam pelo gateway:
 - `POST /internal/events` responde `202 {"status":"accepted"}`, inclusive no reenvio
   do mesmo `event_id`, que não duplica;
 - o corpo vai até 64 KiB (acima, `413 payload_too_large`) e o `metadata` até 16 KiB em
-  JSON e 8 níveis de aninhamento (acima, 422);
+  JSON e 8 níveis de aninhamento (acima, 422; com uns 10 mil níveis o `json.loads` desiste
+  antes e a resposta é `400 http_error`);
 - `GET /internal/events` filtra por `actor_id`, `action` e `[from, to)` e pagina por
   `after_id` (`limit` até 200, `next_cursor` nulo na última página). No fuso, use `Z` ou
   `%2B00:00`: um `+` cru na URL vira espaço e dá 422. O cursor pagina eventos já
