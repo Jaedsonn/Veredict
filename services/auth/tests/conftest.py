@@ -3,10 +3,10 @@
 from collections.abc import AsyncIterator
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from auth_service.adapters.clock import FakeClock
 from auth_service.adapters.password_hasher import Argon2PasswordHasher
@@ -18,23 +18,54 @@ from veriditi_common.audit import InMemoryAuditLogger
 from veriditi_common.db import Database
 from veriditi_common.notifications import InMemoryNotifier
 
-TEST_INTERNAL_TOKEN = "test-internal-token"
-TEST_PEPPER = "test-verification-pepper"
+TOKEN = "test-internal-token-0123456789"
+TEST_INTERNAL_TOKEN = TOKEN
+TEST_PEPPER = "test-verification-pepper-0123456789"
+
+
+@pytest.fixture(scope="session")
+def rsa_keypair() -> tuple[str, str]:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    pub_pem = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("utf-8")
+    )
+    return priv_pem, pub_pem
 
 
 @pytest.fixture
-def test_settings() -> Settings:
+def settings(rsa_keypair: tuple[str, str]) -> Settings:
+    priv_pem, pub_pem = rsa_keypair
     return Settings(
+        _env_file=None,  # type: ignore[call-arg]
         service_name="auth",
-        internal_api_token=SecretStr(TEST_INTERNAL_TOKEN),
+        db_user="test",
+        db_password=SecretStr("test"),
+        internal_api_token=SecretStr(TOKEN),
         verification_pepper=SecretStr(TEST_PEPPER),
         verification_code_ttl_minutes=15,
         verification_max_attempts=5,
         verification_resend_cooldown_seconds=60,
         verification_max_resends_per_hour=5,
+        jwt_private_key=SecretStr(priv_pem),
+        jwt_public_key=pub_pem,
         access_token_ttl_seconds=900,
         refresh_token_ttl_days=7,
     )
+
+
+@pytest.fixture
+def test_settings(settings: Settings) -> Settings:
+    return settings
 
 
 @pytest.fixture
@@ -43,8 +74,13 @@ def fake_clock() -> FakeClock:
 
 
 @pytest.fixture
-def audit_logger() -> InMemoryAuditLogger:
+def audit() -> InMemoryAuditLogger:
     return InMemoryAuditLogger()
+
+
+@pytest.fixture
+def audit_logger(audit: InMemoryAuditLogger) -> InMemoryAuditLogger:
+    return audit
 
 
 @pytest.fixture
@@ -59,49 +95,40 @@ def password_hasher() -> Argon2PasswordHasher:
 
 
 @pytest.fixture
-def token_issuer(test_settings: Settings) -> PyJwtTokenIssuer:
+def token_issuer(settings: Settings) -> PyJwtTokenIssuer:
     return PyJwtTokenIssuer(
-        private_key_pem=test_settings.resolved_jwt_private_key(),
-        public_key_pem=test_settings.resolved_jwt_public_key(),
-        issuer=test_settings.jwt_issuer,
-        audience=test_settings.jwt_audience,
-        access_ttl_seconds=test_settings.access_token_ttl_seconds,
-        refresh_ttl_days=test_settings.refresh_token_ttl_days,
+        private_key_pem=settings.resolved_jwt_private_key(),
+        public_key_pem=settings.resolved_jwt_public_key(),
+        issuer=settings.jwt_issuer,
+        audience=settings.jwt_audience,
+        access_ttl_seconds=settings.access_token_ttl_seconds,
+        refresh_ttl_days=settings.refresh_token_ttl_days,
     )
 
 
 @pytest.fixture
 async def db() -> AsyncIterator[Database]:
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    async with engine.begin() as conn:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    async with database.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-    database = Database.__new__(Database)
-    database.engine = engine
-    database.session_factory = async_sessionmaker(engine, expire_on_commit=False)
-
     yield database
-    await engine.dispose()
+    await database.dispose()
 
 
 @pytest.fixture
 async def client(
-    test_settings: Settings,
+    settings: Settings,
     db: Database,
     fake_clock: FakeClock,
-    audit_logger: InMemoryAuditLogger,
+    audit: InMemoryAuditLogger,
     notifier: InMemoryNotifier,
     password_hasher: Argon2PasswordHasher,
     token_issuer: PyJwtTokenIssuer,
 ) -> AsyncIterator[AsyncClient]:
     app = create_app(
-        settings=test_settings,
+        settings=settings,
         db=db,
-        audit_logger=audit_logger,
+        audit_logger=audit,
         notifier=notifier,
         clock=fake_clock,
         password_hasher=password_hasher,
@@ -112,6 +139,6 @@ async def client(
         AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",
-        ) as c,
+        ) as ac,
     ):
-        yield c
+        yield ac

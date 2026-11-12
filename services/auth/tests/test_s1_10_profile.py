@@ -2,18 +2,27 @@
 
 from httpx import AsyncClient
 
+from auth_service.adapters.token_issuer import PyJwtTokenIssuer
 from veriditi_common.audit import InMemoryAuditLogger
 from veriditi_common.notifications import InMemoryNotifier
 
-TEST_INTERNAL_TOKEN = "test-internal-token"
+TEST_INTERNAL_TOKEN = "test-internal-token-0123456789"
 
 
-def gateway_headers(user_id: int, email: str = "perfil@example.com") -> dict[str, str]:
-    return {
+def gateway_headers(
+    user_id: int,
+    email: str = "perfil@example.com",
+    *,
+    session_id: str | None = None,
+) -> dict[str, str]:
+    headers = {
         "X-Internal-Token": TEST_INTERNAL_TOKEN,
         "X-User-Id": str(user_id),
         "X-User-Email": email,
     }
+    if session_id is not None:
+        headers["X-Session-Id"] = session_id
+    return headers
 
 
 async def _setup_active_user(
@@ -29,7 +38,8 @@ async def _setup_active_user(
     )
     assert reg.status_code == 201
     user_id: int = reg.json()["id"]
-    code = notifier.find_by_template("email_verification")[-1].data["code"]
+    sent = [n for n in notifier.sent if n.template == "email_verification"]
+    code = sent[-1].data["code"]
     await client.post("/auth/verify-email", json={"email": email, "code": code})
     return user_id
 
@@ -69,7 +79,7 @@ async def test_patch_me_updates_name_ignores_mass_assignment_and_audits_fields(
 
     res = await client.patch(
         "/me",
-        headers=gateway_headers(user_id),
+        headers=gateway_headers(user_id, "patch@example.com"),
         json={
             "name": "  Novo Nome Atualizado  ",
             "email": "atacante@example.com",
@@ -83,15 +93,16 @@ async def test_patch_me_updates_name_ignores_mass_assignment_and_audits_fields(
     assert body["email"] == "patch@example.com"
     assert body["status"] == "active"
 
-    events = audit_logger.find("auth.profile.updated")
+    events = [e for e in audit_logger.events if e.action == "auth.profile.updated"]
     assert len(events) == 1
     assert events[0].actor_id == user_id
     assert events[0].metadata == {"fields": ["name"]}
 
 
-async def test_change_password_validates_current_enforces_policy_and_revokes_other_sessions(
+async def test_change_password_preserves_current_session_via_x_session_id_and_revokes_others(
     client: AsyncClient,
     notifier: InMemoryNotifier,
+    token_issuer: PyJwtTokenIssuer,
     audit_logger: InMemoryAuditLogger,
 ) -> None:
     user_id = await _setup_active_user(client, notifier, email="senha@example.com")
@@ -105,13 +116,16 @@ async def test_change_password_validates_current_enforces_policy_and_revokes_oth
         "/auth/login",
         json={"email": "senha@example.com", "password": "SenhaForte123"},
     )
-    refresh_a = login_a.json()["refresh_token"]
-    refresh_b = login_b.json()["refresh_token"]
+    tokens_a = login_a.json()
+    tokens_b = login_b.json()
+    refresh_a = tokens_a["refresh_token"]
+    refresh_b = tokens_b["refresh_token"]
+    session_id_a: str = token_issuer.decode_access_token(tokens_a["access_token"])["sid"]
 
     # Senha atual incorreta -> 400
     wrong_current = await client.post(
         "/me/password",
-        headers=gateway_headers(user_id),
+        headers=gateway_headers(user_id, "senha@example.com", session_id=session_id_a),
         json={
             "current_password": "SenhaIncorreta999",
             "new_password": "NovaSenhaValida456",
@@ -123,7 +137,7 @@ async def test_change_password_validates_current_enforces_policy_and_revokes_oth
     # Nova senha fraca -> 422
     weak_new = await client.post(
         "/me/password",
-        headers=gateway_headers(user_id),
+        headers=gateway_headers(user_id, "senha@example.com", session_id=session_id_a),
         json={
             "current_password": "SenhaForte123",
             "new_password": "curta",
@@ -131,24 +145,24 @@ async def test_change_password_validates_current_enforces_policy_and_revokes_oth
     )
     assert weak_new.status_code == 422
 
-    # Alteração válida preservando a sessão atual (refresh_a) e revogando refresh_b -> 204
+    # Alteração válida com o contrato oficial `{current_password, new_password}` + `X-Session-Id`
+    # injetado pelo Gateway a partir da claim `sid` do JWT -> preserva a sessão A e revoga a B
     changed = await client.post(
         "/me/password",
-        headers=gateway_headers(user_id),
+        headers=gateway_headers(user_id, "senha@example.com", session_id=session_id_a),
         json={
             "current_password": "SenhaForte123",
             "new_password": "NovaSenhaValida456",
-            "refresh_token": refresh_a,
         },
     )
     assert changed.status_code == 204
-    assert len(audit_logger.find("auth.password.changed")) == 1
+    assert len([e for e in audit_logger.events if e.action == "auth.password.changed"]) == 1
 
     # Outra sessão (refresh_b) foi revogada
     refresh_b_res = await client.post("/auth/refresh", json={"refresh_token": refresh_b})
     assert refresh_b_res.status_code == 401
 
-    # Sessão atual (refresh_a) continua ativa
+    # Sessão atual (refresh_a, identificada por family_id == X-Session-Id) continua ativa
     refresh_a_res = await client.post("/auth/refresh", json={"refresh_token": refresh_a})
     assert refresh_a_res.status_code == 200
 

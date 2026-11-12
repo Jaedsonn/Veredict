@@ -1,7 +1,7 @@
 """Testes da Issue [S1-08] (#8): Verificação de e-mail por código de 6 dígitos (RF02, ADR-007)."""
 
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from auth_service.adapters.clock import FakeClock
 from auth_service.models import EmailVerificationCode, User, UserStatus
@@ -20,7 +20,7 @@ async def _register_and_extract_code(
         json={"name": "Usuária Teste", "email": email, "password": "SenhaForte123"},
     )
     assert r.status_code == 201
-    sent = notifier.find_by_template("email_verification")
+    sent = [n for n in notifier.sent if n.template == "email_verification"]
     assert sent
     code = sent[-1].data["code"]
     assert isinstance(code, str)
@@ -61,8 +61,8 @@ async def test_verify_email_stores_hmac_hash_activates_user_and_sends_welcome(
         assert consumed.consumed_at is not None
 
     # Disparo de notificação `welcome` e evento de auditoria `auth.email.verified`
-    assert len(notifier.find_by_template("welcome")) == 1
-    assert len(audit_logger.find("auth.email.verified")) == 1
+    assert len([n for n in notifier.sent if n.template == "welcome"]) == 1
+    assert len([e for e in audit_logger.events if e.action == "auth.email.verified"]) == 1
 
     # Reutilizar código já consumido retorna 400
     reuse = await client.post(
@@ -75,6 +75,7 @@ async def test_verify_email_stores_hmac_hash_activates_user_and_sends_welcome(
 async def test_verify_email_wrong_code_increments_attempts_and_blocks_at_five(
     client: AsyncClient,
     notifier: InMemoryNotifier,
+    audit_logger: InMemoryAuditLogger,
 ) -> None:
     real_code = await _register_and_extract_code(client, notifier, email="attempts@example.com")
     wrong_code = "000000" if real_code != "000000" else "999999"
@@ -96,6 +97,10 @@ async def test_verify_email_wrong_code_increments_attempts_and_blocks_at_five(
     )
     assert fifth.status_code == 400
     assert fifth.json()["detail"]["code"] == "too_many_attempts"
+
+    # Mesmo em respostas de erro (400), os 5 eventos de falha são gravados via fila adiada
+    failed_events = [e for e in audit_logger.events if e.action == "auth.email.verification_failed"]
+    assert len(failed_events) == 5
 
     # Mesmo enviando o código correto após a 5ª tentativa, deve falhar com 400
     after_lock = await client.post(
@@ -121,21 +126,51 @@ async def test_verify_email_expired_code_returns_400(
     assert res.json()["detail"]["code"] == "code_expired"
 
 
-async def test_resend_code_invalidates_previous_and_enforces_cooldown_and_hourly_limit(
+async def test_verify_email_cannot_reactivate_blocked_account(
+    client: AsyncClient,
+    db: Database,
+    notifier: InMemoryNotifier,
+) -> None:
+    raw_code = await _register_and_extract_code(client, notifier, email="blocked@example.com")
+
+    async with db.session_factory() as session:
+        await session.execute(
+            update(User)
+            .where(User.email == "blocked@example.com")
+            .values(status=UserStatus.BLOCKED)
+        )
+        await session.commit()
+
+    res = await client.post(
+        "/auth/verify-email",
+        json={"email": "blocked@example.com", "code": raw_code},
+    )
+    assert res.status_code == 400
+
+    async with db.session_factory() as session:
+        user = await session.scalar(select(User).where(User.email == "blocked@example.com"))
+        assert user is not None
+        assert user.status == UserStatus.BLOCKED
+
+
+async def test_resend_code_invalidates_previous_and_enforces_cooldown_and_hourly_limit_with_202(
     client: AsyncClient,
     notifier: InMemoryNotifier,
     fake_clock: FakeClock,
 ) -> None:
     first_code = await _register_and_extract_code(client, notifier, email="resend@example.com")
+    assert len([n for n in notifier.sent if n.template == "email_verification"]) == 1
 
-    # Cooldown de 60s: tentar reenviar após 20s retorna 429 com Retry-After
+    # Cooldown de 60s: tentar reenviar após 20s retorna 202 (anti-enumeração) sem enviar novo e-mail
     fake_clock.advance(seconds=20)
     too_soon = await client.post(
         "/auth/verify-email/resend",
         json={"email": "resend@example.com"},
     )
-    assert too_soon.status_code == 429
-    assert int(too_soon.headers["Retry-After"]) == 40
+    assert too_soon.status_code == 202
+    assert too_soon.json() == {"status": "accepted"}
+    assert "Retry-After" not in too_soon.headers
+    assert len([n for n in notifier.sent if n.template == "email_verification"]) == 1
 
     # Avança para completar 60s -> reenvia com sucesso (202 Accepted)
     fake_clock.advance(seconds=45)
@@ -145,8 +180,10 @@ async def test_resend_code_invalidates_previous_and_enforces_cooldown_and_hourly
     )
     assert resend_ok.status_code == 202
     assert resend_ok.json() == {"status": "accepted"}
+    sent_verif = [n for n in notifier.sent if n.template == "email_verification"]
+    assert len(sent_verif) == 2
 
-    second_code = notifier.find_by_template("email_verification")[-1].data["code"]
+    second_code = sent_verif[-1].data["code"]
 
     # O primeiro código foi invalidado pelo novo envio
     old_attempt = await client.post(
@@ -164,17 +201,20 @@ async def test_resend_code_invalidates_previous_and_enforces_cooldown_and_hourly
         )
         assert r.status_code == 202
 
-    # 6º código na mesma hora -> 429
+    assert len([n for n in notifier.sent if n.template == "email_verification"]) == 5
+
+    # 6º código na mesma hora -> responde 202 (anti-enumeração), mas bloqueia envio e preserva o 5º
     fake_clock.advance(seconds=65)
     sixth = await client.post(
         "/auth/verify-email/resend",
         json={"email": "resend@example.com"},
     )
-    assert sixth.status_code == 429
-    assert "Retry-After" in sixth.headers
+    assert sixth.status_code == 202
+    assert "Retry-After" not in sixth.headers
+    assert len([n for n in notifier.sent if n.template == "email_verification"]) == 5
 
-    # O último código emitido continua válido
-    latest_code = notifier.find_by_template("email_verification")[-1].data["code"]
+    # O último (5º) código emitido continua válido
+    latest_code = [n for n in notifier.sent if n.template == "email_verification"][-1].data["code"]
     assert latest_code != second_code or isinstance(latest_code, str)
     verify_latest = await client.post(
         "/auth/verify-email",

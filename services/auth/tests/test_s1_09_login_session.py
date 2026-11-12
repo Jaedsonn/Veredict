@@ -1,10 +1,16 @@
 """Testes da Issue [S1-09] (#9): Login, JWT RS256, rotação de refresh token e logout (RF03)."""
 
+import uuid
+
+import pytest
 from httpx import AsyncClient
 
 from auth_service.adapters.clock import FakeClock
 from auth_service.adapters.token_issuer import PyJwtTokenIssuer
+from auth_service.config import Settings
+from auth_service.main import create_app
 from veriditi_common.audit import InMemoryAuditLogger
+from veriditi_common.db import Database
 from veriditi_common.notifications import InMemoryNotifier
 
 
@@ -21,10 +27,19 @@ async def _create_verified_user(
     )
     assert reg.status_code == 201
     user_id: int = reg.json()["id"]
-    code = notifier.find_by_template("email_verification")[-1].data["code"]
+    sent = [n for n in notifier.sent if n.template == "email_verification"]
+    code = sent[-1].data["code"]
     ver = await client.post("/auth/verify-email", json={"email": email, "code": code})
     assert ver.status_code == 200
     return user_id
+
+
+def test_create_app_requires_jwt_private_key_when_issuer_not_injected(
+    settings: Settings,
+    db: Database,
+) -> None:
+    with pytest.raises(RuntimeError, match="JWT_PRIVATE_KEY"):
+        create_app(settings=settings.model_copy(update={"jwt_private_key": None}), db=db)
 
 
 async def test_login_pending_verification_returns_403_email_not_verified(
@@ -67,10 +82,8 @@ async def test_login_wrong_password_or_unknown_email_returns_401_and_audits_with
     # Mesma mensagem para não enumerar e-mails
     assert wrong_pw.json()["detail"] == unknown_email.json()["detail"]
 
-    failures = audit_logger.find("auth.session.login_failed")
+    failures = [e for e in audit_logger.events if e.action == "auth.session.login_failed"]
     assert len(failures) == 2
-    assert failures[0].metadata is not None
-    assert failures[1].metadata is not None
     assert failures[0].metadata["reason"] == "invalid_password"
     assert failures[1].metadata["reason"] == "user_not_found"
     for event in failures:
@@ -93,15 +106,16 @@ async def test_login_issues_valid_rs256_jwt_and_refresh_token_rotation_with_reus
     assert login_res.status_code == 200
     tokens_1 = login_res.json()
     assert tokens_1["expires_in"] == 900
-    assert len(audit_logger.find("auth.session.login_succeeded")) == 1
+    assert len([e for e in audit_logger.events if e.action == "auth.session.login_succeeded"]) == 1
 
-    # Valida assinatura RS256 e claims obrigatórios do Access Token (#9)
+    # Valida assinatura RS256 e claims obrigatórios do Access Token (#9), incluindo `sid`
     claims = token_issuer.decode_access_token(tokens_1["access_token"])
     assert claims["sub"] == str(user_id)
     assert claims["email"] == "sessao@example.com"
     assert claims["iss"] == "veriditi-auth"
     assert claims["aud"] == "veriditi"
     assert "jti" in claims
+    assert uuid.UUID(claims["sid"]).version == 4
     assert claims["exp"] - claims["iat"] == 900
 
     # Rotação de refresh token: POST /auth/refresh emite novo par e invalida o anterior
@@ -113,6 +127,8 @@ async def test_login_issues_valid_rs256_jwt_and_refresh_token_rotation_with_reus
     assert refresh_res.status_code == 200
     tokens_2 = refresh_res.json()
     assert tokens_2["refresh_token"] != tokens_1["refresh_token"]
+    claims_2 = token_issuer.decode_access_token(tokens_2["access_token"])
+    assert claims_2["sid"] == claims["sid"]
 
     # Reuso do refresh_token antigo (rotacionado) revoga toda a família do usuário e retorna 401
     reuse_res = await client.post(
@@ -121,7 +137,10 @@ async def test_login_issues_valid_rs256_jwt_and_refresh_token_rotation_with_reus
     )
     assert reuse_res.status_code == 401
     assert reuse_res.json()["detail"]["code"] == "refresh_reuse_detected"
-    assert len(audit_logger.find("auth.session.refresh_reuse_detected")) == 1
+    assert (
+        len([e for e in audit_logger.events if e.action == "auth.session.refresh_reuse_detected"])
+        == 1
+    )
 
     # Todos os tokens do usuário foram revogados por segurança; tokens_2 também não funciona mais
     compromised_res = await client.post(
@@ -131,24 +150,40 @@ async def test_login_issues_valid_rs256_jwt_and_refresh_token_rotation_with_reus
     assert compromised_res.status_code == 401
 
 
-async def test_logout_revokes_refresh_token_and_emits_audit_event(
+async def test_logout_revokes_refresh_token_and_ignores_unvalidated_user_id_header(
     client: AsyncClient,
     notifier: InMemoryNotifier,
     audit_logger: InMemoryAuditLogger,
 ) -> None:
-    await _create_verified_user(client, notifier, email="logout@example.com")
+    user_id = await _create_verified_user(client, notifier, email="logout@example.com")
     login_res = await client.post(
         "/auth/login",
         json={"email": "logout@example.com", "password": "SenhaForte123"},
     )
     refresh_token = login_res.json()["refresh_token"]
 
+    # Logout com refresh_token válido atribui actor_id ao dono real do token,
+    # ignorando qualquer X-User-Id arbitrário enviado por cliente não confiável
     logout_res = await client.post(
         "/auth/logout",
+        headers={"X-User-Id": "999999"},
         json={"refresh_token": refresh_token},
     )
     assert logout_res.status_code == 204
-    assert len(audit_logger.find("auth.session.logout")) == 1
+    logout_events = [e for e in audit_logger.events if e.action == "auth.session.logout"]
+    assert len(logout_events) == 1
+    assert logout_events[0].actor_id == user_id
+
+    # Logout sem refresh_token válido não aceita X-User-Id forjado (actor_id deve ser None)
+    forged_logout = await client.post(
+        "/auth/logout",
+        headers={"X-User-Id": str(user_id)},
+        json={"refresh_token": "token-inexistente"},
+    )
+    assert forged_logout.status_code == 204
+    logout_events = [e for e in audit_logger.events if e.action == "auth.session.logout"]
+    assert len(logout_events) == 2
+    assert logout_events[1].actor_id is None
 
     # Refresh token revogado no logout não pode mais renovar sessão
     after_logout = await client.post(

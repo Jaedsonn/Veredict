@@ -1,4 +1,4 @@
-"""Testes da Issue [S1-07] (#7): Cadastro de usuário (`POST /auth/register`, RF01, REQ 01)."""
+"""Testes da Issue [S1-07] (#7): Cadastro de usuário (`POST /auth/register`, RF01)."""
 
 import uuid
 
@@ -27,7 +27,7 @@ async def test_health_and_legacy_users_endpoints_removed(client: AsyncClient) ->
     assert legacy_get.status_code == 404
 
 
-async def test_register_common_user_creates_pending_verification_and_triggers_side_effects(
+async def test_register_creates_pending_verification_and_triggers_side_effects(
     client: AsyncClient,
     db: Database,
     notifier: InMemoryNotifier,
@@ -41,7 +41,7 @@ async def test_register_common_user_creates_pending_verification_and_triggers_si
             "email": "  Maria.Silva@Example.COM ",
             "password": "SenhaForte123",
         },
-        headers={"X-Request-Id": req_id},
+        headers={"X-Request-ID": req_id},
     )
     assert response.status_code == 201
     body = response.json()
@@ -61,18 +61,18 @@ async def test_register_common_user_creates_pending_verification_and_triggers_si
         assert user.email_verified_at is None
 
     # Disparo de notificação `email_verification` com código de 6 dígitos
-    sent = notifier.find_by_template("email_verification")
+    sent = [n for n in notifier.sent if n.template == "email_verification"]
     assert len(sent) == 1
     assert sent[0].to == "maria.silva@example.com"
     code = sent[0].data["code"]
     assert isinstance(code, str) and len(code) == 6 and code.isdigit()
 
     # Evento de auditoria `auth.user.registered` sem senha ou código em texto puro
-    events = audit_logger.find("auth.user.registered")
+    events = [e for e in audit_logger.events if e.action == "auth.user.registered"]
     assert len(events) == 1
     assert events[0].actor_id == body["id"]
     assert str(events[0].request_id) == req_id
-    assert events[0].metadata == {"role": "common"}
+    assert events[0].metadata == {}
 
 
 async def test_register_duplicate_email_returns_409_case_insensitive(
@@ -128,24 +128,12 @@ async def test_register_weak_password_returns_422_with_portuguese_message(
     assert "pelo menos 1 letra" in no_letter.json()["detail"][0]["msg"]
 
 
-async def test_register_lawyer_and_profile_type_validation_req01_d1(
+async def test_register_ignores_unpersisted_extra_fields(
     client: AsyncClient,
+    audit_logger: InMemoryAuditLogger,
 ) -> None:
-    # Advogado sem OAB deve falhar com 422
-    lawyer_no_oab = await client.post(
-        "/auth/register",
-        json={
-            "name": "Dr. Carlos",
-            "email": "carlos@example.com",
-            "password": "SenhaForte123",
-            "role": "lawyer",
-        },
-    )
-    assert lawyer_no_oab.status_code == 422
-    assert "OAB" in lawyer_no_oab.json()["detail"][0]["msg"]
-
-    # Advogado com OAB e CPF válido (dígitos verificadores módulo 11) deve cadastrar com 201
-    lawyer_ok = await client.post(
+    # Campos extras não persistidos no schema de `users` (§5.1) são ignorados
+    res = await client.post(
         "/auth/register",
         json={
             "name": "Dr. Carlos",
@@ -153,19 +141,10 @@ async def test_register_lawyer_and_profile_type_validation_req01_d1(
             "password": "SenhaForte123",
             "role": "lawyer",
             "cpf": "123.456.789-09",
-            "oab_number": "ba 12345",
+            "oab_number": "BA12345",
         },
     )
-    assert lawyer_ok.status_code == 201
-
-    # Perfil 'company' (Empresa) fora de escopo na v1 (Decisão D1 / Apêndice A) -> 422
-    company_rejected = await client.post(
-        "/auth/register",
-        json={
-            "name": "Empresa X",
-            "email": "contato@empresax.com",
-            "password": "SenhaForte123",
-            "role": "company",
-        },
-    )
-    assert company_rejected.status_code == 422
+    assert res.status_code == 201
+    events = [e for e in audit_logger.events if e.action == "auth.user.registered"]
+    assert len(events) == 1
+    assert "role" not in events[0].metadata
