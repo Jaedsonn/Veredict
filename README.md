@@ -210,7 +210,8 @@ POST /internal/notifications
   (`unknown_template` traz a lista dos válidos no `msg`), sem ecoar o valor recebido;
   corpo acima de 16 KiB dá `413 payload_too_large`;
 - no máximo 3 tentativas, com esperas de 1 s e 2 s; um 5xx do SMTP (destinatário
-  recusado, credencial errada) encerra na hora. O fim vira `notification.email.sent`
+  recusado, credencial errada), um servidor sem STARTTLS ou SMTPUTF8 e um certificado
+  inválido encerram na hora. O fim vira `notification.email.sent`
   ou `notification.email.failed` no monitoring, só com o template, o e-mail mascarado
   (`j***@exemplo.com`), a chave, o `message_id` ou o erro, sem o conteúdo.
 

@@ -1,4 +1,5 @@
 import asyncio
+import ssl
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from email.message import EmailMessage
@@ -6,7 +7,12 @@ from email.utils import format_datetime, formataddr, make_msgid
 from typing import Any
 
 import aiosmtplib
-from aiosmtplib import SMTPException, SMTPRecipientsRefused, SMTPResponseException
+from aiosmtplib import (
+    SMTPException,
+    SMTPNotSupported,
+    SMTPRecipientsRefused,
+    SMTPResponseException,
+)
 from pydantic import SecretStr
 
 from notification_service.domain import EmailDeliveryError, OutgoingEmail
@@ -51,6 +57,9 @@ def _delivery_error(exc: SMTPException | OSError) -> EmailDeliveryError:
         )
     if isinstance(exc, SMTPResponseException):
         return EmailDeliveryError(reason, permanent=_is_permanent(exc.code), smtp_code=exc.code)
+    # Antes do OSError genérico: servidor sem STARTTLS/SMTPUTF8 ou certificado inválido não mudam
+    if isinstance(exc, SMTPNotSupported | ssl.SSLCertVerificationError):
+        return EmailDeliveryError(reason, permanent=True)
     return EmailDeliveryError(reason)
 
 

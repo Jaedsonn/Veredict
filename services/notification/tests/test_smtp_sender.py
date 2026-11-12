@@ -2,6 +2,7 @@ import asyncio
 import email
 import email.policy
 import re
+import ssl
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from typing import Any
@@ -10,6 +11,7 @@ import pytest
 from aiosmtplib import (
     SMTPAuthenticationError,
     SMTPConnectError,
+    SMTPNotSupported,
     SMTPRecipientRefused,
     SMTPRecipientsRefused,
     SMTPResponseException,
@@ -173,6 +175,15 @@ def _refused(*codes: int) -> SMTPRecipientsRefused:
         (_refused(550), "SMTPRecipientsRefused", True, 550),
         (_refused(450), "SMTPRecipientsRefused", False, 450),
         (_refused(550, 450), "SMTPRecipientsRefused", False, 550),
+        (SMTPNotSupported("STARTTLS ausente"), "SMTPNotSupported", True, None),
+        (SMTPNotSupported("SMTPUTF8 ausente"), "SMTPNotSupported", True, None),
+        (
+            ssl.SSLCertVerificationError(1, "certificate verify failed"),
+            "SSLCertVerificationError",
+            True,
+            None,
+        ),
+        (ssl.SSLError(1, "handshake interrompido"), "SSLError", False, None),
     ],
     ids=[
         "connect",
@@ -186,6 +197,10 @@ def _refused(*codes: int) -> SMTPRecipientsRefused:
         "recipients-550",
         "recipients-450",
         "recipients-mixed",
+        "starttls-not-supported",
+        "smtputf8-not-supported",
+        "cert-verification",
+        "other-ssl-error",
     ],
 )
 async def test_errors_are_classified_without_the_address(
