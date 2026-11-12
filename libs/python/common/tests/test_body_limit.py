@@ -6,6 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from starlette.types import Message
 
 from veriditi_common.errors import install_error_handlers
+from veriditi_common.health import build_health_router
 from veriditi_common.middleware import (
     REQUEST_ID_HEADER,
     BodySizeLimitMiddleware,
@@ -21,9 +22,14 @@ TOO_LARGE = {
 def _app() -> FastAPI:
     app = FastAPI()
     install_error_handlers(app)
+    app.include_router(build_health_router())
 
     @app.post("/echo")
     async def echo(request: Request) -> dict[str, int]:
+        return {"size": len(await request.body())}
+
+    @app.get("/ping")
+    async def ping(request: Request) -> dict[str, int]:
         return {"size": len(await request.body())}
 
     @app.post("/json")
@@ -81,8 +87,12 @@ async def test_small_stream_without_length_passes(client: AsyncClient) -> None:
     assert resp.json() == {"size": LIMIT}
 
 
-async def test_get_without_body_is_not_affected(client: AsyncClient) -> None:
-    assert (await client.get("/nao-existe")).status_code == 404
+async def test_get_with_small_body_and_health_pass(client: AsyncClient) -> None:
+    ping = await client.request("GET", "/ping", content=b"a" * 10)
+    health = await client.get("/health/live")
+
+    assert (ping.status_code, ping.json()) == (200, {"size": 10})
+    assert (health.status_code, health.json()) == (200, {"status": "ok"})
 
 
 @pytest.mark.parametrize("declared", ["²", "¹²", "-1", "abc"])

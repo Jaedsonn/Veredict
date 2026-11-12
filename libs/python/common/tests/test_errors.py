@@ -191,16 +191,20 @@ async def test_model_validator_error_does_not_echo_the_body() -> None:
     assert resp.json()["detail"][0]["loc"] == ["body"]
 
 
-async def test_malformed_json_does_not_echo_the_body() -> None:
-    resp = await _call(
-        "POST",
-        "/items",
-        content=b'{"password": "s3cr3t-echo"',
-        headers={"content-type": "application/json"},
-    )
+async def test_field_error_does_not_echo_the_invalid_value() -> None:
+    # Sem o handler, o int_parsing devolveria "input": "s3cr3t-echo"
+    resp = await _call("POST", "/items", json={"email": "a@example.com", "age": "s3cr3t-echo"})
 
     assert resp.status_code == 422
-    assert "s3cr3t-echo" not in resp.text
+    assert resp.json() == {
+        "detail": [
+            {
+                "type": "int_parsing",
+                "loc": ["body", "age"],
+                "msg": "Input should be a valid integer, unable to parse string as an integer",
+            }
+        ]
+    }
 
 
 def test_internal_error_response() -> None:

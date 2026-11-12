@@ -243,7 +243,8 @@ async def _post(client: AsyncClient, body: dict[str, object]) -> int:
 @pytest.mark.parametrize(
     "overrides",
     [
-        pytest.param({"metadata": _deep(101)}, id="depth-above-mysql-limit"),
+        # Nosso limite (8) fica abaixo do JSON do MySQL (100): o dele não é alcançável pela API
+        pytest.param({"metadata": _deep(9)}, id="depth-above-8-levels"),
         pytest.param({"metadata": {"x": "\ud800"}}, id="surrogate-value"),
         pytest.param({"metadata": {"\udc00": "x"}}, id="surrogate-key"),
         pytest.param({"metadata": {"x": float("nan")}}, id="nan"),
