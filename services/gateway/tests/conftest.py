@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import ASGITransport, AsyncClient
 
 from gateway_service.config import Settings
+from gateway_service.domain import InvalidTokenError, Principal, RateDecision, RateLimit
 from gateway_service.main import create_app
 
 ISSUER = "veriditi-auth"
@@ -46,6 +47,34 @@ class FakeClock:
 @pytest.fixture
 def fake_clock() -> FakeClock:
     return FakeClock()
+
+
+class FakeVerifier:
+    """Aceita só o token "valido"; guarda o que recebeu"""
+
+    def __init__(self) -> None:
+        self.tokens: list[str] = []
+
+    def verify(self, token: str) -> Principal:
+        self.tokens.append(token)
+        if token != "valido":
+            raise InvalidTokenError("signature")
+        return Principal(user_id=USER_ID, email=EMAIL)
+
+
+class RecordingLimiter:
+    """Guarda as chaves; nega quando allowed é False"""
+
+    def __init__(self, *, allowed: bool = True, retry_after: int = 12) -> None:
+        self.allowed = allowed
+        self.retry_after = retry_after
+        self.hits: list[tuple[str, RateLimit]] = []
+
+    async def hit(self, key: str, limit: RateLimit) -> RateDecision:
+        self.hits.append((key, limit))
+        if self.allowed:
+            return RateDecision(allowed=True)
+        return RateDecision(allowed=False, retry_after=self.retry_after)
 
 
 def _rsa_keys() -> RsaKeys:

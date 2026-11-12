@@ -61,3 +61,10 @@ class InvalidTokenError(Exception):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class RateLimitExceededError(Exception):
+    def __init__(self, policy: str, retry_after: int) -> None:
+        super().__init__(policy)
+        self.policy = policy
+        self.retry_after = retry_after
