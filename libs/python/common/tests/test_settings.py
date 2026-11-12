@@ -109,3 +109,17 @@ def test_log_level_defaults_to_info_and_is_case_insensitive() -> None:
 
 def test_service_settings_without_token_stay_valid() -> None:
     assert _settings().internal_api_token is None
+
+
+def test_short_token_is_not_repeated_in_the_error() -> None:
+    with pytest.raises(ValidationError) as caught:
+        _base(internal_api_token="short-secret-1")
+
+    assert "short-secret-1" not in str(caught.value)
+
+
+def test_validation_errors_do_not_repeat_input() -> None:
+    with pytest.raises(ValidationError) as caught:
+        _settings(db_port="hunter2")
+
+    assert "hunter2" not in str(caught.value)
