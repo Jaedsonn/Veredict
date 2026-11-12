@@ -186,8 +186,9 @@ class BodySizeLimitMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        declared = Headers(scope=scope).get("content-length")
-        if declared is not None and declared.isdigit() and int(declared) > self.max_bytes:
+        declared = Headers(scope=scope).get("content-length", "")
+        # isascii: "²".isdigit() é True, mas int("²") levanta
+        if declared.isascii() and declared.isdigit() and int(declared) > self.max_bytes:
             response = JSONResponse(http_error_body(413), status_code=413)
             await response(scope, receive, send)
             return

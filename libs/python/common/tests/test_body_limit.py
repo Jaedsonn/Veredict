@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
+from starlette.types import Message
 
 from veriditi_common.errors import install_error_handlers
 from veriditi_common.middleware import (
@@ -82,3 +83,39 @@ async def test_small_stream_without_length_passes(client: AsyncClient) -> None:
 
 async def test_get_without_body_is_not_affected(client: AsyncClient) -> None:
     assert (await client.get("/nao-existe")).status_code == 404
+
+
+@pytest.mark.parametrize("declared", ["²", "¹²", "-1", "abc"])
+async def test_invalid_content_length_falls_back_to_counting(declared: str) -> None:
+    app = _app()
+    # Headers ASGI chegam em latin-1: "²" vira o byte 0xb2
+    headers = [
+        (b"content-length", declared.encode("latin-1")),
+        (b"content-type", b"application/json"),
+    ]
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/echo",
+        "raw_path": b"/echo",
+        "query_string": b"",
+        "root_path": "",
+        "headers": headers,
+        "client": ("127.0.0.1", 1),
+        "server": ("t", 80),
+    }
+    messages = [{"type": "http.request", "body": b"a" * (LIMIT + 1), "more_body": False}]
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return messages.pop(0) if messages else {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await app(scope, receive, send)
+
+    assert sent[0]["status"] == 413
