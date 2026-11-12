@@ -67,7 +67,12 @@ vazio**. Ao atualizar para esta versão, ou ao mudar o init:
    ```
 
 `make down`, `make reset` e `make logs` funcionam mesmo com o `.env` antigo
-(usam o `.env.example` como reserva), para dar para derrubar o stack anterior.
+(o `.env.example` preenche só as senhas que faltam), para dar para derrubar o
+stack anterior.
+
+As imagens se chamam `veriditi-<serviço>` em qualquer projeto do compose: dois
+clones lado a lado (`COMPOSE_PROJECT_NAME` diferente) compartilham a tag, e o
+último build vence.
 
 Se o `mysql` ficar `unhealthy` logo na primeira subida, o init falhou (veja
 `make logs`, geralmente senha faltando ou com `'`/`\`): corrija o `.env` e rode

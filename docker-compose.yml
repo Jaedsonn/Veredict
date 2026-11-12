@@ -3,7 +3,8 @@ name: veriditi
 # Só mysql, mailpit, gateway e web publicam porta; o resto fica na rede do compose
 # mysql e mailpit (UI e SMTP) ficam presos a 127.0.0.1
 # Nenhum serviço usa env_file: o DB_PORT do .env é o do host, aqui dentro é 3306
-# Cada par <svc>-migrate/<svc> declara a mesma image para o build acontecer uma vez só
+# Cada par <svc>-migrate/<svc> declara a mesma image para o build acontecer uma vez só;
+# pull_policy: build impede o compose pull de procurar essas imagens no Docker Hub
 
 x-secrets:
   root-password: &root-password "${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env (make install copia o .env.example)}"
@@ -79,6 +80,7 @@ services:
 
   auth-migrate:
     image: veriditi-auth
+    pull_policy: build
     build: &auth-build
       context: .
       dockerfile: services/auth/Dockerfile
@@ -95,6 +97,7 @@ services:
 
   notification-migrate:
     image: veriditi-notification
+    pull_policy: build
     build: &notification-build
       context: .
       dockerfile: services/notification/Dockerfile
@@ -111,6 +114,7 @@ services:
 
   monitoring-migrate:
     image: veriditi-monitoring
+    pull_policy: build
     build: &monitoring-build
       context: .
       dockerfile: services/monitoring/Dockerfile
@@ -127,6 +131,7 @@ services:
 
   auth:
     image: veriditi-auth
+    pull_policy: build
     build: *auth-build
     restart: unless-stopped
     environment:
@@ -144,6 +149,7 @@ services:
 
   notification:
     image: veriditi-notification
+    pull_policy: build
     build: *notification-build
     restart: unless-stopped
     environment:
@@ -169,6 +175,7 @@ services:
 
   monitoring:
     image: veriditi-monitoring
+    pull_policy: build
     build: *monitoring-build
     restart: unless-stopped
     environment:
@@ -184,6 +191,7 @@ services:
 
   gateway:
     image: veriditi-gateway
+    pull_policy: build
     build:
       context: .
       dockerfile: services/gateway/Dockerfile
@@ -202,6 +210,7 @@ services:
 
   web:
     image: veriditi-web
+    pull_policy: build
     build:
       context: .
       dockerfile: apps/web/Dockerfile
