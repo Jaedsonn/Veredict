@@ -1,11 +1,11 @@
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
 
 from fastapi import FastAPI
 
 from monitoring_service.config import Settings, get_settings
 from monitoring_service.dependencies import get_session
+from monitoring_service.ports import Clock
 from veriditi_common.db import Database
 from veriditi_common.db_types import utcnow
 from veriditi_common.errors import install_error_handlers
@@ -18,7 +18,7 @@ from veriditi_common.security import install_internal_auth
 def create_app(
     settings: Settings | None = None,
     db: Database | None = None,
-    clock: Callable[[], datetime] | None = None,
+    clock: Clock | None = None,
 ) -> FastAPI:
     """App factory para os testes injetarem config, banco e relógio"""
     settings = settings or get_settings()
