@@ -1,71 +1,132 @@
 .DEFAULT_GOAL := help
-.PHONY: help install up down logs db dev-web dev-auth migrate migration test db-test-contract lint format check
+.PHONY: help install up down reset logs db dev dev-web migrate migration test lint format check \
+	db-test db-test-contract db-test-migrations _migrations-check
+
+SERVICES := gateway auth notification monitoring
+# Serviço com banco é o que tem alembic.ini
+DB_SERVICES := $(patsubst services/%/alembic.ini,%,$(wildcard services/*/alembic.ini))
+
+# Portas do `make dev`; no compose todos escutam na 8000
+PORT_gateway := 8080
+PORT_auth := 8001
+PORT_notification := 8002
+PORT_monitoring := 8003
+
+# Usuário de runtime, variável do .env com a senha dele e banco (padrão veriditi)
+DB_USER_auth := auth_svc
+DB_USER_notification := notification_svc
+DB_USER_monitoring := veriditi_logs_writer
+DB_PASS_auth := AUTH_DB_PASSWORD
+DB_PASS_notification := NOTIFICATION_DB_PASSWORD
+DB_PASS_monitoring := LOGS_DB_PASSWORD
+DB_NAME_monitoring := veriditi_logs
+
+empty :=
+space := $(empty) $(empty)
+need_s = $(if $(filter $(s),$(SERVICES)),,$(error use s=<$(subst $(space),|,$(SERVICES))>))
+need_db_s = $(if $(filter $(s),$(DB_SERVICES)),,$(error use s=<$(subst $(space),|,$(DB_SERVICES))>))
+
+# Lê o .env no shell e traduz a senha do serviço `s` para as DB_* do ServiceSettings
+svc_env = set -a; [ ! -f .env ] || . ./.env; set +a; \
+	$(if $(DB_USER_$(s)),export DB_NAME=$(or $(DB_NAME_$(s)),veriditi) DB_USER=$(DB_USER_$(s)) \
+	DB_PASSWORD="$${$(DB_PASS_$(s))}" DB_MIGRATOR_USER=migrator;)
 
 help:
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z-][a-zA-Z_-]*:.*?## ' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install:
+install: ## Instala dependências e cria o .env a partir do .env.example
 	@test -f .env || cp .env.example .env
 	npm install
 	uv sync
 
-up:
+up: ## Sobe o stack completo e espera todos ficarem saudáveis
 	docker compose up -d --build --wait
 
-down:
+down: ## Para o stack (mantém o volume do MySQL)
 	docker compose down
 
-logs:
+reset: ## Apaga o volume do MySQL: reaplica docker/mysql/init e as migrations
+	docker compose down -v --remove-orphans
+
+logs: ## Acompanha os logs do stack
 	docker compose logs -f
 
-db:
+db: ## Sobe só o MySQL no Docker
 	docker compose up -d --wait mysql
 
-dev-web:
+dev: ## Serviço com hot reload (s=gateway|auth|notification|monitoring)
+	$(need_s)@$(svc_env) uv run uvicorn $(s)_service.main:create_app --factory --reload \
+		--port $(PORT_$(s)) --reload-dir services/$(s)/src --reload-dir libs/python/common/src
+
+dev-web: ## Web com hot reload
 	npm run dev:web
 
-# No futuro a gente vai fazer um geral para todos os serviços
-# Mas por enquanto bora deixar somente para cada serviço específico
-dev-auth:
-	uv run uvicorn auth_service.main:create_app --factory --reload --port 8001
+migrate: ## Aplica as migrations (s=<serviço> ou todos os serviços com banco)
+ifdef s
+	$(need_db_s)@$(svc_env) uv run alembic -c services/$(s)/alembic.ini upgrade head
+else
+	@for svc in $(DB_SERVICES); do $(MAKE) --no-print-directory migrate s=$$svc || exit 1; done
+endif
 
-migrate:
-	uv run alembic -c services/auth/alembic.ini upgrade head
+migration: ## Nova revisão autogerada (s=<serviço> m="mensagem")
+	$(need_db_s)$(if $(m),,$(error use m="mensagem"))@$(svc_env) \
+		uv run alembic -c services/$(s)/alembic.ini revision --autogenerate -m "$(m)"
 
-migration:
-	uv run alembic -c services/auth/alembic.ini revision --autogenerate -m "$(m)"
+test: ## Testes Python sem MySQL (s=<serviço> opcional)
+	uv run pytest $(if $(s),services/$(s))
 
-test:
-	uv run pytest
-
-# Contrato do banco (privilégios, UTC, tipos) num MySQL descartável com docker/mysql/init
-DB_CONTRACT := veriditi-db-contract
+# MySQL descartável na 3317 com docker/mysql/init (mesmo comando local e no CI, ADR-023)
+DB_TEST := veriditi-db-test
 DB_CONTRACT_ENV := CONTRACT_DB_PORT=3317 DB_MIGRATOR_PASSWORD=m AUTH_DB_PASSWORD=a \
 	NOTIFICATION_DB_PASSWORD=n LOGS_DB_PASSWORD=l
 
-db-test-contract:
-	@docker rm -f $(DB_CONTRACT) >/dev/null 2>&1 || true
-	docker run --rm -d --name $(DB_CONTRACT) -p 3317:3306 \
+define db_test_up
+	@docker rm -f $(DB_TEST) >/dev/null 2>&1 || true
+	docker run --rm -d --name $(DB_TEST) -p 3317:3306 \
 		-e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=veriditi $(addprefix -e ,$(DB_CONTRACT_ENV)) \
 		-v "$(CURDIR)/docker/mysql/init:/docker-entrypoint-initdb.d:ro" \
 		mysql:8.4 --default-time-zone=+00:00 >/dev/null
 	@# TCP só responde depois do initdb (o servidor temporário roda sem rede)
 	@for i in $$(seq 1 60); do \
-		docker exec $(DB_CONTRACT) mysql -uroot -proot -h127.0.0.1 -e 'SELECT 1' >/dev/null 2>&1 && break; \
+		docker exec $(DB_TEST) mysql -uroot -proot -h127.0.0.1 -e 'SELECT 1' >/dev/null 2>&1 \
+			&& exit 0; \
 		sleep 2; \
-	done
-	@$(DB_CONTRACT_ENV) uv run pytest -m mysql libs/python/common/tests/mysql; \
-		status=$$?; docker rm -f $(DB_CONTRACT) >/dev/null; exit $$status
+	done; echo "MySQL de teste não respondeu"; docker rm -f $(DB_TEST) >/dev/null; exit 1
+endef
 
-lint:
+db_test_down = docker rm -f $(DB_TEST) >/dev/null
+
+db-test: db-test-contract db-test-migrations ## Tudo que precisa de MySQL real (roda no CI)
+
+db-test-contract: ## Contrato do banco e testes marcados como mysql
+	$(db_test_up)
+	@$(DB_CONTRACT_ENV) uv run pytest -m mysql; status=$$?; $(db_test_down); exit $$status
+
+db-test-migrations: ## heads, upgrade, check, downgrade e upgrade de cada serviço com banco
+	$(db_test_up)
+	@status=0; for svc in $(DB_SERVICES); do \
+		$(MAKE) --no-print-directory _migrations-check s=$$svc || { status=1; break; }; \
+	done; $(db_test_down); exit $$status
+
+# Variáveis exportadas valem mais que o .env lido pelo pydantic
+_migrations-check:
+	$(need_db_s)@echo "==> $(s)"; \
+	export DB_HOST=127.0.0.1 DB_PORT=3317 DB_MIGRATOR_USER=migrator DB_MIGRATOR_PASSWORD=m \
+		DB_NAME=$(or $(DB_NAME_$(s)),veriditi) DB_USER=$(DB_USER_$(s)); \
+	a="uv run alembic -c services/$(s)/alembic.ini"; \
+	n=$$($$a heads | grep -c .); [ $$n -le 1 ] || { echo "$(s): $$n heads"; exit 1; }; \
+	$$a upgrade head && $$a check && $$a downgrade base && $$a upgrade head
+
+lint: ## ruff, mypy e lint/typecheck da web
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run mypy services/*/src libs/python/*/src
 	npm run lint:web
 	npm run typecheck:web
 
-format:
+format: ## Formata o código Python
 	uv run ruff check --fix .
 	uv run ruff format .
 
-check: lint test
+check: lint test ## lint + test
