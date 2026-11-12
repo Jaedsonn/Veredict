@@ -2,6 +2,10 @@
 .PHONY: help install up down reset logs db dev dev-web migrate migration test lint format check \
 	db-test db-test-contract db-test-migrations _migrations-check
 
+# Variáveis da linha de comando vão para o ambiente das receitas, e exportar expande o valor:
+# um m='$(shell ...)' executaria. As receitas leem m e s por $(value), nunca do ambiente
+unexport m s
+
 SERVICES := gateway auth notification monitoring
 # Serviço com banco é o que tem alembic.ini
 DB_SERVICES := $(patsubst services/%/alembic.ini,%,$(wildcard services/*/alembic.ini))
