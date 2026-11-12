@@ -53,7 +53,7 @@ services:
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     environment:
-      USERS_API_URL: http://users:8000
+      GATEWAY_URL: http://gateway:8000
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
