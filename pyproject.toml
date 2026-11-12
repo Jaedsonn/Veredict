@@ -39,6 +39,8 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["services", "libs/python"]
 # importlib: permite vários serviços terem tests/conftest.py sem colisão de nomes
-addopts = "--import-mode=importlib"
+# `mysql` fica fora do padrão; rode com `make db-test-contract`
+addopts = "--import-mode=importlib -m 'not mysql'"
+markers = ["mysql: precisa de um MySQL real com docker/mysql/init aplicado"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

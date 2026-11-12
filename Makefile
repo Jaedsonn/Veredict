@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install up down logs db dev-web dev-users migrate migration test lint format check
+.PHONY: help install up down logs db dev-web dev-users migrate migration test db-test-contract lint format check
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -37,6 +37,25 @@ migration:
 
 test:
 	uv run pytest
+
+# Contrato do banco (privilégios, UTC, tipos) num MySQL descartável com docker/mysql/init
+DB_CONTRACT := veriditi-db-contract
+DB_CONTRACT_ENV := CONTRACT_DB_PORT=3317 DB_MIGRATOR_PASSWORD=m AUTH_DB_PASSWORD=a \
+	NOTIFICATION_DB_PASSWORD=n LOGS_DB_PASSWORD=l
+
+db-test-contract:
+	@docker rm -f $(DB_CONTRACT) >/dev/null 2>&1 || true
+	docker run --rm -d --name $(DB_CONTRACT) -p 3317:3306 \
+		-e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=veriditi $(addprefix -e ,$(DB_CONTRACT_ENV)) \
+		-v "$(CURDIR)/docker/mysql/init:/docker-entrypoint-initdb.d:ro" \
+		mysql:8.4 --default-time-zone=+00:00 >/dev/null
+	@# TCP só responde depois do initdb (o servidor temporário roda sem rede)
+	@for i in $$(seq 1 60); do \
+		docker exec $(DB_CONTRACT) mysql -uroot -proot -h127.0.0.1 -e 'SELECT 1' >/dev/null 2>&1 && break; \
+		sleep 2; \
+	done
+	@$(DB_CONTRACT_ENV) uv run pytest -m mysql libs/python/common/tests/mysql; \
+		status=$$?; docker rm -f $(DB_CONTRACT) >/dev/null; exit $$status
 
 lint:
 	uv run ruff check .
