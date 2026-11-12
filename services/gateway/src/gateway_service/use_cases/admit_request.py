@@ -44,7 +44,9 @@ def rate_key(limit: RateLimit, client_ip: str | None, body: bytes | None) -> str
     """O hash limita o tamanho da chave e não guarda e-mail em claro na memória"""
     base = client_ip or "unknown"
     if limit.key is RateKey.IP_AND_EMAIL:
-        digest = hashlib.sha256(login_email(body).encode()).hexdigest()[:_EMAIL_HASH_CHARS]
+        # surrogatepass: um \ud800 solto no JSON não pode virar 500 numa rota pública
+        email = login_email(body).encode("utf-8", "surrogatepass")
+        digest = hashlib.sha256(email).hexdigest()[:_EMAIL_HASH_CHARS]
         return f"{base}|{digest}"
     return base
 

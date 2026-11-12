@@ -155,3 +155,12 @@ async def test_limit_is_checked_before_jwt(verifier: FakeVerifier) -> None:
 def test_bearer_token_extracts_token() -> None:
     assert bearer_token("Bearer abc.def.ghi") == "abc.def.ghi"
     assert bearer_token("BEARER abc") == "abc"
+
+
+def test_lone_surrogate_in_email_still_builds_a_key() -> None:
+    body = b'{"email": "a\\ud800@x.com", "password": "p"}'
+
+    key = rate_key(LOGIN_LIMIT, IP, body)
+
+    assert key.startswith(f"{IP}|")
+    assert key != rate_key(LOGIN_LIMIT, IP, b'{"email": "a@x.com"}')

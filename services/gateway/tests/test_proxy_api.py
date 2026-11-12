@@ -746,3 +746,21 @@ async def test_client_disconnect_while_reading_login_body(
     events = [e["event"] for e in json_logs()]
     assert "client_disconnected" in events
     assert "unhandled_exception" not in events
+
+
+async def test_lone_surrogate_email_is_not_500_and_still_limited(
+    client: AsyncClient, auth_mock: respx.MockRouter, json_logs: JsonLogs
+) -> None:
+    route = auth_mock.post("/auth/login").respond(422, json={"detail": []})
+    body = b'{"email": "a\\ud800@x.com", "password": "p"}'
+    headers = {"Content-Type": "application/json"}
+
+    statuses = [
+        (await client.post("/api/auth/login", content=body, headers=headers)).status_code
+        for _ in range(6)
+    ]
+
+    assert statuses == [422] * 5 + [429]
+    assert route.call_count == 5
+    assert route.calls.last.request.content == body
+    assert "unhandled_exception" not in [e["event"] for e in json_logs()]
