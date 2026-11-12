@@ -423,7 +423,9 @@ def _nested(depth: int) -> dict[str, Any]:
 async def test_metadata_depth_is_limited(
     client: AsyncClient, auth_headers: Headers, make_event: EventFactory, depth: int, status: int
 ) -> None:
-    resp = await client.post(URL, json=make_event(metadata=_nested(depth)), headers=auth_headers)
+    resp = await client.post(
+        URL, json={**make_event(), "metadata": _nested(depth)}, headers=auth_headers
+    )
 
     assert resp.status_code == status
 
@@ -446,7 +448,7 @@ async def test_absurd_nesting_is_rejected_without_recursion_error(
 async def test_metadata_size_is_limited(
     client: AsyncClient, auth_headers: Headers, make_event: EventFactory, size: int, status: int
 ) -> None:
-    body = make_event(metadata={"blob": "a" * size})
+    body = {**make_event(), "metadata": {"blob": "a" * size}}
 
     resp = await client.post(URL, json=body, headers=auth_headers)
 
@@ -456,7 +458,7 @@ async def test_metadata_size_is_limited(
 async def test_body_above_64_kib_is_payload_too_large(
     client: AsyncClient, auth_headers: Headers, make_event: EventFactory, db: Database
 ) -> None:
-    body = make_event(metadata={"blob": "a" * 70_000})
+    body = {**make_event(), "metadata": {"blob": "a" * 70_000}}
 
     resp = await client.post(URL, json=body, headers=auth_headers)
 

@@ -10,8 +10,8 @@ from monitoring_service.schemas import (
     AuditEventIn,
     AuditEventOut,
     AuditEventsPage,
-    StorableDatetime,
 )
+from veriditi_common.audit import StorableDatetime
 from veriditi_common.security import internal_router
 
 DEFAULT_LIMIT: Final = 50
