@@ -47,9 +47,9 @@ install: ## Instala dependências e cria o .env a partir do .env.example
 up: ## Sobe o stack completo e espera todos ficarem saudáveis
 	docker compose up -d --build --wait
 
-# Parar e ler logs não depende das senhas: com o .env incompleto (ou sem .env), o compose
-# interpola com o .env.example em vez de falhar no ${VAR:?}
-compose_any = docker compose $$(docker compose config -q >/dev/null 2>&1 || echo --env-file .env.example)
+# Parar e ler logs não depende das senhas: o .env.example só preenche o que falta no .env,
+# que vem por último e vence (inclusive COMPOSE_PROJECT_NAME)
+compose_any = docker compose --env-file .env.example $(if $(wildcard .env),--env-file .env)
 
 down: ## Para o stack (mantém o volume do MySQL)
 	$(compose_any) down
