@@ -123,12 +123,28 @@ uvicorn ([ADR-012](docs/adr/0012-geracao-de-logs-estruturados.md)):
 
 Toda resposta traz o `X-Request-ID`: o do cliente, se for um UUID válido, ou um
 UUID4 novo. Para seguir uma requisição, `make logs | grep <request_id>`. O
-acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`. Chaves que contêm
-`password`, `secret`, `token`, `cookie`, `authorization`, `private_key`,
-`api_key` ou `otp`, e `code`/`*_code`, saem como `[redacted]`, inclusive em
-pares de headers. Por isso o código de erro de negócio vai em `error_code`
-(`status_code` e `error_code` não são redigidos). A redação é por nome de
-chave: não logue `str(exc)` nem interpole valores no evento.
+acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`.
+
+A redação troca por `[redacted]` o valor de chaves sensíveis, em qualquer
+nível do evento (`is_sensitive_key` em `veriditi_common/logging.py`):
+
+- o nome é normalizado (`apiKey` e `X-Api-Key` viram `api_key`/`x_api_key`);
+- é sensível o nome que contém `password`, `passphrase`, `secret`, `token`,
+  `authorization`, `cookie`, `credential`, `signature`, `private_key`,
+  `api_key`, `access_key`, `signing_key`, `encryption_key`, `session_key` ou
+  `database_url`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`, `jwt`,
+  `dsn`, `hmac` e afins;
+- `code` é sensível, e `*_code` só com prefixo de segredo (`verification_code`,
+  `otp_code`, `reset_code`...). `status_code`, `zip_code` e `error_code` não são:
+  por isso o código de erro de negócio vai em `error_code`;
+- metadados do segredo não são redigidos (`token_type`, `token_id`,
+  `password_changed_at`, `has_password`...);
+- pares `(nome, valor)` são tratados como headers quando o nome é bytes ou a
+  chave pai contém `header`.
+
+Nas exceções, tipo e frames sempre saem. A mensagem só é redigida em erros de
+banco (que ganham `db_errno`, como 1062) e em `ValidationError`. A redação é por
+nome de chave: não logue `str(exc)` nem interpole valores no evento.
 
 Os erros seguem `{"detail": {"code": "...", "message": "...", ...extras}}`, o
 formato lido por `apps/web/src/lib/errors.ts`; o 422 de validação mantém o
