@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from email.message import EmailMessage
-from email.utils import format_datetime, make_msgid
+from email.utils import format_datetime, formataddr, make_msgid
 from typing import Any
 
 import aiosmtplib
@@ -62,7 +62,8 @@ class SmtpEmailSender:
         *,
         host: str,
         port: int,
-        sender: str,
+        sender_name: str,
+        sender_address: str,
         username: str | None,
         password: SecretStr | None,
         start_tls: bool,
@@ -72,7 +73,9 @@ class SmtpEmailSender:
     ) -> None:
         self._host = host
         self._port = port
-        self._sender = sender
+        # formataddr põe aspas no nome: "Veriditi, Inc" sem elas viraria 2 mailboxes
+        self._from_header = formataddr((sender_name, sender_address))
+        self._sender_address = sender_address
         self._username = username
         self._password = password
         self._start_tls = start_tls
@@ -81,13 +84,16 @@ class SmtpEmailSender:
         self._clock = clock
 
     async def send(self, email: OutgoingEmail) -> None:
-        message = build_message(email, sender=self._sender, date=self._clock())
+        message = build_message(email, sender=self._from_header, date=self._clock())
         password = self._password.get_secret_value() if self._username and self._password else None
         try:
             # O timeout do aiosmtplib vale por comando; este limita a tentativa inteira
             async with asyncio.timeout(self._timeout):
                 await self._transport(
                     message,
+                    # Envelope explícito: não depende de o aiosmtplib reler o From e o To
+                    sender=self._sender_address,
+                    recipients=[email.to],
                     hostname=self._host,
                     port=self._port,
                     username=self._username,

@@ -54,7 +54,8 @@ def _sender(transport: FakeTransport, **overrides: Any) -> SmtpEmailSender:
     values: dict[str, Any] = {
         "host": "mailpit",
         "port": 1025,
-        "sender": SENDER,
+        "sender_name": "Veriditi",
+        "sender_address": "no-reply@veriditi.app",
         "username": None,
         "password": None,
         "start_tls": False,
@@ -106,6 +107,8 @@ async def test_transport_gets_explicit_connection_settings(start_tls: bool) -> N
 
     [(message, kwargs)] = transport.calls
     assert kwargs == {
+        "sender": "no-reply@veriditi.app",
+        "recipients": [TO],
         "hostname": "mailpit",
         "port": 1025,
         "username": None,
@@ -115,6 +118,28 @@ async def test_transport_gets_explicit_connection_settings(start_tls: bool) -> N
     }
     assert message["Message-ID"] == EMAIL.message_id
     assert message["Date"] == "Thu, 12 Nov 2026 15:00:00 +0000"
+    assert message["From"] == SENDER
+
+
+@pytest.mark.parametrize(
+    ("name", "header"),
+    [
+        ("Veriditi, Inc", '"Veriditi, Inc" <no-reply@veriditi.app>'),
+        ("Équipe Vérité", "Équipe Vérité <no-reply@veriditi.app>"),
+    ],
+    ids=["comma", "accents"],
+)
+async def test_from_is_a_single_mailbox_and_envelope_is_the_address(name: str, header: str) -> None:
+    transport = FakeTransport()
+
+    await _sender(transport, sender_name=name).send(EMAIL)
+
+    [(message, kwargs)] = transport.calls
+    parsed = email.message_from_bytes(bytes(message), policy=email.policy.default)
+    [mailbox] = parsed["From"].addresses
+    assert (mailbox.display_name, mailbox.addr_spec) == (name, "no-reply@veriditi.app")
+    assert str(parsed["From"]) == header
+    assert (kwargs["sender"], kwargs["recipients"]) == ("no-reply@veriditi.app", [TO])
 
 
 async def test_password_is_revealed_only_in_the_transport_call() -> None:

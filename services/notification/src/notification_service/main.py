@@ -32,7 +32,8 @@ def _smtp_sender(settings: Settings) -> SmtpEmailSender:
     return SmtpEmailSender(
         host=settings.smtp_host,
         port=settings.smtp_port,
-        sender=str(settings.smtp_from),
+        sender_name=settings.smtp_from.name,
+        sender_address=settings.smtp_from.email,
         username=settings.smtp_user,
         password=settings.smtp_password,
         start_tls=settings.smtp_starttls,

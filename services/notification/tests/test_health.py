@@ -114,3 +114,17 @@ def test_default_registry_is_wired(settings: Settings) -> None:
     app = create_app(settings)
 
     assert app.state.registry.names == build_registry().names
+
+
+def test_smtp_from_with_comma_is_wired_as_one_quoted_mailbox() -> None:
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        db_user="test",
+        internal_api_token="test-internal-token-0123456789",  # type: ignore[arg-type]
+        smtp_from='"Veriditi, Inc" <no-reply@veriditi.app>',  # type: ignore[arg-type]
+    )
+
+    sender = create_app(settings).state.email_sender
+
+    assert sender._from_header == '"Veriditi, Inc" <no-reply@veriditi.app>'
+    assert sender._sender_address == "no-reply@veriditi.app"
