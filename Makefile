@@ -130,7 +130,11 @@ _migrations-check:
 		DB_NAME=$(or $(DB_NAME_$(s)),veriditi) DB_USER=$(DB_USER_$(s)); \
 	a="uv run alembic -c services/$(s)/alembic.ini"; \
 	n=$$($$a heads | grep -c .); [ $$n -le 1 ] || { echo "$(s): $$n heads"; exit 1; }; \
-	$$a upgrade head && $$a check && $$a downgrade base && $$a upgrade head
+	$$a upgrade head && $$a check && $$a downgrade base && $$a upgrade head || exit 1; \
+	vt=$$(docker exec $(DB_TEST) mysql -uroot -proot -N -e "SELECT COUNT(*) FROM \
+		information_schema.TABLES WHERE TABLE_SCHEMA='$$DB_NAME' \
+		AND TABLE_NAME='alembic_version_$(s)'" 2>/dev/null); \
+	[ "$$vt" = 1 ] || { echo "$(s): falta alembic_version_$(s) em $$DB_NAME (VERSION_TABLE)"; exit 1; }
 
 lint: ## ruff, mypy e lint/typecheck da web
 	uv run ruff check .

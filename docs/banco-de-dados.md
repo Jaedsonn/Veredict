@@ -470,7 +470,8 @@ Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAM
   2. `upgrade head`;
   3. `alembic check`;
   4. `downgrade base`;
-  5. `upgrade head`.
+  5. `upgrade head`;
+  6. confere que `alembic_version_<serviço>` existe no banco do serviço (pega um `VERSION_TABLE` copiado errado).
 - As migrations rodam como `migrator`; os serviços nunca têm DDL.
 
 ## 12. Plano de migrations da Sprint 1
