@@ -30,9 +30,10 @@ space := $(empty) $(empty)
 need_s = $(if $(filter $(s),$(SERVICES)),,$(error use s=<$(subst $(space),|,$(SERVICES))>))
 need_db_s = $(if $(filter $(s),$(DB_SERVICES)),,$(error use s=<$(subst $(space),|,$(DB_SERVICES))>))
 
-# Lê uma chave sem executar o .env: o ambiente vence, senão a última linha KEY= sem aspas
+# Lê uma chave sem executar o .env: o ambiente vence, senão a última linha KEY= sem \r e
+# sem aspas envolventes (o .env.example proíbe comentário na linha e export)
 env_get = env_get() { printenv "$$1" || { [ -f .env ] && grep -E "^$$1=" .env | tail -n 1 | \
-	cut -d= -f2- | sed -e "s/^\"\(.*\)\"$$/\1/" -e "s/^'\(.*\)'$$/\1/"; }; };
+	cut -d= -f2- | sed -e "s/\r$$//" -e "s/^\"\(.*\)\"$$/\1/" -e "s/^'\(.*\)'$$/\1/"; }; };
 
 # O resto do .env (DB_HOST, DB_PORT, DB_MIGRATOR_PASSWORD...) o pydantic lê sozinho
 svc_env = $(if $(DB_USER_$(s)),$(env_get) export DB_NAME=$(or $(DB_NAME_$(s)),veriditi) \
