@@ -46,20 +46,24 @@ def _request_id_from(headers: Headers) -> str:
     return str(uuid.uuid4())
 
 
-def try_defer(request: Request, func: Callable[..., Awaitable[None]], *args: Any) -> bool:
+def try_defer[**P](
+    request: Request, func: Callable[P, Awaitable[None]], *args: P.args, **kwargs: P.kwargs
+) -> bool:
     """False se a fila já foi drenada; quem chama decide o que fazer com a tarefa"""
     queue: _DeferredQueue | None = request.scope.get("state", {}).get(_DEFERRED_KEY)
     if queue is None:
         raise RuntimeError("RequestContextMiddleware ausente: a tarefa adiada nunca rodaria")
     if queue.closed:
         return False
-    queue.tasks.append(functools.partial(func, *args))
+    queue.tasks.append(functools.partial(func, *args, **kwargs))
     return True
 
 
-def defer(request: Request, func: Callable[..., Awaitable[None]], *args: Any) -> None:
+def defer[**P](
+    request: Request, func: Callable[P, Awaitable[None]], *args: P.args, **kwargs: P.kwargs
+) -> None:
     """Roda depois da resposta, inclusive de erro, porque o handler descarta as BackgroundTasks"""
-    if not try_defer(request, func, *args):
+    if not try_defer(request, func, *args, **kwargs):
         raise RuntimeError("A fila de tarefas adiadas desta requisição já foi drenada")
 
 

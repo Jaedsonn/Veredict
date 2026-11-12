@@ -323,3 +323,22 @@ async def test_cancelled_drain_logs_dropped_tasks(json_logs: JsonLogs) -> None:
     [dropped] = [e for e in json_logs() if e["event"] == "deferred_tasks_dropped"]
     assert dropped["count"] == 2
     assert dropped["level"] == "error"
+
+
+async def test_defer_forwards_keyword_arguments() -> None:
+    seen: dict[str, Any] = {}
+    app = FastAPI()
+
+    async def task(value: int, *, label: str) -> None:
+        seen[label] = value
+
+    @app.get("/x")
+    async def x(request: Request) -> None:
+        defer(request, task, 7, label="sete")
+
+    app.add_middleware(RequestContextMiddleware)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        await client.get("/x")
+
+    assert seen == {"sete": 7}
