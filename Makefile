@@ -55,8 +55,8 @@ up: ## Sobe o stack completo e espera todos ficarem saudáveis
 # que vem por último e vence (inclusive COMPOSE_PROJECT_NAME)
 compose_any = docker compose --env-file .env.example $(if $(wildcard .env),--env-file .env)
 
-down: ## Para o stack (mantém o volume do MySQL)
-	$(compose_any) down
+down: ## Para o stack, inclusive containers de serviços que saíram do compose (mantém o volume)
+	$(compose_any) down --remove-orphans
 
 reset: ## Apaga o volume do MySQL: reaplica docker/mysql/init e as migrations
 	$(compose_any) down -v --remove-orphans
