@@ -73,9 +73,15 @@ else
 	@for svc in $(DB_SERVICES); do $(MAKE) --no-print-directory migrate s=$$svc || exit 1; done
 endif
 
-migration: ## Nova revisão autogerada (s=<serviço> m="mensagem")
-	$(need_db_s)$(if $(m),,$(error use m="mensagem"))@$(svc_env) \
-		uv run alembic -c services/$(s)/alembic.ini revision --autogenerate -m "$(m)"
+# Id sequencial de 4 dígitos (§11) a partir do nome YYYYMMDD_<rev>_<slug>.py; m vai entre
+# aspas simples com $(value) para nem o make nem o sh interpretarem a mensagem
+migration: ## Nova revisão autogerada com id sequencial (s=<serviço> m="mensagem")
+	$(need_db_s)$(if $(value m),,$(error use m="mensagem"))@$(svc_env) \
+	rev=$$(ls services/$(s)/migrations/versions | \
+		sed -n 's/^[0-9]\{8\}_\([0-9]\{4\}\)_.*\.py$$/\1/p' | sort -n | tail -n 1); \
+	rev=$$(printf '%04d' "$$(expr "$${rev:-0}" + 1)"); \
+	uv run alembic -c services/$(s)/alembic.ini revision --autogenerate --rev-id "$$rev" \
+		-m '$(subst ','\'',$(value m))'
 
 test: ## Testes Python sem MySQL (s=<serviço> opcional)
 	uv run pytest $(if $(s),services/$(s))
