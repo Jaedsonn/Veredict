@@ -6,7 +6,8 @@ from collections.abc import Mapping
 from typing import Any, Final, TextIO
 
 import structlog
-from structlog.typing import EventDict, Processor, WrappedLogger
+from structlog.tracebacks import safe_str
+from structlog.typing import EventDict, ExcInfo, Processor, WrappedLogger
 
 # Basta a chave conter uma destas partes (minúsculas, "-" igual a "_")
 SENSITIVE_KEY_PARTS: Final[frozenset[str]] = frozenset(
@@ -74,24 +75,71 @@ def redact_sensitive(logger: WrappedLogger, method_name: str, event_dict: EventD
     return event_dict
 
 
-def _hide_exception_values(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            k: REDACTED if k in ("exc_value", "exc_notes") else _hide_exception_values(v)
-            for k, v in value.items()
-        }
-    if isinstance(value, list):
-        return [_hide_exception_values(v) for v in value]
-    return value
+# Mensagens que sabidamente repetem dados: SQL ("Duplicate entry '<email>'") e input do Pydantic
+_DATA_EXCEPTIONS: Final = frozenset(
+    {"sqlalchemy.exc.DBAPIError", "pydantic_core._pydantic_core.ValidationError"}
+)
+_DB_DRIVER_MODULES: Final = frozenset({"pymysql", "aiomysql", "sqlite3", "MySQLdb"})
 
 
-def hide_exception_messages(
-    logger: WrappedLogger, method_name: str, event_dict: EventDict
-) -> EventDict:
-    """Mantém tipo e frames, mas a mensagem pode trazer input do Pydantic ou parâmetros SQL"""
-    if "exception" in event_dict:
-        event_dict["exception"] = _hide_exception_values(event_dict["exception"])
-    return event_dict
+def _carries_data(exc: BaseException) -> bool:
+    if type(exc).__module__.split(".")[0] in _DB_DRIVER_MODULES:
+        return True
+    return any(
+        f"{cls.__module__}.{cls.__qualname__}" in _DATA_EXCEPTIONS for cls in type(exc).__mro__
+    )
+
+
+def _db_errno(exc: BaseException) -> int | None:
+    """Código do MySQL (1062, 1045...) do erro do driver, sem importar o SQLAlchemy"""
+    args = getattr(getattr(exc, "orig", None) or exc, "args", ())
+    if args and isinstance(args[0], int) and not isinstance(args[0], bool):
+        return args[0]
+    return None
+
+
+def _data_exceptions(root: BaseException) -> dict[tuple[str, str], int | None]:
+    """(tipo, mensagem) das exceções da cadeia e dos grupos que carregam dados"""
+    found: dict[tuple[str, str], int | None] = {}
+    seen: set[int] = set()
+    pending: list[BaseException | None] = [root]
+    while pending:
+        exc = pending.pop()
+        if exc is None or id(exc) in seen:
+            continue
+        seen.add(id(exc))
+        if _carries_data(exc):
+            found[(type(exc).__name__, safe_str(exc))] = _db_errno(exc)
+        pending += [exc.__cause__, exc.__context__, getattr(exc, "orig", None)]
+        if isinstance(exc, BaseExceptionGroup):
+            pending += list(exc.exceptions)
+    return found
+
+
+def _redact_stacks(stacks: list[dict[str, Any]], found: dict[tuple[str, str], int | None]) -> None:
+    for stack in stacks:
+        key = (stack.get("exc_type"), stack.get("exc_value"))
+        if key in found:
+            stack["exc_value"] = REDACTED
+            if stack.get("exc_notes"):
+                stack["exc_notes"] = [REDACTED] * len(stack["exc_notes"])
+            if (errno := found[key]) is not None:
+                stack["db_errno"] = errno
+        for group_member in stack.get("exceptions", []):
+            _redact_stacks(group_member, found)
+
+
+class _SafeExceptionFormatter:
+    """Mantém tipo, frames e mensagem; só redige exceções que repetem dados de entrada"""
+
+    def __init__(self) -> None:
+        # show_locals=True (padrão) vazaria variáveis locais, como headers com o token
+        self._inner = structlog.tracebacks.ExceptionDictTransformer(show_locals=False)
+
+    def __call__(self, exc_info: ExcInfo) -> list[dict[str, Any]]:
+        stacks = self._inner(exc_info)
+        _redact_stacks(stacks, _data_exceptions(exc_info[1]))
+        return stacks
 
 
 def _add_service(service_name: str) -> Processor:
@@ -132,11 +180,7 @@ def configure_logging(
         foreign_pre_chain=shared,
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            # show_locals=True (padrão) vazaria variáveis locais, como headers com o token
-            structlog.processors.ExceptionRenderer(
-                structlog.tracebacks.ExceptionDictTransformer(show_locals=False)
-            ),
-            hide_exception_messages,
+            structlog.processors.ExceptionRenderer(_SafeExceptionFormatter()),
             structlog.processors.JSONRenderer(),
         ],
     )

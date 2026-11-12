@@ -5,9 +5,11 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+import pymysql.err
 import pytest
 import sqlalchemy as sa
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import exc as sa_exc
 from sqlalchemy.exc import IntegrityError
 from structlog.contextvars import bound_contextvars
 
@@ -245,3 +247,81 @@ async def test_sql_parameters_do_not_reach_the_log(json_logs: JsonLogs) -> None:
     output = json.dumps([e for e in json_logs() if e["event"] == "insert_failed"])
     assert "IntegrityError" in output
     assert "segredo@sql.test" not in output
+
+
+class _Strict(BaseModel):
+    n: int
+
+
+def _validation_error(secret: str) -> ValidationError:
+    try:
+        _Strict(n=secret)  # type: ignore[arg-type]
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("deveria falhar")
+
+
+def _log_exception(exc: BaseException) -> None:
+    try:
+        raise exc
+    except BaseException:
+        get_logger("t").exception("falhou")
+
+
+def test_common_exception_keeps_its_message(json_logs: JsonLogs) -> None:
+    _log_exception(ValueError("x"))
+
+    [stack] = json_logs()[0]["exception"]
+    assert stack["exc_value"] == "x"
+
+
+def test_db_error_is_redacted_and_keeps_errno(json_logs: JsonLogs) -> None:
+    driver_error = pymysql.err.IntegrityError(
+        1062, "Duplicate entry 'x@y' for key 'uq_users_email'"
+    )
+    try:
+        try:
+            raise driver_error
+        except pymysql.err.IntegrityError as orig:
+            raise sa_exc.IntegrityError("INSERT INTO users ...", None, orig) from orig
+    except sa_exc.IntegrityError:
+        get_logger("t").exception("falhou")
+
+    [line] = json_logs()
+    assert "x@y" not in json.dumps(line)
+    outer, cause = line["exception"]
+    assert (outer["exc_type"], outer["exc_value"], outer["db_errno"]) == (
+        "IntegrityError",
+        REDACTED,
+        1062,
+    )
+    assert cause["exc_value"] == REDACTED
+    assert cause["is_cause"] is True
+
+
+def test_redaction_follows_the_cause_chain(json_logs: JsonLogs) -> None:
+    try:
+        try:
+            raise _validation_error("hunter2")
+        except ValidationError as inner:
+            raise RuntimeError("cadastro falhou") from inner
+    except RuntimeError:
+        get_logger("t").exception("falhou")
+
+    [line] = json_logs()
+    assert "hunter2" not in json.dumps(line)
+    outer, cause = line["exception"]
+    assert outer["exc_value"] == "cadastro falhou"
+    assert (cause["exc_type"], cause["exc_value"]) == ("ValidationError", REDACTED)
+
+
+def test_redaction_inside_exception_groups(json_logs: JsonLogs) -> None:
+    _log_exception(
+        ExceptionGroup(
+            "lote", [ValueError("visivel"), ExceptionGroup("sub", [_validation_error("hunter2")])]
+        )
+    )
+
+    output = json.dumps(json_logs())
+    assert "hunter2" not in output
+    assert "visivel" in output
