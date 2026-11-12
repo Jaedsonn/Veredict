@@ -141,3 +141,20 @@ def test_template_files_ship_inside_the_package() -> None:
     for name in build_registry().names:
         for filename in ("subject.txt", "body.txt", "body.html"):
             assert (root / name / filename).is_file(), f"{name}/{filename}"
+
+
+@pytest.mark.parametrize("template", ["email_verification", "welcome"])
+def test_line_breaks_in_name_never_reach_subject_or_bodies(template: str) -> None:
+    data: dict[str, JsonValue] = {"name": "Ana\r\nBcc: x@evil.com \tSilva"}
+    if template == "email_verification":
+        data = {**VERIFICATION, **data}
+
+    rendered = _render(template, data)
+
+    assert "Olá, Ana Bcc: x@evil.com Silva!" in rendered.text
+    assert "Olá, Ana Bcc: x@evil.com Silva!" in rendered.html
+    for part in (rendered.subject, rendered.text, rendered.html):
+        assert "\r" not in part
+        assert " " not in part
+        assert "\t" not in part
+    assert "\n" not in rendered.subject

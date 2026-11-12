@@ -82,20 +82,47 @@ def test_expires_in_minutes_is_strict_int_in_range(value: JsonValue) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["", "   ", "a" * 121, "Ana\r\nBcc: x@evil.com", "Ana\x00", "Ana\x7f", "Ana\tSilva"],
-    ids=["empty", "blank", "121-chars", "crlf", "nul", "del", "tab"],
+    ["", "   ", "\r\n\t", "\x00\x7f", "\u2028", "a" * 121],
+    ids=["empty", "blank", "only-crlf-tab", "only-nul-del", "only-line-separator", "121-chars"],
 )
-def test_invalid_names_are_rejected(name: str) -> None:
+def test_names_empty_after_normalization_or_too_long_are_rejected(name: str) -> None:
     [error] = _errors("email_verification", {**VALID, "name": name})
 
     assert error["loc"] == ("name",)
 
 
-def test_name_is_stripped_and_120_chars_fit() -> None:
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (" Ana ", "Ana"),
+        ("Ana\r\nSilva", "Ana Silva"),
+        ("Ana\tSilva", "Ana Silva"),
+        ("Ana\x85Silva", "Ana Silva"),
+        ("Ana\x00\x7fSilva", "Ana Silva"),
+        ("Ana\u2028Silva\u2029", "Ana Silva"),
+        ("Ana   \t  Maria\nSilva", "Ana Maria Silva"),
+        ("Ana\r\nBcc: x@evil.com", "Ana Bcc: x@evil.com"),
+    ],
+    ids=["strip", "crlf", "tab", "nel", "nul-del", "line-separators", "runs", "header-injection"],
+)
+def test_names_are_normalized_instead_of_rejected(raw: str, expected: str) -> None:
+    assert build_registry().parse("welcome", {"name": raw}) == WelcomeData(name=expected)
+
+
+def test_120_chars_fit_even_with_breaks_collapsed() -> None:
     registry = build_registry()
 
-    assert registry.parse("welcome", {"name": " Ana "}) == WelcomeData(name="Ana")
     assert registry.parse("welcome", {"name": "a" * 120}) == WelcomeData(name="a" * 120)
+    padded = "\t" + "a" * 59 + "\r\n" + "b" * 59 + "\n"
+    assert registry.parse("welcome", {"name": padded}) == WelcomeData(
+        name="a" * 59 + " " + "b" * 59
+    )
+
+
+def test_name_must_be_text() -> None:
+    [error] = _errors("welcome", {"name": 42})
+
+    assert (error["type"], error["loc"]) == ("string_type", ("name",))
 
 
 def test_welcome_requires_name_and_forbids_extra() -> None:

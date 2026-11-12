@@ -4,8 +4,8 @@ import unicodedata
 from typing import Annotated
 
 from pydantic import (
-    AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictInt,
@@ -15,19 +15,25 @@ from pydantic import (
 from notification_service.registry import TemplateRegistry, TemplateSpec
 from veriditi_common.notifications import NotificationTemplate
 
-
-def _no_control_chars(value: str) -> str:
-    """CR/LF e afins quebrariam o texto do e-mail e não existem num nome real"""
-    if any(unicodedata.category(char) == "Cc" for char in value):
-        raise ValueError("texto com caractere de controle")
-    return value
+# Controle (CR, LF, TAB, NUL, DEL) e separadores de linha e parágrafo (U+2028, U+2029)
+_BREAKING_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
 
 
-# 120 é o tamanho de users.name (docs/banco-de-dados.md §5.1)
+def _normalize_name(value: object) -> object:
+    """Normaliza em vez de recusar: o auth só apara, e um 422 aqui prenderia a conta em pending"""
+    if not isinstance(value, str):
+        return value
+    spaced = "".join(
+        " " if unicodedata.category(char) in _BREAKING_CATEGORIES else char for char in value
+    )
+    return " ".join(spaced.split())
+
+
+# 120 é o tamanho de users.name (docs/banco-de-dados.md §5.1); o BeforeValidator roda antes
 DisplayName = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=120),
-    AfterValidator(_no_control_chars),
+    StringConstraints(min_length=1, max_length=120),
+    BeforeValidator(_normalize_name),
 ]
 
 

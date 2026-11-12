@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -10,6 +11,7 @@ from structlog.testing import capture_logs
 
 from notification_service.adapters.memory_repo import InMemoryNotificationRepository
 from notification_service.adapters.memory_sender import FailingEmailSender, InMemoryEmailSender
+from notification_service.adapters.smtp_sender import build_message
 from notification_service.domain import NotificationStatus, StoredNotification
 from notification_service.models import NotificationRecord
 from veriditi_common.audit import InMemoryAuditLogger
@@ -20,6 +22,7 @@ from veriditi_common.security import INTERNAL_TOKEN_HEADER
 URL = "/internal/notifications"
 TO = "joao@exemplo.com"
 KEY = "email_verification:42"
+FIXED = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
 
 
 def _body(**overrides: Any) -> dict[str, Any]:
@@ -72,6 +75,24 @@ async def test_happy_path_accepts_then_sends(
     assert event.action == "notification.email.sent"
     assert event.resource_id == str(row.id)
     assert str(event.request_id) == request_id
+
+
+async def test_auth_payload_with_tab_in_name_is_accepted_and_sent(
+    client: AsyncClient, auth_headers: dict[str, str], sender: InMemoryEmailSender
+) -> None:
+    # Exatamente o que o auth envia: ele só apara o nome e limita a 120 caracteres
+    data = {"name": "Ana\tSilva\r\nSouza", "code": "042137", "expires_in_minutes": 15}
+
+    resp = await client.post(URL, json=_body(data=data), headers=auth_headers)
+
+    assert resp.status_code == 202
+    [email] = sender.sent
+    assert "Olá, Ana Silva Souza!" in email.text
+    raw = bytes(build_message(email, sender="Veriditi <no-reply@veriditi.app>", date=FIXED))
+    headers, _, body = raw.partition(b"\n\n")
+    assert b"Ana" not in headers
+    assert b"\r" not in raw
+    assert b"\t" not in body
 
 
 async def test_email_goes_out_after_the_response(
