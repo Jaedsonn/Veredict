@@ -161,7 +161,7 @@ class AuditEvent(BaseModel):
     @field_validator("metadata", mode="before")
     @classmethod
     def _metadata_storable(cls, value: Any) -> Any:
-        """Antes do Pydantic: profundidade, NaN, inteiros e UTF-8 que o MySQL recusaria"""
+        """Antes do Pydantic: profundidade, NaN, UTF-8 e inteiros que o JSON do MySQL distorce"""
         _check_json(value)
         return value
 
