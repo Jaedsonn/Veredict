@@ -16,6 +16,9 @@ PORT_auth := 8001
 PORT_notification := 8002
 PORT_monitoring := 8003
 
+# O IP real do gateway vem do TRUSTED_PROXIES; o uvicorn não reescreve o peer pelo XFF
+DEV_FLAGS_gateway := --no-proxy-headers
+
 # Usuário de runtime, variável do .env com a senha dele e banco (padrão veriditi)
 DB_USER_auth := auth_svc
 DB_USER_notification := notification_svc
@@ -75,7 +78,8 @@ db: ## Sobe só o MySQL no Docker
 
 dev: ## Serviço com hot reload (s=gateway|auth|notification|monitoring)
 	$(need_s)@$(svc_env) uv run uvicorn $(s)_service.main:create_app --factory --reload \
-		--port $(PORT_$(s)) --reload-dir services/$(s)/src --reload-dir libs/python/common/src
+		--port $(PORT_$(s)) --reload-dir services/$(s)/src --reload-dir libs/python/common/src \
+		$(DEV_FLAGS_$(s))
 
 dev-web: ## Web com hot reload
 	npm run dev:web

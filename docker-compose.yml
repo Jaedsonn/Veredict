@@ -1,7 +1,7 @@
 name: veriditi
 
 # Só mysql, mailpit, gateway e web publicam porta; o resto fica na rede do compose
-# mysql e mailpit (UI e SMTP) ficam presos a 127.0.0.1
+# mysql, mailpit (UI e SMTP) e gateway ficam presos a 127.0.0.1
 # Nenhum serviço usa env_file: o DB_PORT do .env é o do host, aqui dentro é 3306
 # Cada par <svc>-migrate/<svc> declara a mesma image para o build acontecer uma vez só;
 # pull_policy: build impede o compose pull de procurar essas imagens no Docker Hub
@@ -214,9 +214,14 @@ services:
       INTERNAL_API_TOKEN: *internal-api-token
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_ISSUER: ${JWT_ISSUER:-veriditi-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-veriditi}
+      # A web (BFF) repassa o XFF; só a rede do compose fala com o gateway
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
     ports:
-      - "${GATEWAY_PORT:-8080}:8000"
+      # Só no loopback: uma máquina da LAN não alcança o gateway nem forja o X-Forwarded-For
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8000"
     healthcheck: *ready
     depends_on:
       auth:

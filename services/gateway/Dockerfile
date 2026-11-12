@@ -38,4 +38,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"
 
-CMD ["uvicorn", "gateway_service.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# O IP real é decidido pelo TRUSTED_PROXIES, não pelo uvicorn
+CMD ["uvicorn", "gateway_service.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", \
+     "--no-proxy-headers", "--no-server-header"]
