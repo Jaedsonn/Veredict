@@ -85,6 +85,17 @@ async def test_roundtrip_keeps_microseconds_utc_and_empty_metadata(
     assert stored.metadata == {}
 
 
+async def test_get_finds_by_event_id(repo: AuditEventRepository, received_at: datetime) -> None:
+    event = _event(metadata={"plan": "pro"})
+    await repo.add(event, received_at=received_at)
+
+    stored = await repo.get(event.event_id)
+
+    assert stored is not None
+    assert (stored.event_id, stored.metadata) == (event.event_id, {"plan": "pro"})
+    assert await repo.get(uuid4()) is None
+
+
 async def _seed(repo: AuditEventRepository, received_at: datetime) -> None:
     hour = timedelta(hours=1)
     base = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)

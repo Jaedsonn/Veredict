@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from uuid import UUID
 
 from monitoring_service.adapters.memory_repo import InMemoryAuditEventRepository
 from monitoring_service.domain import AuditEventFilter, StoredAuditEvent
@@ -46,6 +47,9 @@ class _SpyRepository:
         self.calls: list[tuple[AuditEventFilter, int | None, int]] = []
 
     async def add(self, event: AuditEvent, *, received_at: datetime) -> bool:
+        raise NotImplementedError
+
+    async def get(self, event_id: UUID) -> StoredAuditEvent | None:
         raise NotImplementedError
 
     async def search(

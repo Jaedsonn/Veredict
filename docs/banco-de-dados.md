@@ -331,7 +331,7 @@ CREATE TABLE audit_events (
 
 | Coluna | Tipo | Nulo | Padrão | Descrição | PII |
 |---|---|---|---|---|---|
-| `event_id` | CHAR(36) ascii | não | — | UUID gerado pelo produtor; deduplica reenvios (a primeira escrita vence) | não |
+| `event_id` | CHAR(36) ascii | não | — | UUID gerado pelo produtor; deduplica reenvios. A primeira escrita vence; um reenvio com conteúdo diferente gera o warning `audit_event_conflict` com os nomes dos campos divergentes, sem valores | não |
 | `occurred_at` | DATETIME(6) | não | — | Relógio do produtor | não |
 | `received_at` | DATETIME(6) | não | agora (UTC) | Relógio confiável do monitoring (#5), gravado explicitamente pelo caso de uso. O DEFAULT é a defesa para INSERT manual | não |
 | `service` / `action` | VARCHAR | não | — | `action` segue `<serviço>.<entidade>.<verbo_passado>` (#4) | não |

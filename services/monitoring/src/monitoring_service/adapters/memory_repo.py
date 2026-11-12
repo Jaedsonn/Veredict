@@ -1,5 +1,6 @@
 import copy
 from datetime import datetime
+from uuid import UUID
 
 from monitoring_service.domain import AuditEventFilter, StoredAuditEvent
 from veriditi_common.audit import AuditEvent
@@ -32,6 +33,9 @@ class InMemoryAuditEventRepository:
             )
         )
         return True
+
+    async def get(self, event_id: UUID) -> StoredAuditEvent | None:
+        return next((row for row in self.rows if row.event_id == event_id), None)
 
     async def search(
         self, filters: AuditEventFilter, *, after_id: int | None, limit: int

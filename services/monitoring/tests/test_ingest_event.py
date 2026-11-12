@@ -128,3 +128,47 @@ async def test_ingested_and_duplicate_are_logged(ingest: IngestAuditEvent) -> No
     ]
     for line in logs:
         assert expected.items() <= line.items()
+
+
+async def test_resend_with_other_content_warns_conflict_without_values(
+    ingest: IngestAuditEvent, repo: InMemoryAuditEventRepository
+) -> None:
+    first = _event(metadata={"plan": "basic"})
+    event_id = first.event_id
+    await ingest.execute(first)
+    resend = first.model_copy(update={"action": "auth.user.changed", "metadata": {"plan": "pro-x"}})
+
+    with capture_logs() as logs:
+        created = await ingest.execute(resend)
+
+    assert created is False
+    [conflict] = [line for line in logs if line["event"] == "audit_event_conflict"]
+    assert conflict == {
+        "event": "audit_event_conflict",
+        "log_level": "warning",
+        "event_id": str(event_id),
+        "action": "auth.user.changed",
+        "producer": "auth",
+        "fields": ["action", "metadata"],
+    }
+    assert "pro-x" not in repr(logs)
+    assert repo.rows[0].action == "auth.user.registered"
+
+
+@pytest.mark.parametrize(
+    "resend",
+    [
+        pytest.param({}, id="identical"),
+        pytest.param({"metadata": {"password": "outra"}}, id="only-redacted-value-differs"),
+    ],
+)
+async def test_equal_resend_does_not_warn_conflict(
+    ingest: IngestAuditEvent, resend: dict[str, Any]
+) -> None:
+    event = _event(metadata={"password": "uma"}, actor_ip="2001:db8::1")
+    await ingest.execute(event)
+
+    with capture_logs() as logs:
+        await ingest.execute(event.model_copy(update=resend))
+
+    assert all(line["event"] != "audit_event_conflict" for line in logs)

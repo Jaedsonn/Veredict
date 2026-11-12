@@ -555,3 +555,21 @@ async def test_get_rejects_dates_outside_datetime_range(
 
     assert resp.status_code == 422
     assert resp.json()["detail"][0]["loc"] == ["query", next(iter(params))]
+
+
+async def test_resend_with_other_content_is_accepted_and_logs_conflict(
+    client: AsyncClient, auth_headers: Headers, make_event: EventFactory, db: Database
+) -> None:
+    body = make_event(metadata={"plan": "basic"})
+    await client.post(URL, json=body, headers=auth_headers)
+
+    with capture_logs() as logs:
+        resp = await client.post(
+            URL, json={**body, "metadata": {"plan": "pro"}, "actor_id": 7}, headers=auth_headers
+        )
+
+    assert resp.json() == ACCEPTED
+    [conflict] = [line for line in logs if line["event"] == "audit_event_conflict"]
+    assert conflict["fields"] == ["actor_id", "metadata"]
+    [record] = await _records(db)
+    assert record.metadata_ == {"plan": "basic"}

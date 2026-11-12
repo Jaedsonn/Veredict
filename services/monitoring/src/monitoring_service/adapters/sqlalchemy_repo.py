@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Final
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -78,6 +79,11 @@ class SqlAlchemyAuditEventRepository:
             await self._session.rollback()
             raise
         return True
+
+    async def get(self, event_id: UUID) -> StoredAuditEvent | None:
+        stmt = select(AuditEventRecord).where(AuditEventRecord.event_id == event_id)
+        record = await self._session.scalar(stmt)
+        return _to_domain(record) if record is not None else None
 
     async def search(
         self, filters: AuditEventFilter, *, after_id: int | None, limit: int
