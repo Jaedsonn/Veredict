@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,25 +12,22 @@ from auth_service.domain.entities import (
     UserEntity,
     VerificationCodeEntity,
 )
-from auth_service.domain.errors import EmailAlreadyRegisteredError, UserNotFoundError
+from auth_service.domain.errors import (
+    EmailAlreadyRegisteredError,
+    UserNotFoundError,
+    VerificationCodeExpiredError,
+)
 from auth_service.models import (
     EmailVerificationCode,
     RefreshToken,
     RevokeReason,
     User,
-    UserRole,
     UserStatus,
     VerificationPurpose,
 )
 
 
-def _to_user_entity(
-    model: User,
-    *,
-    role: UserRole = UserRole.COMMON,
-    cpf: str | None = None,
-    oab_number: str | None = None,
-) -> UserEntity:
+def _to_user_entity(model: User) -> UserEntity:
     return UserEntity(
         id=model.id,
         email=model.email,
@@ -40,9 +37,6 @@ def _to_user_entity(
         email_verified_at=model.email_verified_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
-        role=role,
-        cpf=cpf,
-        oab_number=oab_number,
     )
 
 
@@ -86,10 +80,8 @@ class SqlAlchemyUserRepository:
         email: str,
         name: str,
         password_hash: str,
-        role: UserRole = UserRole.COMMON,
-        cpf: str | None = None,
-        oab_number: str | None = None,
         now: datetime,
+        commit: bool = True,
     ) -> UserEntity:
         user = User(
             email=email,
@@ -102,31 +94,62 @@ class SqlAlchemyUserRepository:
         )
         self._session.add(user)
         try:
-            await self._session.commit()
+            if commit:
+                await self._session.commit()
+                await self._session.refresh(user)
+            else:
+                await self._session.flush()
         except IntegrityError as exc:
             await self._session.rollback()
             raise EmailAlreadyRegisteredError(email) from exc
-        await self._session.refresh(user)
-        return _to_user_entity(user, role=role, cpf=cpf, oab_number=oab_number)
+        return _to_user_entity(user)
 
     async def get_by_id(self, user_id: int) -> UserEntity | None:
         user = await self._session.get(User, user_id)
         return _to_user_entity(user) if user is not None else None
 
-    async def get_by_email(self, email: str) -> UserEntity | None:
+    async def get_by_email(
+        self,
+        email: str,
+        *,
+        for_update: bool = False,
+    ) -> UserEntity | None:
         stmt = select(User).where(User.email == email)
+        if for_update:
+            stmt = stmt.with_for_update()
         user = await self._session.scalar(stmt)
         return _to_user_entity(user) if user is not None else None
 
-    async def mark_email_verified(self, user_id: int, *, verified_at: datetime) -> UserEntity:
-        user = await self._session.get(User, user_id)
+    async def mark_email_verified(
+        self,
+        user_id: int,
+        *,
+        verified_at: datetime,
+        commit: bool = True,
+    ) -> UserEntity:
+        stmt = (
+            update(User)
+            .where(
+                User.id == user_id,
+                User.status == UserStatus.PENDING_VERIFICATION,
+            )
+            .values(
+                status=UserStatus.ACTIVE,
+                email_verified_at=verified_at,
+                updated_at=verified_at,
+            )
+        )
+        result = await self._session.execute(stmt)
+        if int(result.rowcount or 0) != 1:  # type: ignore[attr-defined]
+            await self._session.rollback()
+            raise VerificationCodeExpiredError()
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
+        user = await self._session.get(User, user_id, populate_existing=True)
         if user is None:
             raise UserNotFoundError()
-        user.status = UserStatus.ACTIVE
-        user.email_verified_at = verified_at
-        user.updated_at = verified_at
-        await self._session.commit()
-        await self._session.refresh(user)
         return _to_user_entity(user)
 
     async def update_name(self, user_id: int, *, name: str, now: datetime) -> UserEntity:
@@ -140,15 +163,23 @@ class SqlAlchemyUserRepository:
         return _to_user_entity(user)
 
     async def update_password_hash(
-        self, user_id: int, *, password_hash: str, now: datetime
+        self,
+        user_id: int,
+        *,
+        password_hash: str,
+        now: datetime,
+        commit: bool = True,
     ) -> UserEntity:
         user = await self._session.get(User, user_id)
         if user is None:
             raise UserNotFoundError()
         user.password_hash = password_hash
         user.updated_at = now
-        await self._session.commit()
-        await self._session.refresh(user)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(user)
+        else:
+            await self._session.flush()
         return _to_user_entity(user)
 
 
@@ -255,21 +286,58 @@ class SqlAlchemyVerificationCodeRepository:
         max_attempts: int,
         now: datetime,
     ) -> VerificationCodeEntity:
-        record = await self._session.get(EmailVerificationCode, code_id)
+        next_attempts = EmailVerificationCode.attempts + 1
+        stmt = (
+            update(EmailVerificationCode)
+            .where(
+                EmailVerificationCode.id == code_id,
+                EmailVerificationCode.consumed_at.is_(None),
+                EmailVerificationCode.attempts < max_attempts,
+                EmailVerificationCode.expires_at > now,
+            )
+            .values(
+                attempts=next_attempts,
+                consumed_at=case(
+                    (next_attempts >= max_attempts, now),
+                    else_=EmailVerificationCode.consumed_at,
+                ),
+            )
+        )
+        await self._session.execute(stmt)
+        await self._session.commit()
+        record = await self._session.get(
+            EmailVerificationCode,
+            code_id,
+            populate_existing=True,
+        )
         if record is None:
             raise ValueError(f"Código de verificação {code_id} não encontrado.")
-        record.attempts += 1
-        if record.attempts >= max_attempts:
-            record.consumed_at = now
-        await self._session.commit()
-        await self._session.refresh(record)
         return _to_code_entity(record)
 
-    async def mark_consumed(self, code_id: int, *, consumed_at: datetime) -> None:
-        record = await self._session.get(EmailVerificationCode, code_id)
-        if record is not None:
-            record.consumed_at = consumed_at
+    async def mark_consumed(
+        self,
+        code_id: int,
+        *,
+        consumed_at: datetime,
+        max_attempts: int | None = None,
+        commit: bool = True,
+    ) -> bool:
+        conditions = [
+            EmailVerificationCode.id == code_id,
+            EmailVerificationCode.consumed_at.is_(None),
+        ]
+        if max_attempts is not None:
+            conditions.append(EmailVerificationCode.attempts < max_attempts)
+            conditions.append(EmailVerificationCode.expires_at > consumed_at)
+
+        stmt = update(EmailVerificationCode).where(*conditions).values(consumed_at=consumed_at)
+        result = await self._session.execute(stmt)
+        consumed = int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
+        if commit:
             await self._session.commit()
+        else:
+            await self._session.flush()
+        return consumed
 
 
 class SqlAlchemyRefreshTokenRepository:
@@ -310,6 +378,48 @@ class SqlAlchemyRefreshTokenRepository:
         record = await self._session.scalar(stmt)
         return _to_refresh_entity(record) if record is not None else None
 
+    async def rotate_token(
+        self,
+        *,
+        current_token_id: int,
+        user_id: int,
+        new_token_hash: str,
+        family_id: uuid.UUID,
+        expires_at: datetime,
+        created_ip: str | None,
+        user_agent: str | None,
+        now: datetime,
+    ) -> RefreshTokenEntity | None:
+        revoke_stmt = (
+            update(RefreshToken)
+            .where(
+                RefreshToken.id == current_token_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+            .values(revoked_at=now, revoke_reason=RevokeReason.ROTATED)
+        )
+        result = await self._session.execute(revoke_stmt)
+        if int(result.rowcount or 0) != 1:  # type: ignore[attr-defined]
+            await self._session.rollback()
+            return None
+
+        successor = RefreshToken(
+            user_id=user_id,
+            token_hash=new_token_hash,
+            family_id=family_id,
+            expires_at=expires_at,
+            revoked_at=None,
+            revoke_reason=None,
+            created_ip=created_ip,
+            user_agent=user_agent,
+            created_at=now,
+        )
+        self._session.add(successor)
+        await self._session.commit()
+        await self._session.refresh(successor)
+        return _to_refresh_entity(successor)
+
     async def revoke(
         self,
         token_id: int,
@@ -317,11 +427,16 @@ class SqlAlchemyRefreshTokenRepository:
         reason: RevokeReason,
         revoked_at: datetime,
     ) -> None:
-        record = await self._session.get(RefreshToken, token_id)
-        if record is not None and record.revoked_at is None:
-            record.revoked_at = revoked_at
-            record.revoke_reason = reason
-            await self._session.commit()
+        stmt = (
+            update(RefreshToken)
+            .where(
+                RefreshToken.id == token_id,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=revoked_at, revoke_reason=reason)
+        )
+        await self._session.execute(stmt)
+        await self._session.commit()
 
     async def revoke_all_for_user(
         self,
@@ -330,6 +445,7 @@ class SqlAlchemyRefreshTokenRepository:
         reason: RevokeReason,
         revoked_at: datetime,
         exclude_token_hash: str | None = None,
+        exclude_family_id: uuid.UUID | None = None,
     ) -> int:
         conditions = [
             RefreshToken.user_id == user_id,
@@ -337,6 +453,8 @@ class SqlAlchemyRefreshTokenRepository:
         ]
         if exclude_token_hash:
             conditions.append(RefreshToken.token_hash != exclude_token_hash.lower())
+        if exclude_family_id is not None:
+            conditions.append(RefreshToken.family_id != exclude_family_id)
 
         stmt = (
             update(RefreshToken)

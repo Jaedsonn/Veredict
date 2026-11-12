@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Response, status
 
 from auth_service.dependencies import (
     RequestContextDep,
@@ -59,9 +59,6 @@ async def register(
             name=payload.name,
             email=payload.email,
             password=payload.password,
-            role=payload.role,
-            cpf=payload.cpf,
-            oab_number=payload.oab_number,
         ),
         ctx,
     )
@@ -151,16 +148,9 @@ async def logout(
     payload: LogoutRequest,
     ctx: RequestContextDep,
     use_case: Annotated[LogoutUser, Depends(get_logout_user_use_case)],
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
 ) -> Response:
-    actor_id: int | None = None
-    if x_user_id:
-        try:
-            actor_id = int(x_user_id)
-        except ValueError:
-            actor_id = None
     await use_case.execute(
-        LogoutCommand(refresh_token=payload.refresh_token, actor_id=actor_id),
+        LogoutCommand(refresh_token=payload.refresh_token),
         ctx,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

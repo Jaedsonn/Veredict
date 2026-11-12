@@ -7,6 +7,7 @@ from datetime import timedelta
 from auth_service.domain.entities import (
     AuthenticatedResult,
     LoginResult,
+    RequestContext,
     TokenPairResult,
 )
 from auth_service.domain.errors import (
@@ -25,7 +26,6 @@ from auth_service.ports import (
     UserRepository,
 )
 from veriditi_common.audit import AuditEvent, AuditLogger, AuditOutcome
-from veriditi_common.middleware import RequestContext
 
 
 def _parse_uuid(value: str | None) -> uuid.UUID | None:
@@ -51,7 +51,6 @@ class RefreshCommand:
 @dataclass(frozen=True, slots=True)
 class LogoutCommand:
     refresh_token: str
-    actor_id: int | None = None
 
 
 class AuthenticateUser:
@@ -91,8 +90,8 @@ class AuthenticateUser:
                     action="auth.session.login_failed",
                     outcome=AuditOutcome.FAILURE,
                     actor_id=None,
-                    actor_ip=ctx.actor_ip,
-                    request_id=_parse_uuid(ctx.request_id),
+                    actor_ip=ctx.actor_ip_address,
+                    request_id=ctx.request_uuid,
                     resource_type="session",
                     metadata={"reason": "user_not_found"},
                 )
@@ -107,8 +106,8 @@ class AuthenticateUser:
                     action="auth.session.login_failed",
                     outcome=AuditOutcome.FAILURE,
                     actor_id=user.id,
-                    actor_ip=ctx.actor_ip,
-                    request_id=_parse_uuid(ctx.request_id),
+                    actor_ip=ctx.actor_ip_address,
+                    request_id=ctx.request_uuid,
                     resource_type="user",
                     resource_id=str(user.id),
                     metadata={"reason": "invalid_password"},
@@ -124,8 +123,8 @@ class AuthenticateUser:
                     action="auth.session.login_failed",
                     outcome=AuditOutcome.FAILURE,
                     actor_id=user.id,
-                    actor_ip=ctx.actor_ip,
-                    request_id=_parse_uuid(ctx.request_id),
+                    actor_ip=ctx.actor_ip_address,
+                    request_id=ctx.request_uuid,
                     resource_type="user",
                     resource_id=str(user.id),
                     metadata={"reason": "email_not_verified"},
@@ -141,8 +140,8 @@ class AuthenticateUser:
                     action="auth.session.login_failed",
                     outcome=AuditOutcome.FAILURE,
                     actor_id=user.id,
-                    actor_ip=ctx.actor_ip,
-                    request_id=_parse_uuid(ctx.request_id),
+                    actor_ip=ctx.actor_ip_address,
+                    request_id=ctx.request_uuid,
                     resource_type="user",
                     resource_id=str(user.id),
                     metadata={"reason": "account_blocked"},
@@ -150,13 +149,14 @@ class AuthenticateUser:
             )
             raise AccountBlockedError()
 
+        family_id = uuid.uuid4()
         access_token = self._tokens.issue_access_token(
             user_id=user.id,
             email=user.email,
             now=now,
+            session_id=family_id,
         )
         raw_refresh, refresh_hash = self._tokens.generate_refresh_token()
-        family_id = uuid.uuid4()
         expires_at = now + timedelta(days=self._tokens.refresh_ttl_days)
 
         await self._refresh_tokens.create(
@@ -176,8 +176,8 @@ class AuthenticateUser:
                 action="auth.session.login_succeeded",
                 outcome=AuditOutcome.SUCCESS,
                 actor_id=user.id,
-                actor_ip=ctx.actor_ip,
-                request_id=_parse_uuid(ctx.request_id),
+                actor_ip=ctx.actor_ip_address,
+                request_id=ctx.request_uuid,
                 resource_type="session",
                 resource_id=str(family_id),
             )
@@ -194,7 +194,7 @@ class AuthenticateUser:
 
 
 class RefreshSession:
-    """Rotaciona refresh tokens e revoga todas as sessões em caso de reuso (#9)."""
+    """Rotaciona refresh tokens atomicamente e revoga todas as sessões em caso de reuso (#9)."""
 
     def __init__(
         self,
@@ -210,6 +210,38 @@ class RefreshSession:
         self._audit = audit
         self._clock = clock
 
+    async def _handle_reuse_detected(
+        self,
+        *,
+        user_id: int,
+        family_id: uuid.UUID,
+        now: object,
+        ctx: RequestContext,
+    ) -> None:
+        revoked_count = await self._refresh_tokens.revoke_all_for_user(
+            user_id,
+            reason=RevokeReason.REUSE_DETECTED,
+            revoked_at=self._clock.now(),
+        )
+        await self._audit.record(
+            AuditEvent(
+                occurred_at=self._clock.now(),
+                service="auth",
+                action="auth.session.refresh_reuse_detected",
+                outcome=AuditOutcome.FAILURE,
+                actor_id=user_id,
+                actor_ip=ctx.actor_ip_address,
+                request_id=ctx.request_uuid,
+                resource_type="session",
+                resource_id=str(family_id),
+                metadata={
+                    "family_id": str(family_id),
+                    "revoked_sessions": revoked_count,
+                },
+            )
+        )
+        raise RefreshTokenReuseDetectedError()
+
     async def execute(self, cmd: RefreshCommand, ctx: RequestContext) -> TokenPairResult:
         now = self._clock.now()
         raw_token = cmd.refresh_token.strip()
@@ -223,30 +255,12 @@ class RefreshSession:
 
         if stored.revoked_at is not None:
             if stored.revoke_reason in (RevokeReason.ROTATED, RevokeReason.REUSE_DETECTED):
-                # Reuso de refresh token já rotacionado: possível comprometimento de sessão!
-                revoked_count = await self._refresh_tokens.revoke_all_for_user(
-                    stored.user_id,
-                    reason=RevokeReason.REUSE_DETECTED,
-                    revoked_at=now,
+                await self._handle_reuse_detected(
+                    user_id=stored.user_id,
+                    family_id=stored.family_id,
+                    now=now,
+                    ctx=ctx,
                 )
-                await self._audit.record(
-                    AuditEvent(
-                        occurred_at=now,
-                        service="auth",
-                        action="auth.session.refresh_reuse_detected",
-                        outcome=AuditOutcome.FAILURE,
-                        actor_id=stored.user_id,
-                        actor_ip=ctx.actor_ip,
-                        request_id=_parse_uuid(ctx.request_id),
-                        resource_type="session",
-                        resource_id=str(stored.family_id),
-                        metadata={
-                            "family_id": str(stored.family_id),
-                            "revoked_sessions": revoked_count,
-                        },
-                    )
-                )
-                raise RefreshTokenReuseDetectedError()
             raise InvalidRefreshTokenError()
 
         if stored.expires_at <= now:
@@ -256,28 +270,34 @@ class RefreshSession:
         if user is None or user.status != UserStatus.ACTIVE:
             raise InvalidRefreshTokenError()
 
-        await self._refresh_tokens.revoke(
-            stored.id,
-            reason=RevokeReason.ROTATED,
-            revoked_at=now,
-        )
-
-        access_token = self._tokens.issue_access_token(
-            user_id=user.id,
-            email=user.email,
-            now=now,
-        )
         new_raw_refresh, new_refresh_hash = self._tokens.generate_refresh_token()
         expires_at = now + timedelta(days=self._tokens.refresh_ttl_days)
 
-        await self._refresh_tokens.create(
+        # Rotação condicional e inserção do sucessor na mesma transação: evita múltiplos sucessores
+        rotated = await self._refresh_tokens.rotate_token(
+            current_token_id=stored.id,
             user_id=user.id,
-            token_hash=new_refresh_hash,
+            new_token_hash=new_refresh_hash,
             family_id=stored.family_id,
             expires_at=expires_at,
             created_ip=ctx.actor_ip,
             user_agent=ctx.user_agent,
             now=now,
+        )
+        if rotated is None:
+            # Outro request concorrente já consumiu/rotacionou este token -> reuso detectado!
+            await self._handle_reuse_detected(
+                user_id=stored.user_id,
+                family_id=stored.family_id,
+                now=now,
+                ctx=ctx,
+            )
+
+        access_token = self._tokens.issue_access_token(
+            user_id=user.id,
+            email=user.email,
+            now=now,
+            session_id=stored.family_id,
         )
 
         return TokenPairResult(
@@ -316,9 +336,8 @@ class LogoutUser:
                     revoked_at=now,
                 )
 
-        actor_id = (
-            cmd.actor_id if cmd.actor_id is not None else (stored.user_id if stored else None)
-        )
+        # Atribui actor_id somente a partir do refresh token persistido (nunca de header público)
+        actor_id = stored.user_id if stored is not None else None
         await self._audit.record(
             AuditEvent(
                 occurred_at=now,
@@ -326,8 +345,8 @@ class LogoutUser:
                 action="auth.session.logout",
                 outcome=AuditOutcome.SUCCESS,
                 actor_id=actor_id,
-                actor_ip=ctx.actor_ip,
-                request_id=_parse_uuid(ctx.request_id),
+                actor_ip=ctx.actor_ip_address,
+                request_id=ctx.request_uuid,
                 resource_type="session",
                 resource_id=str(stored.family_id) if stored else None,
             )

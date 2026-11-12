@@ -42,7 +42,14 @@ class PyJwtTokenIssuer:
     def refresh_ttl_days(self) -> int:
         return self._refresh_ttl_days
 
-    def issue_access_token(self, *, user_id: int, email: str, now: datetime) -> str:
+    def issue_access_token(
+        self,
+        *,
+        user_id: int,
+        email: str,
+        now: datetime,
+        session_id: uuid.UUID | None = None,
+    ) -> str:
         exp = now + timedelta(seconds=self._access_ttl_seconds)
         payload: dict[str, Any] = {
             "sub": str(user_id),
@@ -53,6 +60,8 @@ class PyJwtTokenIssuer:
             "iss": self._issuer,
             "aud": self._audience,
         }
+        if session_id is not None:
+            payload["sid"] = str(session_id)
         return jwt.encode(payload, self._private_key, algorithm="RS256")
 
     def decode_access_token(self, token: str) -> dict[str, Any]:
