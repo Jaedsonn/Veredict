@@ -169,7 +169,9 @@ internas, exigem `X-Internal-Token` e não passam pelo gateway:
   do mesmo `event_id`, que não duplica;
 - `GET /internal/events` filtra por `actor_id`, `action` e `[from, to)` e pagina por
   `after_id` (`limit` até 200, `next_cursor` nulo na última página). No fuso, use `Z` ou
-  `%2B00:00`: um `+` cru na URL vira espaço e dá 422.
+  `%2B00:00`: um `+` cru na URL vira espaço e dá 422. O cursor pagina eventos já
+  gravados; não use `after_id` para acompanhar a cauda, porque um `id` menor pode ser
+  confirmado depois de um maior.
 
 ```bash
 docker compose exec monitoring python -c "import os, urllib.request as u; r = u.Request('http://127.0.0.1:8000/internal/events?actor_id=42&from=2026-11-12T00:00:00Z&limit=20', headers={'X-Internal-Token': os.environ['INTERNAL_API_TOKEN']}); print(u.urlopen(r).read().decode())"

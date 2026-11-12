@@ -38,7 +38,7 @@ async def list_events(
     after_id: Annotated[int | None, Query(ge=0, le=_MAX_BIGINT)] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> AuditEventsPage:
-    """Ordem de inserção (id) com cursor after_id; use Z ou %2B no fuso, um + cru vira espaço"""
+    """Ordem do id com cursor after_id; use Z ou %2B no fuso, um + cru vira espaço"""
     filters = AuditEventFilter(
         actor_id=actor_id,
         action=action,

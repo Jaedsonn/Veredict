@@ -4,7 +4,7 @@ from veriditi_common.errors import AppError
 
 
 class ListAuditEvents:
-    """Página por cursor de id: estável enquanto chegam eventos novos"""
+    """Cursor por id estável para dados confirmados; não segue a cauda com escritas concorrentes"""
 
     def __init__(self, events: AuditEventRepository) -> None:
         self._events = events

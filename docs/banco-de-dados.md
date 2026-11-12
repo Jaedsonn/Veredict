@@ -343,7 +343,8 @@ CREATE TABLE audit_events (
 `prev_hash` e `hash` (`CHAR(64)`, `hash` UNIQUE) entram na migration do **#34**, junto com o encadeamento.
 
 - A redação do `metadata` é por **nome de chave**: um segredo no valor de uma chave neutra (`note: "Bearer …"`) passa. Não pôr segredo em valores é responsabilidade do produtor.
-- Um INSERT duplicado consome um `id` (o InnoDB não devolve o `AUTO_INCREMENT`). Os ids não são contíguos, então o #34 deve encadear pela ordem de `id`, não por `occurred_at`, que depende do relógio do produtor.
+- Um INSERT duplicado consome um `id` (o InnoDB não devolve o `AUTO_INCREMENT`), então os ids não são contíguos.
+- A ordem do `id` é a da reserva do `AUTO_INCREMENT`, não a dos COMMITs: uma transação lenta pode confirmar o `id` 6 depois que o 7 já está visível. O cursor `after_id` é estável para paginar dados já confirmados, mas **não serve para acompanhar a cauda** com escritas concorrentes: quem leu até o 7 nunca verá o 6. Nota para o #34: o encadeamento e qualquer leitura incremental precisam de uma marca d'água atrasada (`received_at < now() - Δ`, com Δ maior que a transação mais longa) ou de uma sequência gerada sob lock na mesma transação do INSERT. `occurred_at` também não serve, porque depende do relógio do produtor.
 
 ## 6. Índices e as consultas que eles atendem
 
@@ -516,7 +517,7 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 | #5 | Filtrar `password`, `token`, `code` e `secret` do `metadata` | `redact` da lib (`is_sensitive_key`, superconjunto desses nomes): o valor vira `[redacted]` e a chave fica | A mesma regra dos logs; a chave preservada mostra o bug no produtor |
 | #5 | O endpoint "recebe um `AuditEvent`" | `AuditEventIn(AuditEvent)` com `event_id`, `occurred_at` e `request_id` obrigatórios (`request_id` aceita `null` explícito) | Os defaults do produtor gerariam um `event_id` novo a cada reenvio, usariam o relógio do monitoring e herdariam o `X-Request-ID` do próprio POST |
 | #5 | `received_at DEFAULT CURRENT_TIMESTAMP(6)` | DEFAULT mantido, mas o caso de uso grava o relógio injetado | Testável; o DEFAULT cobre INSERT manual |
-| #5 | "Paginado por cursor `id`" | `after_id` exclusivo, `id` crescente, `limit` 50 (máx. 200, fora disso 422) e `next_cursor` | Páginas estáveis enquanto entram eventos e polling da cauda (#34) |
+| #5 | "Paginado por cursor `id`" | `after_id` exclusivo, `id` crescente, `limit` 50 (máx. 200, fora disso 422) e `next_cursor` | Paginação estável dos eventos já confirmados. Não acompanha a cauda com escritas concorrentes (§5.5 e §15) |
 | #5 | `occurred_at BETWEEN :from AND :to` | `occurred_at >= :from AND occurred_at < :to`; `from > to` dá 422 `invalid_time_range` | Janelas vizinhas não contam o mesmo evento duas vezes |
 | #5 | `metadata JSON NULL` sem regra | `{}` vira NULL de SQL (`JSON(none_as_null=True)`) e NULL volta como `{}` | Sem `none_as_null`, o SQLAlchemy gravaria o JSON `null` |
 | #5 | Corpo do 202 não definido | `{"status":"accepted"}`, igual para evento novo e reenvio, só depois do COMMIT | O produtor trata o 202 como "gravado"; falha no banco é 500 e cai no fallback |
@@ -544,6 +545,7 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 - **`migrator` com `GRANT OPTION`** nos dois bancos é a credencial mais sensível depois do root. Em produção, ela deve ficar só no job de migração.
 - **`ENUM` nativo**: adicionar valor no fim é um `ALTER` instantâneo; remover ou reordenar exige migration cuidadosa.
 - **Retenção e LGPD** de `actor_ip`, `created_ip` e `user_agent`: definir prazos com o time (#35).
+- **Cursor por `id` e escritas concorrentes**: o `AUTO_INCREMENT` é reservado no INSERT e fica visível só no COMMIT, fora de ordem. Ler a cauda por `after_id` pode pular eventos confirmados depois. O #34 precisa de uma marca d'água atrasada (`received_at < now() - Δ`) ou de uma sequência gerada sob lock (§5.5).
 - **Auditoria na Sprint 1** usa HTTP *fire-and-forget* (ADR-016). Um evento pode se perder se o monitoring estiver fora; a mitigação é o outbox (#37).
 - **Revisão do modelo**: o #41 pede revisão de pelo menos 1 pessoa de backend e 1 da equipe arquiteta. O desvio "banco central compartilhado" está na ADR-020.
 
