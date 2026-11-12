@@ -45,8 +45,15 @@ services:
       - mysql-data:/var/lib/mysql
       - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      # O TCP só responde depois do initdb (o servidor temporário roda sem rede)
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      # Exige os usuários do init: se o 02-service-users.sh falhou, o restart pula o init
+      # e um ping daria healthy sem o migrator (corrija o .env e rode make reset)
+      test:
+        - CMD-SHELL
+        - >-
+          MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h127.0.0.1 -uroot -N -e
+          "SELECT COUNT(*) FROM mysql.user WHERE user IN
+          ('migrator','auth_svc','notification_svc','veriditi_logs_writer')"
+          | grep -qx 4
       interval: 5s
       timeout: 3s
       retries: 20

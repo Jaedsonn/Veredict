@@ -442,6 +442,7 @@ Cada serviço declara a própria `Base` com `metadata = make_metadata()` (`verid
   - Falha o container se faltar uma senha ou se ela tiver `'` ou `\`.
   - Pode ser reaplicado (`CREATE USER IF NOT EXISTS` + `ALTER USER`): `docker compose exec mysql bash /docker-entrypoint-initdb.d/02-service-users.sh`.
 - Os scripts **só rodam com o volume vazio**. Depois de mudá-los: `docker compose down -v`.
+- Se o init falhar (senha faltando ou com `'`/`\`), o MySQL reinicia com o datadir já criado e **não roda o init de novo**. Por isso o healthcheck do compose exige que os quatro usuários existam em vez de só responder ao ping: o `mysql` fica `unhealthy` e os `*-migrate` não chegam a rodar com erro 1045. Corrija o `.env` e rode `make reset`.
 - O initdb **não concede nenhum privilégio de tabela**. As tabelas ainda não existem nessa hora, e o MySQL só aceita GRANT de SELECT/INSERT em tabela existente. Cada GRANT nasce na migration que cria a tabela (seção 11).
 - Um usuário sem nenhum privilégio num banco **nem consegue conectar** a ele (erro 1044). Por isso o `<serviço>-migrate` precisa terminar antes de o serviço subir.
 

@@ -56,6 +56,11 @@ make reset     # docker compose down -v --remove-orphans
 make up
 ```
 
+Se o `mysql` ficar `unhealthy` logo na primeira subida, o init falhou (veja
+`docker compose logs mysql`, geralmente senha faltando ou com `'`/`\`): corrija
+o `.env` e rode `make reset`, porque o init não roda de novo sobre um volume já
+criado.
+
 Quem já tinha `.env` precisa compará-lo com o `.env.example`: as senhas agora
 são por usuário (`DB_MIGRATOR_PASSWORD`, `AUTH_DB_PASSWORD`,
 `NOTIFICATION_DB_PASSWORD`, `LOGS_DB_PASSWORD`). O modelo de dados está em
