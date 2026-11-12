@@ -60,8 +60,11 @@ gateway, e as sessões abertas caem.
 As portas do host vêm do `.env` (`WEB_PORT`, `GATEWAY_PORT`, `MAILPIT_UI_PORT`,
 `MAILPIT_SMTP_PORT`, `DB_PORT`). `auth`, `notification` e `monitoring` não
 publicam porta: só o gateway e a web são acessíveis de fora da rede do compose.
-MySQL, Mailpit e o gateway ficam presos a `127.0.0.1` (o gateway para ninguém
-da LAN forjar o `X-Forwarded-For`; veja [API Gateway](#api-gateway)). O SMTP do Mailpit também é
+Em dev, todas as portas publicadas (MySQL, Mailpit, gateway e web) ficam presas a
+`127.0.0.1`. Para web e gateway isso é requisito de segurança: o gateway confia no
+`X-Forwarded-For` que a web repassa, e o Next só preenche esse header quando ele
+não veio, então uma web exposta na LAN deixaria qualquer máquina forjar o IP
+usado no rate limit e no `actor_ip` (veja [API Gateway](#api-gateway)). O SMTP do Mailpit também é
 publicado, por decisão consciente: sem ele o `make dev s=notification` fora do
 Docker não teria onde entregar e-mail. Ao mudar o `MAILPIT_SMTP_PORT`, mude
 também o `SMTP_PORT` do `.env`, que é a porta usada pelo notification fora do
@@ -312,7 +315,12 @@ Starlette lê em latin-1, então quem precisar do e-mail Unicode faz
 `TRUSTED_PROXIES` (CIDRs separados por vírgula), lido da direita para a
 esquerda. Vazio (padrão do `make dev`): o XFF é ignorado. No compose, o padrão
 são as faixas privadas da rede do Docker, porque a web (BFF) é quem chama o
-gateway. O uvicorn roda com `--no-proxy-headers` para não decidir isso antes.
+gateway e repassa o XFF que recebeu. Isso só é confiável porque, em dev, web e
+gateway escutam só no loopback do host: ninguém de fora fala com eles. Em
+produção, a borda (Caddy, #17) precisa **sobrescrever** o `X-Forwarded-For` com
+o IP da conexão, nunca anexar ao que o cliente mandou, senão o valor forjado
+chega intacto ao gateway através da web. O uvicorn roda com `--no-proxy-headers`
+para não decidir isso antes.
 
 **Rate limit.** Token bucket em memória por processo (`InMemoryTokenBucket`):
 uma ficha por tentativa, consumida antes de chamar o upstream; o `429

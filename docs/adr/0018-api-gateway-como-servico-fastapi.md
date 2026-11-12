@@ -30,7 +30,7 @@ Implementar a API Gateway como um **serviço FastAPI próprio** em `services/gat
 - propagação de `X-User-Id`, `X-Request-ID` e do IP de origem;
 - `/health/ready` agregado, consumido por `apps/web/src/app/api/health/route.ts`.
 
-TLS e a porta pública ficam num proxy de borda (Caddy, #17), não no gateway.
+TLS e a porta pública ficam num proxy de borda (Caddy, #17), não no gateway. O gateway confia no `X-Forwarded-For` que a web repassa (`TRUSTED_PROXIES`), então a borda precisa **sobrescrever** esse header com o IP da conexão, nunca anexar ao valor do cliente: o Next só preenche o header quando ele não veio. Em dev, a mesma garantia vem de web e gateway publicados só em `127.0.0.1`.
 
 ## Consequências (positivas / negativas)
 

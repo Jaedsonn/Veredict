@@ -1,7 +1,7 @@
 name: veriditi
 
 # Só mysql, mailpit, gateway e web publicam porta; o resto fica na rede do compose
-# mysql, mailpit (UI e SMTP) e gateway ficam presos a 127.0.0.1
+# Em dev todas as portas publicadas ficam presas a 127.0.0.1
 # Nenhum serviço usa env_file: o DB_PORT do .env é o do host, aqui dentro é 3306
 # Cada par <svc>-migrate/<svc> declara a mesma image para o build acontecer uma vez só;
 # pull_policy: build impede o compose pull de procurar essas imagens no Docker Hub
@@ -147,6 +147,9 @@ services:
       NOTIFICATION_URL: http://notification:8000
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      # Os mesmos do gateway: um iss/aud diferente daria 401 em todo token
+      JWT_ISSUER: ${JWT_ISSUER:-veriditi-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-veriditi}
     healthcheck: *ready
     depends_on:
       auth-migrate:
@@ -216,11 +219,11 @@ services:
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       JWT_ISSUER: ${JWT_ISSUER:-veriditi-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-veriditi}
-      # A web (BFF) repassa o XFF; só a rede do compose fala com o gateway
+      # A web (BFF) repassa o XFF; só vale porque web e gateway escutam só no loopback do host
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
     ports:
-      # Só no loopback: uma máquina da LAN não alcança o gateway nem forja o X-Forwarded-For
+      # Só no loopback: uma máquina da LAN não fala com o gateway
       - "127.0.0.1:${GATEWAY_PORT:-8080}:8000"
     healthcheck: *ready
     depends_on:
@@ -238,7 +241,9 @@ services:
       # Fixo: o GATEWAY_URL do .env é o da web rodando fora do Docker
       GATEWAY_URL: http://gateway:8000
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      # Só no loopback: o Next só preenche o X-Forwarded-For quando ele não veio, então
+      # a web exposta na LAN deixaria qualquer máquina forjar o IP que o gateway confia
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 5s
