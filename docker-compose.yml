@@ -2,6 +2,7 @@ name: veriditi
 
 # Só mysql, mailpit (UI), gateway e web publicam porta; o resto fica na rede do compose
 # Nenhum serviço usa env_file: o DB_PORT do .env é o do host, aqui dentro é 3306
+# Cada par <svc>-migrate/<svc> declara a mesma image para o build acontecer uma vez só
 
 x-secrets:
   root-password: &root-password "${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env (make install copia o .env.example)}"
@@ -75,6 +76,7 @@ services:
       retries: 12
 
   auth-migrate:
+    image: veriditi-auth
     build: &auth-build
       context: .
       dockerfile: services/auth/Dockerfile
@@ -90,6 +92,7 @@ services:
         condition: service_healthy
 
   notification-migrate:
+    image: veriditi-notification
     build: &notification-build
       context: .
       dockerfile: services/notification/Dockerfile
@@ -105,6 +108,7 @@ services:
         condition: service_healthy
 
   monitoring-migrate:
+    image: veriditi-monitoring
     build: &monitoring-build
       context: .
       dockerfile: services/monitoring/Dockerfile
@@ -120,6 +124,7 @@ services:
         condition: service_healthy
 
   auth:
+    image: veriditi-auth
     build: *auth-build
     restart: unless-stopped
     environment:
@@ -136,6 +141,7 @@ services:
         condition: service_completed_successfully
 
   notification:
+    image: veriditi-notification
     build: *notification-build
     restart: unless-stopped
     environment:
@@ -159,6 +165,7 @@ services:
         condition: service_healthy
 
   monitoring:
+    image: veriditi-monitoring
     build: *monitoring-build
     restart: unless-stopped
     environment:
@@ -173,6 +180,7 @@ services:
         condition: service_completed_successfully
 
   gateway:
+    image: veriditi-gateway
     build:
       context: .
       dockerfile: services/gateway/Dockerfile
@@ -190,6 +198,7 @@ services:
         condition: service_healthy
 
   web:
+    image: veriditi-web
     build:
       context: .
       dockerfile: apps/web/Dockerfile
