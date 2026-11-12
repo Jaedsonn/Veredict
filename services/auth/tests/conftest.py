@@ -15,7 +15,7 @@ async def client() -> AsyncIterator[AsyncClient]:
     async with db.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    settings = Settings(db_user="test", db_password="test", db_name="test")  # type: ignore[arg-type]
+    settings = Settings(_env_file=None, db_user="test", db_password="test")  # type: ignore[call-arg, arg-type]
     app = create_app(settings=settings, db=db)
 
     async with app.router.lifespan_context(app):

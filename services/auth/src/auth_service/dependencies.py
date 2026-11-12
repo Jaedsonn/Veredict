@@ -4,20 +4,11 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth_service.repository import UserRepository
-
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    # O objeto Database vive em app.state (criado no lifespan) -> testes podem trocá-lo.
+    """O Database vive em app.state (criado no lifespan) para os testes poderem trocá-lo"""
     async for session in request.app.state.db.session():
         yield session
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-
-def get_user_repository(session: SessionDep) -> UserRepository:
-    return UserRepository(session)
-
-
-UserRepoDep = Annotated[UserRepository, Depends(get_user_repository)]
