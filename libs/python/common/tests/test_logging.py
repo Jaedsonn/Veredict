@@ -160,7 +160,7 @@ def test_non_sensitive_keys(key: object) -> None:
 def test_header_pairs_are_redacted_by_name(json_logs: JsonLogs) -> None:
     get_logger("t").info(
         "x",
-        raw_headers=[(b"authorization", b"Bearer abc"), (b"x-internal-token", b"tok")],
+        raw_headers=[(b"authorization", b"Bearer abc"), (b"x-internal-token", b"tok-interno")],
         headers=[["Cookie", "sid=1"], ["Accept", "application/json"]],
         error_code="invalid_credentials",
         code="123456",
@@ -168,9 +168,13 @@ def test_header_pairs_are_redacted_by_name(json_logs: JsonLogs) -> None:
 
     [line] = json_logs()
     output = json.dumps(line)
-    for secret in ("Bearer abc", 'tok"', "sid=1", "123456"):
+    for secret in ("Bearer abc", "tok-interno", "sid=1", "123456"):
         assert secret not in output
-    assert line["headers"][1] == ["Accept", "application/json"]
+    assert line["raw_headers"] == [
+        ["b'authorization'", REDACTED],
+        ["b'x-internal-token'", REDACTED],
+    ]
+    assert line["headers"] == [["Cookie", REDACTED], ["Accept", "application/json"]]
     assert line["error_code"] == "invalid_credentials"
     assert line["code"] == REDACTED
 
