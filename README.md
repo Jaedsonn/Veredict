@@ -309,7 +309,7 @@ internas, exigem `X-Internal-Token` e não passam pelo gateway:
 
 Para acompanhar os eventos em tempo real, `make audit-tail` (`n=<qtd>` define quantos eventos
 do histórico aparecem primeiro; Ctrl-C sai). Ele consulta o monitoring de 2 em 2 segundos
-por `from=` e imprime só `event_id` novos. Para uma consulta pontual com filtros:
+por `from=` e imprime só `event_id` novos; um evento com `occurred_at` mais de 2 min atrás, ou além de 200 por janela, não aparece na cauda (só no histórico inicial). Para uma consulta pontual com filtros:
 
 ```bash
 docker compose exec monitoring python -c "import os, urllib.request as u; r = u.Request('http://127.0.0.1:8000/internal/events?actor_id=42&from=2026-11-12T00:00:00Z&limit=20', headers={'X-Internal-Token': os.environ['INTERNAL_API_TOKEN']}); print(u.urlopen(r).read().decode())"
