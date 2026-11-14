@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.engine import make_url
 
 from veriditi_common.settings import BaseServiceSettings, ServiceSettings
@@ -67,3 +68,63 @@ def test_special_characters_in_password_survive_the_url(password: str) -> None:
         url = make_url(raw)
         assert url.password == password
         assert (url.host, url.port, url.database) == ("mysql", 3306, "veriditi")
+
+
+TOKEN = "test-internal-token-0123456789"
+
+
+def _base(**overrides: object) -> BaseServiceSettings:
+    return BaseServiceSettings(_env_file=None, service_name="svc", **overrides)  # type: ignore[call-arg, arg-type]
+
+
+def test_internal_token_is_optional_but_required_on_access() -> None:
+    settings = _base()
+
+    assert settings.internal_api_token is None
+    with pytest.raises(RuntimeError, match="INTERNAL_API_TOKEN"):
+        _ = settings.internal_token
+
+
+def test_empty_internal_token_counts_as_missing() -> None:
+    assert _base(internal_api_token="").internal_api_token is None
+
+
+def test_internal_token_requires_16_characters_only_on_access() -> None:
+    short = _base(internal_api_token="a" * 15)
+
+    with pytest.raises(RuntimeError, match="16"):
+        _ = short.internal_token
+    assert _base(internal_api_token=TOKEN).internal_token.get_secret_value() == TOKEN
+
+
+def test_short_token_does_not_break_settings_used_by_alembic() -> None:
+    assert _settings(internal_api_token="curto").migration_database_url
+
+
+def test_internal_token_is_not_leaked_in_repr() -> None:
+    assert TOKEN not in repr(_base(internal_api_token=TOKEN))
+
+
+def test_log_level_defaults_to_info_and_is_case_insensitive() -> None:
+    assert _base().log_level == "INFO"
+    assert _base(log_level="debug").log_level == "DEBUG"
+    with pytest.raises(ValidationError):
+        _base(log_level="verbose")
+
+
+def test_service_settings_without_token_stay_valid() -> None:
+    assert _settings().internal_api_token is None
+
+
+def test_short_token_is_not_repeated_in_the_error() -> None:
+    with pytest.raises(RuntimeError) as caught:
+        _ = _base(internal_api_token="short-secret-1").internal_token
+
+    assert "short-secret-1" not in str(caught.value)
+
+
+def test_validation_errors_do_not_repeat_input() -> None:
+    with pytest.raises(ValidationError) as caught:
+        _settings(db_port="hunter2")
+
+    assert "hunter2" not in str(caught.value)

@@ -140,6 +140,11 @@ services:
       DB_USER: auth_svc
       DB_PASSWORD: *auth-db-password
       INTERNAL_API_TOKEN: *internal-api-token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Fixos: o MONITORING_URL/NOTIFICATION_URL do .env são os do make dev
+      # Sem depends_on: o envio é fire-and-forget (ADR-016)
+      MONITORING_URL: http://monitoring:8000
+      NOTIFICATION_URL: http://notification:8000
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
     healthcheck: *ready
@@ -158,6 +163,9 @@ services:
       DB_USER: notification_svc
       DB_PASSWORD: *notification-db-password
       INTERNAL_API_TOKEN: *internal-api-token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Fixo: o MONITORING_URL do .env é o do make dev
+      MONITORING_URL: http://monitoring:8000
       # Fixos: o SMTP_HOST/SMTP_PORT do .env são os do notification rodando fora do Docker
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
@@ -184,6 +192,7 @@ services:
       DB_USER: veriditi_logs_writer
       DB_PASSWORD: *logs-db-password
       INTERNAL_API_TOKEN: *internal-api-token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     healthcheck: *ready
     depends_on:
       monitoring-migrate:
@@ -199,6 +208,7 @@ services:
     environment:
       AUTH_URL: http://auth:8000
       INTERNAL_API_TOKEN: *internal-api-token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
     ports:

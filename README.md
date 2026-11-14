@@ -112,6 +112,52 @@ make db-test                     # contrato + migrations num MySQL descartável 
 
 `make help` lista todos os comandos.
 
+### Logs e X-Request-ID
+
+Os serviços escrevem uma linha JSON por evento no stdout, inclusive as do
+uvicorn ([ADR-012](docs/adr/0012-geracao-de-logs-estruturados.md)):
+
+```json
+{"method": "GET", "path": "/nao-existe", "status_code": 404, "duration_ms": 1.38, "event": "request_finished", "request_id": "3f2b8c1e-8a4e-4a39-9a2b-1f1e0c9d7a55", "level": "info", "logger": "veriditi_common.middleware", "service": "gateway", "timestamp": "2026-11-12T05:26:22.960365Z"}
+```
+
+Toda resposta traz o `X-Request-ID`: o do cliente, se for um UUID válido, ou um
+UUID4 novo. Para seguir uma requisição, `make logs | grep <request_id>`. O
+acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`.
+
+A redação troca por `[redacted]` o valor de chaves sensíveis, em qualquer
+nível do evento (`is_sensitive_key` em `veriditi_common/logging.py`):
+
+- o nome é normalizado (`apiKey` e `X-Api-Key` viram `api_key`/`x_api_key`);
+- é sensível o nome que contém `password`, `passphrase`, `secret`, `token`,
+  `authorization`, `cookie`, `credential`, `signature`, `private_key`,
+  `api_key`, `access_key`, `signing_key`, `encryption_key`, `session_key` ou
+  `database_url`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`, `jwt`,
+  `dsn`, `hmac` e afins;
+- `code` é sensível, e `*_code` só com prefixo de segredo (`verification_code`,
+  `otp_code`, `reset_code`...). `status_code`, `zip_code` e `error_code` não são:
+  por isso o código de erro de negócio vai em `error_code`;
+- metadados do segredo não são redigidos (`token_type`, `token_id`,
+  `password_changed_at`, `has_password`...);
+- pares `(nome, valor)` são tratados como headers quando o nome é bytes ou a
+  chave pai contém `header`.
+
+Nas exceções, tipo e frames sempre saem. A mensagem só é redigida em erros de
+banco (que ganham `db_errno`, como 1062) e em `ValidationError`. A redação é por
+nome de chave: não logue `str(exc)` nem interpole valores no evento.
+
+Os erros seguem `{"detail": {"code": "...", "message": "...", ...extras}}`, o
+formato lido por `apps/web/src/lib/errors.ts`; o 422 de validação mantém o
+formato do FastAPI. Falhas de entrega ao monitoring e ao notification não
+quebram a requisição: aparecem no log com `audit_fallback=true` e
+`notification_fallback=true`.
+
+| Variável | Uso |
+| -------- | --- |
+| `LOG_LEVEL` | `DEBUG`, `INFO` (padrão), `WARNING` ou `ERROR` |
+| `INTERNAL_API_TOKEN` | Mínimo de 16 caracteres; auth, notification e monitoring não sobem sem ele |
+| `MONITORING_URL`, `NOTIFICATION_URL` | Só no `make dev`; o compose fixa `http://monitoring:8000` e `http://notification:8000` |
+
 ### Web sem o backend (gateway mock)
 
 Enquanto o roteamento do API Gateway (#11) não existe, a web roda contra um mock em memória

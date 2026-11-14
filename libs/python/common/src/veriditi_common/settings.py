@@ -1,15 +1,47 @@
-from pydantic import SecretStr
+from typing import Literal
+
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
+
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+
+_MIN_TOKEN_LENGTH = 16
 
 
 class BaseServiceSettings(BaseSettings):
     """Configuração comum a todo serviço, inclusive os que não usam banco (gateway)"""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # O erro de validação não repete senhas e tokens lidos do ambiente
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     service_name: str
     debug: bool = False
+    log_level: LogLevel = "INFO"
+    # Opcional aqui porque os *-migrate e o Alembic não o recebem; o create_app o exige
+    internal_api_token: SecretStr | None = None
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _upper_log_level(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
+
+    @field_validator("internal_api_token", mode="before")
+    @classmethod
+    def _empty_token_is_missing(cls, value: object) -> object:
+        """INTERNAL_API_TOKEN= vazio conta como ausente, não como token curto"""
+        return None if value == "" else value
+
+    @property
+    def internal_token(self) -> SecretStr:
+        """Valida aqui, e não no campo, para o Alembic não quebrar com um token curto no .env"""
+        if self.internal_api_token is None:
+            raise RuntimeError("INTERNAL_API_TOKEN não definido")
+        if len(self.internal_api_token.get_secret_value()) < _MIN_TOKEN_LENGTH:
+            raise RuntimeError(
+                f"INTERNAL_API_TOKEN precisa de ao menos {_MIN_TOKEN_LENGTH} caracteres"
+            )
+        return self.internal_api_token
 
 
 class ServiceSettings(BaseServiceSettings):

@@ -1,25 +1,8 @@
-from collections.abc import AsyncIterator
-
 import httpx
-import pytest
 import respx
-from httpx import ASGITransport, AsyncClient
-
-from gateway_service.config import Settings
-from gateway_service.main import create_app
+from httpx import AsyncClient
 
 AUTH_READY = "http://auth.test/health/ready"
-
-
-@pytest.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    settings = Settings(_env_file=None, auth_url="http://auth.test")  # type: ignore[call-arg]
-    app = create_app(settings=settings)
-
-    async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
 
 
 async def test_liveness(client: AsyncClient) -> None:
