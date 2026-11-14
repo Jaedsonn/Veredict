@@ -1,10 +1,10 @@
 .DEFAULT_GOAL := help
 .PHONY: help install keys up down reset logs db dev dev-web migrate migration test lint format check \
-	db-test db-test-contract db-test-migrations _migrations-check cov
+	db-test db-test-contract db-test-migrations _migrations-check cov audit-tail
 
 # Variáveis da linha de comando vão para o ambiente das receitas, e exportar expande o valor:
 # um m='$(shell ...)' executaria. As receitas leem m e s por $(value), nunca do ambiente
-unexport m s
+unexport m s n
 
 SERVICES := gateway auth notification monitoring
 # Serviço com banco é o que tem alembic.ini
@@ -72,6 +72,12 @@ reset: ## Apaga o volume do MySQL: reaplica docker/mysql/init e as migrations
 
 logs: ## Acompanha os logs do stack
 	$(compose_any) logs -f
+
+# Roda scripts/audit_tail.py dentro do monitoring (token e rede interna já estão lá); n é
+# lido por $(value), como m, para o make não expandir a entrada
+audit-tail: ## Acompanha a trilha de auditoria (n=<qtd> eventos do histórico, padrão 10)
+	@$(compose_any) exec -e AUDIT_N='$(subst ','\'',$(value n))' monitoring \
+		python -u -c "$$(cat scripts/audit_tail.py)"
 
 db: ## Sobe só o MySQL no Docker
 	docker compose up -d --wait mysql
