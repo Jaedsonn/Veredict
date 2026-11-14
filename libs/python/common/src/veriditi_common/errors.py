@@ -5,6 +5,7 @@ from typing import Any, Final
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -17,8 +18,11 @@ _HTTP_ERRORS: Final[dict[int, tuple[str, str]]] = {
     403: ("forbidden", "Acesso negado."),
     404: ("not_found", "Recurso não encontrado."),
     405: ("method_not_allowed", "Método não permitido."),
+    413: ("payload_too_large", "Corpo da requisição grande demais."),
 }
 _DEFAULT_HTTP_ERROR: Final = ("http_error", "Não foi possível concluir a operação.")
+# input e ctx repetem o que o cliente mandou (senha, metadata); a web lê só loc, msg e type
+_VALIDATION_KEYS: Final = ("type", "loc", "msg")
 
 
 def error_body(code: str, message: str, **extras: Any) -> dict[str, Any]:
@@ -53,6 +57,10 @@ class UnauthorizedError(AppError):
         super().__init__(401, "unauthorized", message)
 
 
+def http_error_body(status_code: int) -> dict[str, Any]:
+    return error_body(*_HTTP_ERRORS.get(status_code, _DEFAULT_HTTP_ERROR))
+
+
 def internal_error_response() -> JSONResponse:
     return JSONResponse(error_body(INTERNAL_ERROR_CODE, _INTERNAL_ERROR_MESSAGE), status_code=500)
 
@@ -71,11 +79,19 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
     if isinstance(exc.detail, dict):
         body: dict[str, Any] = {"detail": exc.detail}
     else:
-        body = error_body(*_HTTP_ERRORS.get(exc.status_code, _DEFAULT_HTTP_ERROR))
+        body = http_error_body(exc.status_code)
     return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
 
 
+async def _validation_error_handler(request: Request, exc: Exception) -> Response:
+    if not isinstance(exc, RequestValidationError):  # pragma: no cover
+        raise exc
+    errors = [{k: e[k] for k in _VALIDATION_KEYS if k in e} for e in exc.errors()]
+    return JSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
+
+
 def install_error_handlers(app: FastAPI) -> None:
-    """Normaliza 404/405 e HTTPException; o 422 de validação segue o padrão do FastAPI"""
+    """Normaliza 404/405 e HTTPException; o 422 mantém o formato do FastAPI sem ecoar a entrada"""
     app.add_exception_handler(AppError, _app_error_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
+    app.add_exception_handler(RequestValidationError, _validation_error_handler)

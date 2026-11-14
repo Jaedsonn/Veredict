@@ -49,7 +49,7 @@ O RF11 é contado na Sprint 1 porque os dois e-mails exigidos pelos RFs da sprin
 | RF08 | Compra via PIX (checkout transparente) | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #22, #25 |
 | RF09 | Confirmação de pagamento e faturamento | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #23 |
 | RF10 | Saldo e extrato de créditos | Pagamento | — | 4.2.2 | 2 | planejado | #24, #25 |
-| RF11 | Notificações transacionais por e-mail | Notificação | [016](adr/0016-comunicacao-interna-http-fire-and-forget.md) | 4.2.3 | 1 (verificação, boas-vindas) / 2 (demais) | planejado | #6, #33 |
+| RF11 | Notificações transacionais por e-mail | Notificação | [016](adr/0016-comunicacao-interna-http-fire-and-forget.md) | 4.2.3 | 1 (verificação, boas-vindas) / 2 (demais) | em andamento | #6, #33 |
 | RF12 | Registro de captura (prova) com débito de crédito | Captura | [005](adr/0005-arquitetura-baseada-em-servicos.md) | 4.2.4 | 2 | planejado | #29, #32 |
 | RF13 | Captura de tela de URL | Captura | [005](adr/0005-arquitetura-baseada-em-servicos.md) | 4.2.4 | 2 | planejado | #30, #32 |
 | RF14 | Gravação de vídeo de navegação | Captura | [005](adr/0005-arquitetura-baseada-em-servicos.md) | 4.2.4 | 2 | planejado | #31, #32 |
@@ -172,10 +172,11 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 - **Regras de negócio:**
   - Rotas públicas e protegidas declaradas numa tabela.
   - Valida o JWT (assinatura, `exp`, `iss`, `aud`) antes de repassar.
-  - Injeta `X-User-Id`, `X-Request-ID`, `X-Forwarded-For` e o token interno, removendo esses cabeçalhos se vierem do cliente.
+  - Injeta `X-User-Id`, `X-User-Email`, `X-Session-Id` (claim `sid`), `X-Request-ID`, `X-Forwarded-For` e o token interno, removendo esses cabeçalhos se vierem do cliente.
   - Notificação e Monitoramento não têm rota.
   - Timeout de upstream de 5 s.
-  - Rate limit de login e cadastro.
+  - Rate limit de login, cadastro e reenvio do código.
+- **Estado (#11):** gateway implementado em `services/gateway` (tabela de rotas, JWT RS256, rate limit, anti-spoofing, 502/503/504, `/health/ready` agregado), com testes de API para cada critério abaixo. O fluxo de ponta a ponta depende do auth com os endpoints (#7–#10).
 - **Critério de verificação:**
   1. `GET /api/me` sem token → `401`; com um token adulterado → `401`.
   2. `X-User-Id` forjado pelo cliente é ignorado.
@@ -222,11 +223,11 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 
 | ID | Como verificar | Situação na `main` |
 |---|---|---|
-| RNF01 | `password_hash` começa com `$argon2id$`; token adulterado → `401`; 6.º login no minuto → `429`; `docker compose ps` mostra porta publicada só no gateway, na web, no Mailpit e no MySQL (dev); no DevTools, os cookies `vrd_*` são `HttpOnly`; `make db-test-contract` prova o privilégio mínimo | Cookies `httpOnly` e anti *open redirect* na web; usuários MySQL por serviço e teste de contrato prontos; Argon2id, JWT e rate limit dependem de #7, #9 e #11 |
-| RNF02 | Com o serviço de autenticação parado, a web mostra "Serviço indisponível" e continua navegável, e o gateway responde `503` | Timeout de 8 s e mensagem de indisponibilidade na web; `/health/live` e `/health/ready` na lib comum; gateway pendente (#11) |
+| RNF01 | `password_hash` começa com `$argon2id$`; token adulterado → `401`; 6.º login no minuto → `429`; `docker compose ps` mostra porta publicada só no gateway, na web, no Mailpit e no MySQL (dev); no DevTools, os cookies `vrd_*` são `HttpOnly`; `make db-test-contract` prova o privilégio mínimo | Cookies `httpOnly` e anti *open redirect* na web; usuários MySQL por serviço e teste de contrato prontos; validação do JWT, rate limit (login, cadastro e reenvio) e porta do gateway só no loopback prontos no gateway (#11); Argon2id e emissão do JWT dependem de #7 e #9 |
+| RNF02 | Com o serviço de autenticação parado, a web mostra "Serviço indisponível" e continua navegável, e o gateway responde `503` | Timeout de 8 s e mensagem de indisponibilidade na web; `/health/live` e `/health/ready` na lib comum; gateway responde `503`/`504` e continua de pé com o auth parado (#11) |
 | RNF03 | Toda ação dos RFs da Sprint 1 aparece em `audit_events` com `actor_id`, `actor_ip` e `occurred_at` em UTC | A web repassa `X-Forwarded-For` e `User-Agent`; tabela modelada e database criada; serviço pendente (#5) |
 | RNF04 | Objeto em bucket com Object Lock; restaurar o backup do dia em outra máquina | Sprint 2 |
-| RNF05 | CI verde em todo PR; `pytest --cov` ≥ 70% em cada serviço | CI com lint, tipos, testes e build (jobs `backend`, `web`, `docker`); testes na lib comum e no template; meta de cobertura e matriz por serviço em #15 |
+| RNF05 | CI verde em todo PR; `pytest --cov` ≥ 70% em cada serviço | CI com `lint`, `tests` em matriz (auth, gateway, notification, monitoring e lib comum; `make cov` falha abaixo de 70%), `database` (MySQL real), `web` e `images`; o contrato gateway × auth passa a valer com os endpoints do auth (#7–#10); teste de carga em #38 |
 | RNF06 | Telas utilizáveis a 360 px; `make up` em máquina limpa deixa todos os containers `healthy` e o fluxo do RF01 funcionando | Telas responsivas prontas; o `docker-compose.yml` ainda não tem o serviço `gateway` (#3/#11) |
 | RNF07 | Todas as mensagens de erro em PT-BR; todos os fluxos percorríveis só com teclado; erros ligados ao campo por `aria-describedby` | Atendido nas telas da Sprint 1 (`lib/errors.ts`, `FormField`); revalidar a cada tela nova |
 | RNF08 | Teste de carga: p95 < 300 ms em `/api/auth/login` e `/api/me` | Sprint 2 (#38) |
@@ -274,12 +275,12 @@ Nenhum RF fora da lista RF01–RF21. Uma funcionalidade nova entra primeiro aqui
 | RF | Issues | Web (`apps/web/src`) | Back-end | Banco |
 |---|---|---|---|---|
 | RF01 | #7, #13 (PR #45) | `app/(public)/cadastro/`, `components/auth/password-strength.tsx`, `lib/validation/auth.ts` | `services/auth` (implementado em #7) | `users` (seção 5.1) |
-| RF02 | #8, #6, #13 (PR #45) | `app/(public)/verificar-email/`, `components/ui/otp-input.tsx` | `services/auth` (#8), `services/notification` (a criar) | `email_verification_codes` (5.2) |
+| RF02 | #8, #6, #13 (PR #45) | `app/(public)/verificar-email/`, `components/ui/otp-input.tsx` | `services/auth` (#8), `services/notification` | `email_verification_codes` (5.2) |
 | RF03 | #9, #14 (PR #46) | `app/(public)/entrar/`, `app/(app)/actions.ts`, `lib/gateway.ts`, `lib/tokens.ts`, `lib/session.ts`, `proxy.ts`, `app/sessao/expirada/` | `services/auth` (implementado em #9) | `refresh_tokens` (5.3) |
 | RF06 | #10, #14 (PR #46) | `app/(app)/perfil/`, `lib/user.ts` | `services/auth` (implementado em #10) | `users` (5.1) |
-| RF11 | #6 | — | `libs/python/common/src/veriditi_common/notifications.py` (#4); `services/notification` (a criar) | `notifications_sent` (5.4) |
-| RF18 | #4, #5, #41 (PR #49) | `lib/gateway.ts` (repassa IP e User-Agent) | `libs/python/common/src/veriditi_common/audit.py` (#4); `services/monitoring` (a criar); `docker/mysql/init/` | `veriditi_logs.audit_events` (5.5) |
-| RF21 | #11, #3 | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` (PR #44/#47) | `services/gateway` (a criar) | — |
+| RF11 | #6 | — | `services/notification` | `notifications_sent` (5.4) |
+| RF18 | #4, #5, #41 (PR #49) | `lib/gateway.ts` (repassa IP e User-Agent) | `services/monitoring` (a criar); `docker/mysql/init/` | `veriditi_logs.audit_events` (5.5) |
+| RF21 | #11, #3 | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` (PR #44/#47) | `services/gateway` | — |
 
 As seções de banco referem-se a [`banco-de-dados.md`](banco-de-dados.md). O serviço Python de identidade e autenticação encontra-se em `services/auth`, estruturado com princípios SOLID documentados em [`solid.md`](solid.md) e transparência de IA em [`uso-de-ia.md`](uso-de-ia.md).
 

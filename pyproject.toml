@@ -34,6 +34,7 @@ dev = [
     "mypy>=2.4.1",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1.post1",
+    "pytest-cov>=7.1.0",
     "respx>=0.23.1",
     "ruff>=0.17.3",
 ]
@@ -54,3 +55,7 @@ addopts = "--import-mode=importlib -m 'not mysql'"
 markers = ["mysql: precisa de um MySQL real com docker/mysql/init aplicado"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+# O pacote medido vem do --cov de `make cov`
+branch = true

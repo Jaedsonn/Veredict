@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install keys up down reset logs db dev dev-web migrate migration test lint format check \
-	db-test db-test-contract db-test-migrations _migrations-check
+	db-test db-test-contract db-test-migrations _migrations-check cov
 
 # Variáveis da linha de comando vão para o ambiente das receitas, e exportar expande o valor:
 # um m='$(shell ...)' executaria. As receitas leem m e s por $(value), nunca do ambiente
@@ -15,6 +15,9 @@ PORT_gateway := 8080
 PORT_auth := 8001
 PORT_notification := 8002
 PORT_monitoring := 8003
+
+# O IP real do gateway vem do TRUSTED_PROXIES; o uvicorn não reescreve o peer pelo XFF
+DEV_FLAGS_gateway := --no-proxy-headers
 
 # Usuário de runtime, variável do .env com a senha dele e banco (padrão veriditi)
 DB_USER_auth := auth_svc
@@ -44,10 +47,15 @@ help:
 	@grep -E '^[a-zA-Z-][a-zA-Z_-]*:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install: ## Instala dependências e cria o .env a partir do .env.example
+install: ## Instala dependências e cria o .env a partir do .env.example, com o par RS256
 	@test -f .env || cp .env.example .env
 	npm install
 	uv sync
+	uv run python scripts/jwt_keys.py
+
+keys: ## Gera o par RS256 de dev no .env (force=1 troca o par)
+	@test -f .env || cp .env.example .env
+	uv run python scripts/jwt_keys.py $(if $(force),--force)
 
 keys: ## Gera um par RSA-2048 (JWT_PRIVATE_KEY e JWT_PUBLIC_KEY) em uma linha no .env (#9)
 	@test -f .env || cp .env.example .env
@@ -74,7 +82,8 @@ db: ## Sobe só o MySQL no Docker
 
 dev: ## Serviço com hot reload (s=gateway|auth|notification|monitoring)
 	$(need_s)@$(svc_env) uv run uvicorn $(s)_service.main:create_app --factory --reload \
-		--port $(PORT_$(s)) --reload-dir services/$(s)/src --reload-dir libs/python/common/src
+		--port $(PORT_$(s)) --reload-dir services/$(s)/src --reload-dir libs/python/common/src \
+		$(DEV_FLAGS_$(s))
 
 dev-web: ## Web com hot reload
 	npm run dev:web
@@ -98,6 +107,26 @@ migration: ## Nova revisão autogerada com id sequencial (s=<serviço> m="mensag
 
 test: ## Testes Python sem MySQL (s=<serviço> opcional)
 	uv run pytest $(if $(s),services/$(s))
+
+# Cobertura mínima por alvo (RNF05); o CI roda este mesmo comando na matriz
+COV_TARGETS := $(SERVICES) common
+COV_MIN ?= 70
+COV_PATH_common := libs/python/common
+COV_PKG_common := veriditi_common
+# Exatamente um alvo: com dois, o pytest receberia um caminho e um pacote tortos
+need_cov_s = $(if $(and $(filter 1,$(words $(s))),$(filter $(s),$(COV_TARGETS))),,\
+	$(error use s=<$(subst $(space),|,$(COV_TARGETS))>))
+
+cov: ## Testes com cobertura mínima de 70% (s=<serviço>|common ou todos)
+ifdef s
+	$(need_cov_s)uv run pytest $(or $(COV_PATH_$(s)),services/$(s)) \
+		--cov=$(or $(COV_PKG_$(s)),$(s)_service) --cov-report=term-missing \
+		--cov-fail-under=$(COV_MIN) -rs
+else
+	@for target in $(COV_TARGETS); do \
+		$(MAKE) --no-print-directory cov s=$$target || exit 1; \
+	done
+endif
 
 # MySQL descartável na 3317 com docker/mysql/init (mesmo comando local e no CI, ADR-023)
 DB_TEST := veriditi-db-test

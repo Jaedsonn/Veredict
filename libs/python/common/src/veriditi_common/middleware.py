@@ -10,16 +10,19 @@ from typing import Any, Final
 
 import structlog
 from starlette.datastructures import Headers, MutableHeaders
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from veriditi_common.errors import internal_error_response
+from veriditi_common.errors import http_error_body, internal_error_response
 from veriditi_common.logging import get_logger
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"
 MAX_IP_LENGTH: Final = 45  # actor_ip VARCHAR(45) em audit_events
 _QUIET_PREFIX: Final = "/health/"
 _DEFERRED_KEY: Final = "veriditi_deferred"
+_LOG_FIELDS_KEY: Final = "veriditi_log_fields"
 
 DeferredTask = Callable[[], Awaitable[None]]
 
@@ -44,6 +47,12 @@ def _request_id_from(headers: Headers) -> str:
         except ValueError:
             pass
     return str(uuid.uuid4())
+
+
+def set_log_fields(request: Request, **fields: str | int) -> None:
+    """Campos por requisição sem vazar contextvars entre requisições da mesma task"""
+    state = request.scope.setdefault("state", {})
+    state.setdefault(_LOG_FIELDS_KEY, {}).update(fields)
 
 
 def try_defer[**P](
@@ -95,15 +104,17 @@ async def _run_deferred(queue: _DeferredQueue) -> None:
 class RequestContextMiddleware:
     """ASGI puro para não quebrar streaming e manter o request_id nas tarefas adiadas"""
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, trust_request_id: bool = True) -> None:
         self.app = app
+        # Ponto de entrada não confia no id do cliente
+        self.trust_request_id = trust_request_id
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
-        rid = _request_id_from(Headers(scope=scope))
+        rid = _request_id_from(Headers(scope=scope)) if self.trust_request_id else str(uuid.uuid4())
         started_at = time.perf_counter()
         status_code = 500
         response_started = False
@@ -133,19 +144,21 @@ class RequestContextMiddleware:
                 await internal_error_response()(scope, receive, send_with_request_id)
             finally:
                 path: str = scope["path"]
-                extra: dict[str, Any] = {}
+                extra: dict[str, Any] = dict(scope["state"].get(_LOG_FIELDS_KEY, {}))
                 if response_started and finished_at is None:
                     # O status já foi enviado, mas o corpo parou no meio
                     extra["truncated"] = True
-                log.log(
-                    logging.DEBUG if path.startswith(_QUIET_PREFIX) else logging.INFO,
-                    "request_finished",
+                extra.update(
                     method=scope["method"],
                     path=path,
                     status_code=status_code,
                     duration_ms=round(
                         ((finished_at or time.perf_counter()) - started_at) * 1000, 2
                     ),
+                )
+                log.log(
+                    logging.DEBUG if path.startswith(_QUIET_PREFIX) else logging.INFO,
+                    "request_finished",
                     **extra,
                 )
                 await _run_deferred(pending)
@@ -171,3 +184,36 @@ def client_ip(request: Request) -> str | None:
     if forwarded and (ip := _valid_ip(forwarded.split(",")[0])):
         return ip
     return _valid_ip(request.client.host) if request.client else None
+
+
+class BodySizeLimitMiddleware:
+    """413 pelo Content-Length antes de ler e pela contagem do stream quando ele falta"""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = Headers(scope=scope).get("content-length", "")
+        # isascii: "²".isdigit() é True, mas int("²") levanta
+        if declared.isascii() and declared.isdigit() and int(declared) > self.max_bytes:
+            response = JSONResponse(http_error_body(413), status_code=413)
+            await response(scope, receive, send)
+            return
+
+        received = 0
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    # Dentro do app: o handler de HTTPException responde no formato padrão
+                    raise HTTPException(413)
+            return message
+
+        await self.app(scope, limited_receive, send)
