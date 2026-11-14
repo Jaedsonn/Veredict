@@ -57,10 +57,6 @@ keys: ## Gera o par RS256 de dev no .env (force=1 troca o par)
 	@test -f .env || cp .env.example .env
 	uv run python scripts/jwt_keys.py $(if $(force),--force)
 
-keys: ## Gera um par RSA-2048 (JWT_PRIVATE_KEY e JWT_PUBLIC_KEY) em uma linha no .env (#9)
-	@test -f .env || cp .env.example .env
-	@uv run python -c 'from pathlib import Path; import re; from cryptography.hazmat.primitives import serialization; from cryptography.hazmat.primitives.asymmetric import rsa; k = rsa.generate_private_key(65537, 2048); priv = k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode().strip().replace("\n", "\\n"); pub = k.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode().strip().replace("\n", "\\n"); p = Path(".env"); txt = p.read_text(encoding="utf-8"); txt = re.sub(r"^JWT_PRIVATE_KEY=.*$$", f"JWT_PRIVATE_KEY=\"{priv}\"", txt, flags=re.M); txt = re.sub(r"^JWT_PUBLIC_KEY=.*$$", f"JWT_PUBLIC_KEY=\"{pub}\"", txt, flags=re.M); p.write_text(txt, encoding="utf-8")'
-
 up: ## Sobe o stack completo e espera todos ficarem saudáveis
 	docker compose up -d --build --wait
 
