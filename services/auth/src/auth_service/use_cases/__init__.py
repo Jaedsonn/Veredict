@@ -1,4 +1,4 @@
-"""Casos de uso do serviço de Autenticação (camada de aplicação)."""
+"""Casos de uso do serviço de Autenticação (camada de aplicação)"""
 
 from auth_service.use_cases.authenticate_user import (
     AuthenticateUser,

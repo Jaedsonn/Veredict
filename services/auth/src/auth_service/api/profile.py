@@ -1,4 +1,4 @@
-"""Rotas de perfil do usuário autenticado (`/me`) ([S1-10], RF06)."""
+"""Rotas de perfil do usuário autenticado (`/me`) ([S1-10], RF06)"""
 
 from typing import Annotated
 

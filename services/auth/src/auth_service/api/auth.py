@@ -1,4 +1,4 @@
-"""Rotas de registro, verificação de e-mail e sessão (`/auth/*`) ([S1-07], [S1-08], [S1-09])."""
+"""Rotas de registro, verificação de e-mail e sessão (`/auth/*`) ([S1-07], [S1-08], [S1-09])"""
 
 from typing import Annotated
 

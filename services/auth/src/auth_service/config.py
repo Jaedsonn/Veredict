@@ -1,4 +1,4 @@
-"""Configurações do serviço de Autenticação (IAM)."""
+"""Configurações do serviço de Autenticação (IAM)"""
 
 from functools import lru_cache
 
@@ -11,7 +11,7 @@ _MIN_SECRET_LENGTH = 16
 
 
 class Settings(ServiceSettings):
-    """Configurações de ambiente do `auth-service`."""
+    """Configurações de ambiente do `auth-service`"""
 
     service_name: str = "auth"
     db_user: str = "auth_svc"
@@ -44,7 +44,7 @@ class Settings(ServiceSettings):
 
     @property
     def pepper(self) -> str:
-        """Retorna o pepper do HMAC-SHA256 validando tamanho mínimo em fail-fast."""
+        """Retorna o pepper do HMAC-SHA256 validando tamanho mínimo em fail-fast"""
         if self.verification_pepper is None:
             raise RuntimeError("VERIFICATION_PEPPER não definido")
         raw = self.verification_pepper.get_secret_value().strip()
@@ -55,7 +55,7 @@ class Settings(ServiceSettings):
         return raw
 
     def resolved_jwt_private_key(self) -> str:
-        """Retorna a chave privada RSA em formato PEM; falha na subida se ausente (#9)."""
+        """Retorna a chave privada RSA em formato PEM; falha na subida se ausente (#9)"""
         if self.jwt_private_key is None:
             raise RuntimeError("JWT_PRIVATE_KEY não definido (gere o par com `make keys`)")
         pem = self.jwt_private_key.get_secret_value().strip().replace("\\n", "\n")
@@ -64,7 +64,7 @@ class Settings(ServiceSettings):
         return pem
 
     def resolved_jwt_public_key(self) -> str:
-        """Retorna a chave pública RSA em PEM (configurada ou derivada da chave privada)."""
+        """Retorna a chave pública RSA em PEM (configurada ou derivada da chave privada)"""
         if self.jwt_public_key is not None and self.jwt_public_key.strip():
             return self.jwt_public_key.strip().replace("\\n", "\n")
         private_pem = self.resolved_jwt_private_key()

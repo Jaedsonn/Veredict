@@ -1,8 +1,8 @@
-"""Exceções de domínio do serviço de Autenticação."""
+"""Exceções de domínio do serviço de Autenticação"""
 
 
 class DomainError(Exception):
-    """Classe base para erros de regra de negócio do domínio de autenticação."""
+    """Classe base para erros de regra de negócio do domínio de autenticação"""
 
     def __init__(self, code: str, message: str, *, field: str | None = None) -> None:
         super().__init__(message)
@@ -12,7 +12,7 @@ class DomainError(Exception):
 
 
 class EmailAlreadyRegisteredError(DomainError):
-    """E-mail já cadastrado na base (`409 Conflict`)."""
+    """E-mail já cadastrado na base (`409 Conflict`)"""
 
     def __init__(self, email: str) -> None:
         super().__init__(
@@ -24,14 +24,14 @@ class EmailAlreadyRegisteredError(DomainError):
 
 
 class WeakPasswordError(DomainError):
-    """Senha viola a política de segurança (`422 Unprocessable Entity`)."""
+    """Senha viola a política de segurança (`422 Unprocessable Entity`)"""
 
     def __init__(self, message: str, *, field: str = "password") -> None:
         super().__init__(code="weak_password", message=message, field=field)
 
 
 class VerificationCodeExpiredError(DomainError):
-    """Código de verificação expirado, inexistente ou já utilizado (`400 Bad Request`)."""
+    """Código de verificação expirado, inexistente ou já utilizado (`400 Bad Request`)"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -42,7 +42,7 @@ class VerificationCodeExpiredError(DomainError):
 
 
 class VerificationCodeTooManyAttemptsError(DomainError):
-    """Código bloqueado após atingir o limite de 5 tentativas (`400 Bad Request`)."""
+    """Código bloqueado após atingir o limite de 5 tentativas (`400 Bad Request`)"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -53,7 +53,7 @@ class VerificationCodeTooManyAttemptsError(DomainError):
 
 
 class InvalidVerificationCodeError(DomainError):
-    """Código informado não confere (`400 Bad Request`)."""
+    """Código informado não confere (`400 Bad Request`)"""
 
     def __init__(self, attempts_remaining: int) -> None:
         super().__init__(
@@ -65,7 +65,7 @@ class InvalidVerificationCodeError(DomainError):
 
 
 class InvalidCredentialsError(DomainError):
-    """E-mail ou senha inválidos no login (`401 Unauthorized`)."""
+    """E-mail ou senha inválidos no login (`401 Unauthorized`)"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -75,7 +75,7 @@ class InvalidCredentialsError(DomainError):
 
 
 class EmailNotVerifiedError(DomainError):
-    """Tentativa de login em conta ainda pendente de verificação (`403 Forbidden`)."""
+    """Tentativa de login em conta ainda pendente de verificação (`403 Forbidden`)"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -85,7 +85,7 @@ class EmailNotVerifiedError(DomainError):
 
 
 class AccountBlockedError(DomainError):
-    """Tentativa de uso de conta bloqueada (`403 Forbidden`)."""
+    """Tentativa de uso de conta bloqueada (`403 Forbidden`)"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -95,7 +95,7 @@ class AccountBlockedError(DomainError):
 
 
 class InvalidRefreshTokenError(DomainError):
-    """Refresh token inexistente ou expirado (`401 Unauthorized`)."""
+    """Refresh token inexistente ou expirado (`401 Unauthorized`)"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -105,7 +105,7 @@ class InvalidRefreshTokenError(DomainError):
 
 
 class RefreshTokenReuseDetectedError(DomainError):
-    """Reuso de refresh token já revogado detectado (`401 Unauthorized`)."""
+    """Reuso de refresh token já revogado detectado (`401 Unauthorized`)"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -115,7 +115,7 @@ class RefreshTokenReuseDetectedError(DomainError):
 
 
 class UserNotFoundError(DomainError):
-    """Usuário não encontrado (`404 Not Found`)."""
+    """Usuário não encontrado (`404 Not Found`)"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -125,7 +125,7 @@ class UserNotFoundError(DomainError):
 
 
 class InvalidCurrentPasswordError(DomainError):
-    """Senha atual incorreta na troca de senha (`400 Bad Request`)."""
+    """Senha atual incorreta na troca de senha (`400 Bad Request`)"""
 
     def __init__(self) -> None:
         super().__init__(

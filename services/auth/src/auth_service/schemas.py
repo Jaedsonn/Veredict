@@ -1,4 +1,4 @@
-"""Schemas Pydantic (contratos de entrada e saída HTTP) do serviço de Autenticação."""
+"""Schemas Pydantic (contratos de entrada e saída HTTP) do serviço de Autenticação"""
 
 import re
 from datetime import datetime
@@ -33,7 +33,7 @@ def _validate_and_normalize_email(value: str) -> str:
 
 
 class RegisterRequest(BaseModel):
-    """Contrato de entrada de `POST /auth/register` ([S1-07], RF01)."""
+    """Contrato de entrada de `POST /auth/register` ([S1-07], RF01)"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -58,7 +58,7 @@ class RegisterRequest(BaseModel):
 
 
 class RegisterResponse(BaseModel):
-    """Contrato de saída de `POST /auth/register` (`201 Created`)."""
+    """Contrato de saída de `POST /auth/register` (`201 Created`)"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -68,7 +68,7 @@ class RegisterResponse(BaseModel):
 
 
 class VerifyEmailRequest(BaseModel):
-    """Contrato de entrada de `POST /auth/verify-email` ([S1-08], RF02)."""
+    """Contrato de entrada de `POST /auth/verify-email` ([S1-08], RF02)"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -90,13 +90,13 @@ class VerifyEmailRequest(BaseModel):
 
 
 class VerifyEmailResponse(BaseModel):
-    """Contrato de saída de `POST /auth/verify-email` (`200 OK`)."""
+    """Contrato de saída de `POST /auth/verify-email` (`200 OK`)"""
 
     status: UserStatus
 
 
 class ResendVerificationRequest(BaseModel):
-    """Contrato de entrada de `POST /auth/verify-email/resend` ([S1-08])."""
+    """Contrato de entrada de `POST /auth/verify-email/resend` ([S1-08])"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -109,13 +109,13 @@ class ResendVerificationRequest(BaseModel):
 
 
 class ResendVerificationResponse(BaseModel):
-    """Contrato de saída de `POST /auth/verify-email/resend` (`202 Accepted`)."""
+    """Contrato de saída de `POST /auth/verify-email/resend` (`202 Accepted`)"""
 
     status: str = "accepted"
 
 
 class LoginRequest(BaseModel):
-    """Contrato de entrada de `POST /auth/login` ([S1-09], RF03)."""
+    """Contrato de entrada de `POST /auth/login` ([S1-09], RF03)"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -129,7 +129,7 @@ class LoginRequest(BaseModel):
 
 
 class TokenPairResponse(BaseModel):
-    """Contrato de saída de `POST /auth/login` e `POST /auth/refresh` (`200 OK`)."""
+    """Contrato de saída de `POST /auth/login` e `POST /auth/refresh` (`200 OK`)"""
 
     access_token: str
     refresh_token: str
@@ -137,7 +137,7 @@ class TokenPairResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    """Contrato de entrada de `POST /auth/refresh` ([S1-09])."""
+    """Contrato de entrada de `POST /auth/refresh` ([S1-09])"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -145,7 +145,7 @@ class RefreshRequest(BaseModel):
 
 
 class LogoutRequest(BaseModel):
-    """Contrato de entrada de `POST /auth/logout` ([S1-09], REQ 04)."""
+    """Contrato de entrada de `POST /auth/logout` ([S1-09], REQ 04)"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -153,7 +153,7 @@ class LogoutRequest(BaseModel):
 
 
 class ProfileRead(BaseModel):
-    """Contrato de saída de `GET /me` e `PATCH /me` ([S1-10], RF06)."""
+    """Contrato de saída de `GET /me` e `PATCH /me` ([S1-10], RF06)"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -166,7 +166,7 @@ class ProfileRead(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
-    """Contrato de entrada de `PATCH /me` ([S1-10], RF06).
+    """Contrato de entrada de `PATCH /me` ([S1-10], RF06)
 
     `extra="ignore"` descarta silenciosamente campos não editáveis como `email` ou `status`,
     prevenindo vulnerabilidades de *mass assignment*.
@@ -190,7 +190,7 @@ class ProfileUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    """Contrato de entrada de `POST /me/password` ([S1-10], RF06)."""
+    """Contrato de entrada de `POST /me/password` ([S1-10], RF06)"""
 
     model_config = ConfigDict(extra="ignore")
 

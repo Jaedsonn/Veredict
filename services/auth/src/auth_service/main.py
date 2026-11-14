@@ -1,4 +1,4 @@
-"""App factory e mapeamento centralizado de exceções de domínio para HTTP."""
+"""App factory e mapeamento centralizado de exceções de domínio para HTTP"""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -42,7 +42,7 @@ from veriditi_common.security import install_internal_auth
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
-    """Converte erros de domínio puros em respostas HTTP padronizadas (SRP)."""
+    """Converte erros de domínio puros em respostas HTTP padronizadas"""
 
     @app.exception_handler(EmailAlreadyRegisteredError)
     async def handle_email_conflict(
@@ -133,7 +133,7 @@ def create_app(
     password_hasher: PasswordHasher | None = None,
     token_issuer: TokenIssuer | None = None,
 ) -> FastAPI:
-    """App factory do serviço de Autenticação (`auth-service`)."""
+    """App factory do serviço de Autenticação (`auth-service`)"""
     resolved_settings = settings or get_settings()
     configure_logging(resolved_settings.service_name, level=resolved_settings.log_level)
 

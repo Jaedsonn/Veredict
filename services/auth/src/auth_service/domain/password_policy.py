@@ -1,8 +1,7 @@
-"""Política de validação de senhas (SRP / OCP).
+"""Política de validação de senhas
 
-Aplica o Single Responsibility Principle (SRP) isolando a política de força de
-senha, e o Open/Closed Principle (OCP) ao permitir que novas regras (`PasswordRule`)
-sejam adicionadas sem modificar `PasswordPolicy`.
+Isola a política de força de senha: novas regras (`PasswordRule`) entram sem
+modificar `PasswordPolicy`.
 """
 
 from collections.abc import Sequence
@@ -15,10 +14,10 @@ PASSWORD_MAX_LENGTH = 128
 
 
 class PasswordRule(Protocol):
-    """Contrato de uma regra individual de validação de senha (OCP)."""
+    """Contrato de uma regra individual de validação de senha"""
 
     def check(self, password: str) -> str | None:
-        """Retorna mensagem de erro em PT-BR se a senha violar a regra, ou `None` se válida."""
+        """Retorna mensagem de erro em PT-BR se a senha violar a regra, ou `None` se válida"""
 
 
 class MinLengthRule:
@@ -64,13 +63,13 @@ DEFAULT_PASSWORD_RULES: tuple[PasswordRule, ...] = (
 
 
 class PasswordPolicy:
-    """Validador de força de senha composto por regras extensíveis (SRP + OCP)."""
+    """Validador de força de senha composto por regras extensíveis"""
 
     def __init__(self, rules: Sequence[PasswordRule] = DEFAULT_PASSWORD_RULES) -> None:
         self._rules = tuple(rules)
 
     def validate(self, password: str, *, field: str = "password") -> None:
-        """Valida a senha contra todas as regras configuradas, levantando `WeakPasswordError`."""
+        """Valida a senha contra todas as regras configuradas, levantando `WeakPasswordError`"""
         for rule in self._rules:
             error_msg = rule.check(password)
             if error_msg is not None:

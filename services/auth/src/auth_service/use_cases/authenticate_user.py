@@ -1,4 +1,4 @@
-"""Casos de uso [S1-09]: Login, rotação de refresh token com detecção de reuso e logout (RF03)."""
+"""Casos de uso [S1-09]: Login, rotação de refresh token com detecção de reuso e logout (RF03)"""
 
 import uuid
 from dataclasses import dataclass
@@ -54,9 +54,9 @@ class LogoutCommand:
 
 
 class AuthenticateUser:
-    """Autentica credenciais, verifica status da conta e emite par de tokens RS256 + Refresh (#9).
+    """Autentica credenciais, verifica status da conta e emite par de tokens RS256 + Refresh (#9)
 
-    Retorna `LoginResult` (união de tipos preparada para `MfaRequiredResult` na Sprint 2 — OCP).
+    Retorna `LoginResult` (união de tipos preparada para `MfaRequiredResult` na Sprint 2).
     """
 
     def __init__(
@@ -194,7 +194,7 @@ class AuthenticateUser:
 
 
 class RefreshSession:
-    """Rotaciona refresh tokens atomicamente e revoga todas as sessões em caso de reuso (#9)."""
+    """Rotaciona refresh tokens atomicamente e revoga todas as sessões em caso de reuso (#9)"""
 
     def __init__(
         self,
@@ -308,7 +308,7 @@ class RefreshSession:
 
 
 class LogoutUser:
-    """Revoga o refresh token informado e registra evento de auditoria (#9, REQ 04)."""
+    """Revoga o refresh token informado e registra evento de auditoria (#9, REQ 04)"""
 
     def __init__(
         self,

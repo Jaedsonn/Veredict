@@ -1,4 +1,4 @@
-"""Adaptador de emissão e hash de tokens de sessão com PyJWT (RS256) e CSPRNG (#9)."""
+"""Adaptador de emissão e hash de tokens de sessão com PyJWT (RS256) e CSPRNG (#9)"""
 
 import hashlib
 import secrets
@@ -10,7 +10,7 @@ import jwt
 
 
 class PyJwtTokenIssuer:
-    """Emite Access Tokens JWT assinados com RS256 e Refresh Tokens opacos de 32 bytes (#9).
+    """Emite Access Tokens JWT assinados com RS256 e Refresh Tokens opacos de 32 bytes (#9)
 
     Por que RS256: apenas o serviço `auth` detém a chave privada para assinar tokens;
     o API Gateway precisa apenas da chave pública para validá-los, reduzindo a
@@ -65,7 +65,7 @@ class PyJwtTokenIssuer:
         return jwt.encode(payload, self._private_key, algorithm="RS256")
 
     def decode_access_token(self, token: str) -> dict[str, Any]:
-        """Utilitário para inspeção/validação em testes usando a chave pública RS256."""
+        """Utilitário para inspeção/validação em testes usando a chave pública RS256"""
         if not self._public_key:
             raise RuntimeError("Chave pública JWT não configurada.")
         result: dict[str, Any] = jwt.decode(

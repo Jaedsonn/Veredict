@@ -1,4 +1,4 @@
-"""Casos de uso [S1-08]: Verificação de e-mail por código de 6 dígitos e reenvio (RF02, ADR-007)."""
+"""Casos de uso [S1-08]: Verificação de e-mail por código de 6 dígitos e reenvio (RF02, ADR-007)"""
 
 import uuid
 from dataclasses import dataclass
@@ -38,7 +38,7 @@ class ResendVerificationCommand:
 
 
 class VerifyEmail:
-    """Valida o código de 6 dígitos, ativa o usuário e dispara boas-vindas e auditoria (#8)."""
+    """Valida o código de 6 dígitos, ativa o usuário e dispara boas-vindas e auditoria (#8)"""
 
     def __init__(
         self,
@@ -157,7 +157,7 @@ class VerifyEmail:
 
 
 class ResendVerificationCode:
-    """Reenvia um novo código de verificação respeitando cooldown de 60s e limite de 5/hora (#8)."""
+    """Reenvia um novo código de verificação respeitando cooldown de 60s e limite de 5/hora (#8)"""
 
     def __init__(
         self,

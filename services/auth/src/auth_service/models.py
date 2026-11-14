@@ -1,4 +1,4 @@
-"""Modelos ORM do serviço `auth` (`users`, `email_verification_codes`, `refresh_tokens`)."""
+"""Modelos ORM do serviço `auth` (`users`, `email_verification_codes`, `refresh_tokens`)"""
 
 import enum
 import uuid
@@ -28,7 +28,7 @@ from veriditi_common.db_types import (
 
 
 class Base(DeclarativeBase):
-    """Base exclusiva do `auth-service` -> MetaData isolado para o Alembic."""
+    """Base exclusiva do `auth-service` -> MetaData isolado para o Alembic"""
 
     metadata = make_metadata()
 

@@ -1,4 +1,4 @@
-"""Composition Root do serviço de Autenticação (Dependency Inversion Principle — DIP).
+"""Composition Root do serviço de Autenticação
 
 Monta os casos de uso injetando implementações concretas (`adapters`) nas portas
 abstratas (`ports`). Os testes podem substituir qualquer dependência via
@@ -54,7 +54,7 @@ def get_app_settings(request: Request) -> Settings:
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    """O Database vive em app.state (criado no lifespan) para os testes poderem trocá-lo."""
+    """O Database vive em app.state (criado no lifespan) para os testes poderem trocá-lo"""
     async for session in request.app.state.db.session():
         yield session
 

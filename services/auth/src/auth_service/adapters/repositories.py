@@ -1,4 +1,4 @@
-"""Adaptadores de repositório em SQLAlchemy assíncrono (SRP, ISP, DIP)."""
+"""Adaptadores de repositório em SQLAlchemy assíncrono"""
 
 import uuid
 from datetime import datetime
@@ -69,7 +69,7 @@ def _to_refresh_entity(model: RefreshToken) -> RefreshTokenEntity:
 
 
 class SqlAlchemyUserRepository:
-    """Implementação SQLAlchemy de `UserRepository`."""
+    """Implementação SQLAlchemy de `UserRepository`"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -184,7 +184,7 @@ class SqlAlchemyUserRepository:
 
 
 class SqlAlchemyVerificationCodeRepository:
-    """Implementação SQLAlchemy de `VerificationCodeRepository`."""
+    """Implementação SQLAlchemy de `VerificationCodeRepository`"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -341,7 +341,7 @@ class SqlAlchemyVerificationCodeRepository:
 
 
 class SqlAlchemyRefreshTokenRepository:
-    """Implementação SQLAlchemy de `RefreshTokenRepository`."""
+    """Implementação SQLAlchemy de `RefreshTokenRepository`"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

@@ -1,17 +1,17 @@
-"""Implementações de relógio (`Clock`) para produção e testes (LSP / DIP)."""
+"""Implementações de relógio (`Clock`) para produção e testes"""
 
 from datetime import UTC, datetime, timedelta
 
 
 class SystemClock:
-    """Relógio real do sistema, sempre retornando UTC timezone-aware."""
+    """Relógio real do sistema, sempre retornando UTC timezone-aware"""
 
     def now(self) -> datetime:
         return datetime.now(UTC)
 
 
 class FakeClock:
-    """Relógio controlável em memória para testes determinísticos de expiração e cooldown (LSP)."""
+    """Relógio controlável em memória para testes determinísticos de expiração e cooldown"""
 
     def __init__(self, initial: datetime | None = None) -> None:
         default_dt = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)

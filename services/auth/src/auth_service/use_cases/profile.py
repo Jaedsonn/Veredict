@@ -1,4 +1,4 @@
-"""Casos de uso [S1-10]: Consulta e edição de perfil e troca de senha (RF06)."""
+"""Casos de uso [S1-10]: Consulta e edição de perfil e troca de senha (RF06)"""
 
 import uuid
 from dataclasses import dataclass
@@ -48,9 +48,9 @@ class ChangePasswordCommand:
 
 
 class GetProfile:
-    """Consulta os dados de perfil do usuário autenticado (#10).
+    """Consulta os dados de perfil do usuário autenticado (#10)
 
-    Exemplo claro de ISP: depende exclusivamente de `UserRepository`.
+    Depende apenas de `UserRepository`.
     """
 
     def __init__(self, users: UserRepository) -> None:
@@ -64,7 +64,7 @@ class GetProfile:
 
 
 class UpdateProfile:
-    """Atualiza campos permitidos do perfil e emite auditoria dos campos alterados (#10)."""
+    """Atualiza campos permitidos do perfil e emite auditoria dos campos alterados (#10)"""
 
     def __init__(
         self,
@@ -108,7 +108,7 @@ class UpdateProfile:
 
 
 class ChangePassword:
-    """Valida a senha atual, aplica `PasswordPolicy`, atualiza hash e revoga sessões (#10)."""
+    """Valida a senha atual, aplica `PasswordPolicy`, atualiza hash e revoga sessões (#10)"""
 
     def __init__(
         self,

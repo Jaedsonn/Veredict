@@ -1,4 +1,4 @@
-"""Adaptador de hash de senhas com Argon2id (`argon2-cffi`) (RNF01, SRP, DIP)."""
+"""Adaptador de hash de senhas com Argon2id (`argon2-cffi`) (RNF01)"""
 
 import contextlib
 
@@ -8,7 +8,7 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 
 
 class Argon2PasswordHasher:
-    """Implementa `PasswordHasher` usando Argon2id (RNF01 / #7 / #9).
+    """Implementa `PasswordHasher` usando Argon2id (RNF01 / #7 / #9)
 
     Inclui um hash dummy pré-computado no momento da inicialização para que
     tentativas de login com e-mails inexistentes executem a mesma operação

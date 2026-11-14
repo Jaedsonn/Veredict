@@ -1,4 +1,4 @@
-"""Entidades e objetos de valor do domínio de Autenticação."""
+"""Entidades e objetos de valor do domínio de Autenticação"""
 
 import ipaddress
 import uuid
@@ -11,7 +11,7 @@ from auth_service.models import RevokeReason, UserStatus, VerificationPurpose
 
 @dataclass(frozen=True, slots=True)
 class RequestContext:
-    """Metadados de transporte extraídos da requisição HTTP para auditoria e sessão."""
+    """Metadados de transporte extraídos da requisição HTTP para auditoria e sessão"""
 
     request_id: str | None = None
     actor_ip: str | None = None
@@ -38,7 +38,7 @@ class RequestContext:
 
 @dataclass(slots=True)
 class UserEntity:
-    """Representação de domínio de um usuário da plataforma (`docs/banco-de-dados.md` §5.1)."""
+    """Representação de domínio de um usuário da plataforma (`docs/banco-de-dados.md` §5.1)"""
 
     id: int
     email: str
@@ -52,7 +52,7 @@ class UserEntity:
 
 @dataclass(slots=True)
 class VerificationCodeEntity:
-    """Representação de domínio de um código de verificação de 6 dígitos (§5.2)."""
+    """Representação de domínio de um código de verificação de 6 dígitos (§5.2)"""
 
     id: int
     user_id: int
@@ -66,7 +66,7 @@ class VerificationCodeEntity:
 
 @dataclass(slots=True)
 class RefreshTokenEntity:
-    """Representação de domínio de um refresh token persistido por hash (§5.3)."""
+    """Representação de domínio de um refresh token persistido por hash (§5.3)"""
 
     id: int
     user_id: int
@@ -82,7 +82,7 @@ class RefreshTokenEntity:
 
 @dataclass(frozen=True, slots=True)
 class TokenPairResult:
-    """Par de tokens (Access JWT RS256 + Refresh opaco) emitido em sessões autenticadas."""
+    """Par de tokens (Access JWT RS256 + Refresh opaco) emitido em sessões autenticadas"""
 
     access_token: str
     refresh_token: str
@@ -91,7 +91,7 @@ class TokenPairResult:
 
 @dataclass(frozen=True, slots=True)
 class AuthenticatedResult:
-    """Resultado de login concluído com emissão imediata de sessão."""
+    """Resultado de login concluído com emissão imediata de sessão"""
 
     tokens: TokenPairResult
     user: UserEntity
@@ -99,7 +99,7 @@ class AuthenticatedResult:
 
 @dataclass(frozen=True, slots=True)
 class MfaRequiredResult:
-    """Ponto de extensão (OCP) para o desafio de 2º fator na Sprint 2 (#18 / ADR-009)."""
+    """Ponto de extensão para o desafio de 2º fator na Sprint 2 (#18 / ADR-009)"""
 
     mfa_token: str
     methods: tuple[str, ...] = ("totp", "email")
@@ -107,7 +107,7 @@ class MfaRequiredResult:
 
 @dataclass(frozen=True, slots=True)
 class MfaSetupRequiredResult:
-    """Ponto de extensão (OCP) para configuração obrigatória de MFA no 1º acesso (#18)."""
+    """Ponto de extensão para configuração obrigatória de MFA no 1º acesso (#18)"""
 
     mfa_setup_token: str
 

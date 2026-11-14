@@ -1,4 +1,4 @@
-"""Caso de uso [S1-07]: Cadastro de conta com senha forte (RF01, ADR-002, ADR-007, ADR-012)."""
+"""Caso de uso [S1-07]: Cadastro de conta com senha forte (RF01, ADR-002, ADR-007, ADR-012)"""
 
 import uuid
 from dataclasses import dataclass
@@ -28,7 +28,7 @@ def _parse_uuid(value: str | None) -> uuid.UUID | None:
 
 @dataclass(frozen=True, slots=True)
 class RegisterCommand:
-    """Comando de entrada do caso de uso de cadastro."""
+    """Comando de entrada do caso de uso de cadastro"""
 
     name: str
     email: str
@@ -36,13 +36,11 @@ class RegisterCommand:
 
 
 class RegisterUser:
-    """Coordena o cadastro de usuário, geração do código de verificação, notificação e auditoria.
+    """Coordena o cadastro de usuário, geração do código de verificação, notificação e auditoria
 
-    Princípios SOLID aplicados:
-    - SRP: Apenas orquestra o fluxo de registro; validação de senha (`PasswordPolicy`),
-      hash Argon2id (`PasswordHasher`) e geração de código (`VerificationCodeService`)
-      estão em classes dedicadas.
-    - DIP / ISP: Depende exclusivamente de `Protocol`s injetados no construtor.
+    Só orquestra o fluxo: validação de senha (`PasswordPolicy`), hash Argon2id
+    (`PasswordHasher`) e geração de código (`VerificationCodeService`) vivem em classes
+    dedicadas, e as dependências são `Protocol`s injetados no construtor.
     """
 
     def __init__(
