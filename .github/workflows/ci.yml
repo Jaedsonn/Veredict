@@ -6,8 +6,8 @@ on:
   pull_request:
 
 jobs:
-  # galera de backend, adicionem os testes aqui depois ( não ter não é opção )
-  backend:
+  # Estático uma vez só; os testes ficam na matriz
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +18,22 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy services/*/src libs/python/*/src
-      - run: uv run pytest
+
+  # Um item por serviço e a lib comum, cada um com 70% de cobertura (RNF05);
+  # quem cria serviço novo acrescenta aqui e no COV_TARGETS do Makefile
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth, gateway, notification, monitoring, common]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: make cov s=${{ matrix.service }}
 
   # MySQL real com docker/mysql/init via docker run, igual ao local (ADR-023);
   # services: do GitHub não aceita o bind mount dos scripts de init
@@ -32,7 +47,6 @@ jobs:
       - run: uv sync --frozen
       - run: make db-test
 
-  # galera de web, adicionem os testes aqui depois ( se for ter )
   web:
     runs-on: ubuntu-latest
     steps:
