@@ -1,0 +1,92 @@
+from dataclasses import dataclass, field
+from enum import StrEnum
+
+
+class RateKey(StrEnum):
+    IP = "ip"
+    IP_AND_EMAIL = "ip_email"
+
+
+@dataclass(frozen=True, slots=True)
+class RateLimit:
+    # Namespace do bucket e campo policy do log
+    name: str
+    capacity: int
+    # Tempo para encher do zero
+    period_seconds: float
+    key: RateKey = RateKey.IP
+
+
+@dataclass(frozen=True, slots=True)
+class Upstream:
+    name: str
+    base_url: str
+    # Entra nas mensagens 502/503/504: "Serviço de {label} indisponível."
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
+class Route:
+    """Rota pública do gateway; o upstream_path explícito tira o /api sem mágica"""
+
+    path: str
+    upstream: str
+    upstream_path: str
+    public: bool = field(kw_only=True)
+    methods: frozenset[str] = field(default=frozenset({"POST"}), kw_only=True)
+    rate_limit: RateLimit | None = field(default=None, kw_only=True)
+    # Casa path e path/...; sem uso na Sprint 1
+    prefix: bool = field(default=False, kw_only=True)
+    # Headers do cliente além da allowlist do proxy (ex.: assinatura de webhook)
+    extra_request_headers: frozenset[str] = field(default=frozenset(), kw_only=True)
+
+
+@dataclass(frozen=True, slots=True)
+class RateDecision:
+    allowed: bool
+    # Segundos inteiros para o header Retry-After; 0 quando permitido
+    retry_after: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Principal:
+    user_id: int
+    email: str = field(repr=False)
+    session_id: str | None = None
+
+
+class InvalidTokenError(Exception):
+    """Todo motivo vira o mesmo 401; o reason vai só para o log"""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class RateLimitExceededError(Exception):
+    def __init__(self, policy: str, retry_after: int) -> None:
+        super().__init__(policy)
+        self.policy = policy
+        self.retry_after = retry_after
+
+
+class UpstreamUnavailableError(Exception):
+    def __init__(self, upstream: Upstream, error_type: str) -> None:
+        super().__init__(upstream.name)
+        self.upstream = upstream
+        self.error_type = error_type
+
+
+class UpstreamTimeoutError(Exception):
+    def __init__(self, upstream: Upstream, error_type: str) -> None:
+        super().__init__(upstream.name)
+        self.upstream = upstream
+        self.error_type = error_type
+
+
+class UpstreamAuthRejectedError(Exception):
+    """Upstream recusou o token interno: erro de configuração, não sessão expirada"""
+
+    def __init__(self, upstream: Upstream) -> None:
+        super().__init__(upstream.name)
+        self.upstream = upstream

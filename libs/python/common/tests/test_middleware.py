@@ -21,6 +21,7 @@ from veriditi_common.middleware import (
     client_ip,
     current_request_id,
     defer,
+    set_log_fields,
     try_defer,
 )
 
@@ -342,3 +343,96 @@ async def test_defer_forwards_keyword_arguments() -> None:
         await client.get("/x")
 
     assert seen == {"sete": 7}
+
+
+def _untrusting_app(seen: dict[str, Any]) -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/x")
+    async def x() -> dict[str, str]:
+        seen["route"] = current_request_id()
+        return {"ok": "1"}
+
+    app.add_middleware(RequestContextMiddleware, trust_request_id=False)
+    return app
+
+
+async def test_untrusted_request_id_is_always_generated() -> None:
+    seen: dict[str, Any] = {}
+
+    resp = await _get("/x", headers={REQUEST_ID_HEADER: RID}, app=_untrusting_app(seen))
+
+    rid = resp.headers[REQUEST_ID_HEADER]
+    assert rid != RID
+    assert rid == seen["route"]
+    assert uuid.UUID(rid).version == 4
+
+
+async def test_default_still_trusts_request_id() -> None:
+    resp = await _get("/x", headers={REQUEST_ID_HEADER: RID})
+
+    assert resp.headers[REQUEST_ID_HEADER] == RID
+
+
+def _fields_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/with")
+    async def with_fields(request: Request) -> dict[str, str]:
+        set_log_fields(request, user_id=7, route="/x")
+        return {"ok": "1"}
+
+    @app.get("/without")
+    async def without_fields() -> dict[str, str]:
+        return {"ok": "1"}
+
+    app.add_middleware(RequestContextMiddleware)
+    return app
+
+
+async def test_log_fields_reach_access_log_without_leaking(json_logs: JsonLogs) -> None:
+    app = _fields_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        await client.get("/with")
+        await client.get("/without")
+
+    first, second = [e for e in json_logs() if e["event"] == "request_finished"]
+    assert first["user_id"] == 7
+    assert first["route"] == "/x"
+    assert first["path"] == "/with"
+    assert "user_id" not in second
+    assert "route" not in second
+
+
+async def test_log_fields_do_not_override_fixed_fields(json_logs: JsonLogs) -> None:
+    app = FastAPI()
+
+    @app.get("/x")
+    async def x(request: Request) -> dict[str, str]:
+        set_log_fields(request, path="/forjado", status_code=1)
+        return {"ok": "1"}
+
+    app.add_middleware(RequestContextMiddleware)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        await client.get("/x")
+
+    [line] = [e for e in json_logs() if e["event"] == "request_finished"]
+    assert line["path"] == "/x"
+    assert line["status_code"] == 200
+
+
+async def test_set_log_fields_without_middleware_does_not_break() -> None:
+    seen: dict[str, Any] = {}
+    app = FastAPI()
+
+    @app.get("/x")
+    async def x(request: Request) -> dict[str, str]:
+        set_log_fields(request, user_id=1)
+        seen["state"] = request.scope["state"]["veriditi_log_fields"]
+        return {"ok": "1"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        resp = await client.get("/x")
+
+    assert resp.status_code == 200
+    assert seen["state"] == {"user_id": 1}

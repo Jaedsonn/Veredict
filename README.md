@@ -38,15 +38,26 @@ Node 22+, [uv](https://docs.astral.sh/uv/), Docker com Compose.
 ## Setup
 
 ```bash
-make install   # npm install + uv sync + cria .env
+make install   # npm install + uv sync + cria .env + par RS256 de dev (make keys)
 make up        # sobe mysql + migrations + serviços + web
 ```
+
+O auth assina o access token com `JWT_PRIVATE_KEY` e o gateway valida com
+`JWT_PUBLIC_KEY`; **o gateway não sobe sem a chave pública**. Quem já tinha
+`.env` roda `make keys`, que grava o par no `.env` sem imprimir a chave e não
+mexe num par já existente. `make keys force=1` troca o par: reinicie auth e
+gateway, e as sessões abertas caem.
+
+O `.env.example` fica só com `JWT_PRIVATE_KEY=` e `JWT_PUBLIC_KEY=` vazios. Um
+par preenchido ali seria copiado para todo `.env` novo, o `make keys`
+responderia "já existem" e todo ambiente passaria a usar uma chave privada
+conhecida, que assina token válido para qualquer usuário.
 
 | O quê                     | URL                                |
 | ------------------------- | ---------------------------------- |
 | Web                       | http://localhost:3000              |
 | Health agregado (web)     | http://localhost:3000/api/health   |
-| Gateway                   | http://localhost:8080/health/ready |
+| Gateway                   | http://127.0.0.1:8080/health/ready |
 | Mailpit (e-mails de dev)  | http://localhost:8025              |
 | Mailpit SMTP              | localhost:1025 (`MAILPIT_SMTP_PORT`) |
 | MySQL (host)              | localhost:3307                     |
@@ -54,7 +65,11 @@ make up        # sobe mysql + migrations + serviços + web
 As portas do host vêm do `.env` (`WEB_PORT`, `GATEWAY_PORT`, `MAILPIT_UI_PORT`,
 `MAILPIT_SMTP_PORT`, `DB_PORT`). `auth`, `notification` e `monitoring` não
 publicam porta: só o gateway e a web são acessíveis de fora da rede do compose.
-MySQL e Mailpit ficam presos a `127.0.0.1`. O SMTP do Mailpit também é
+Em dev, todas as portas publicadas (MySQL, Mailpit, gateway e web) ficam presas a
+`127.0.0.1`. Para web e gateway isso é requisito de segurança: o gateway confia no
+`X-Forwarded-For` que a web repassa, e o Next só preenche esse header quando ele
+não veio, então uma web exposta na LAN deixaria qualquer máquina forjar o IP
+usado no rate limit e no `actor_ip` (veja [API Gateway](#api-gateway)). O SMTP do Mailpit também é
 publicado, por decisão consciente: sem ele o `make dev s=notification` fora do
 Docker não teria onde entregar e-mail. Ao mudar o `MAILPIT_SMTP_PORT`, mude
 também o `SMTP_PORT` do `.env`, que é a porta usada pelo notification fora do
@@ -118,11 +133,14 @@ Os serviços escrevem uma linha JSON por evento no stdout, inclusive as do
 uvicorn ([ADR-012](docs/adr/0012-geracao-de-logs-estruturados.md)):
 
 ```json
-{"method": "GET", "path": "/nao-existe", "status_code": 404, "duration_ms": 1.38, "event": "request_finished", "request_id": "3f2b8c1e-8a4e-4a39-9a2b-1f1e0c9d7a55", "level": "info", "logger": "veriditi_common.middleware", "service": "gateway", "timestamp": "2026-11-12T05:26:22.960365Z"}
+{"route": "/api/me", "upstream": "auth", "user_id": 42, "method": "GET", "path": "/api/me", "status_code": 200, "duration_ms": 4.12, "event": "request_finished", "request_id": "3f2b8c1e-8a4e-4a39-9a2b-1f1e0c9d7a55", "level": "info", "logger": "veriditi_common.middleware", "service": "gateway", "timestamp": "2026-11-12T05:26:22.960365Z"}
 ```
 
-Toda resposta traz o `X-Request-ID`: o do cliente, se for um UUID válido, ou um
-UUID4 novo. Para seguir uma requisição, `make logs | grep <request_id>`. O
+Toda resposta traz o `X-Request-ID`. O gateway sempre gera um UUID4 novo e
+ignora o do cliente (`RequestContextMiddleware(trust_request_id=False)`); os
+serviços internos aceitam o que o gateway manda, se for um UUID válido, e só
+geram um quando ele falta. `route`, `upstream` e `user_id` entram no log de
+acesso do gateway por `set_log_fields`. Para seguir uma requisição, `make logs | grep <request_id>`. O
 acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`.
 
 A redação troca por `[redacted]` o valor de chaves sensíveis, em qualquer
@@ -160,7 +178,7 @@ quebram a requisição: aparecem no log com `audit_fallback=true` e
 | Variável | Uso |
 | -------- | --- |
 | `LOG_LEVEL` | `DEBUG`, `INFO` (padrão), `WARNING` ou `ERROR` |
-| `INTERNAL_API_TOKEN` | Mínimo de 16 caracteres; auth, notification e monitoring não sobem sem ele |
+| `INTERNAL_API_TOKEN` | Mínimo de 16 caracteres; gateway, auth, notification e monitoring não sobem sem ele |
 | `MONITORING_URL`, `NOTIFICATION_URL` | Só no `make dev`; o compose fixa `http://monitoring:8000` e `http://notification:8000` |
 
 ### Trilha de auditoria
@@ -255,9 +273,91 @@ compose deixa o envio terminar num `docker compose stop` (pior caso de 56 s, com
 4 × `SMTP_TIMEOUT_SECONDS`), e a conta e a consulta de detecção estão em
 `docs/banco-de-dados.md` §5.4.
 
+### API Gateway
+
+Porta única da web para o backend (RF21, [ADR-018](docs/adr/0018-api-gateway-como-servico-fastapi.md)).
+Para cada `/api/...`, em ordem: recusa caminho inseguro (`%`, `//`, barra final,
+`.`/`..`) com 404, casa a rota na tabela (404/405), aplica o rate limit, valida o
+JWT nas rotas protegidas e repassa ao upstream em streaming. `/docs` e
+`/openapi.json` não existem; notification e monitoring não têm rota (404).
+
+**Rotas** (`services/gateway/src/gateway_service/routes.py`). O gateway tira o
+`/api`: `/api/me` chega ao auth como `/me`.
+
+| Rota | Métodos | Acesso | Limite |
+| ---- | ------- | ------ | ------ |
+| `/api/auth/register` | POST | pública | 10 de rajada por IP, 1 a cada 6 s |
+| `/api/auth/verify-email` | POST | pública | — (o auth limita a 5 tentativas por código) |
+| `/api/auth/verify-email/resend` | POST | pública | 10 por IP, bucket separado do cadastro |
+| `/api/auth/login` | POST | pública | 5 de rajada por IP + e-mail, 1 a cada 12 s |
+| `/api/auth/refresh` | POST | pública | — |
+| `/api/auth/logout` | POST | protegida | — |
+| `/api/me` | GET, PATCH | protegida | — |
+| `/api/me/password` | POST | protegida | — |
+
+Uma rota nova é uma linha nova em `ROUTES` (`Route(path, upstream,
+upstream_path, public=..., methods=..., rate_limit=...)`); a tabela é validada
+na subida (duplicata, upstream desconhecido, caminho inseguro, método
+inválido). O casamento é exato; `prefix=True` casa também `path/...` e fica
+para os ids da Sprint 2. Um upstream novo entra em `Settings.upstreams` e
+passa a ser agregado no `/health/ready`.
+
+**JWT.** Só RS256 com `JWT_PUBLIC_KEY`, exigindo `exp`, `iat`, `iss`
+(`JWT_ISSUER`), `aud` (`JWT_AUDIENCE`) e `sub`, com `JWT_LEEWAY_SECONDS` (10 s).
+Qualquer falha dá `401 unauthorized` + `WWW-Authenticate: Bearer`; o motivo vai
+só para o log `jwt_rejected`.
+
+**Headers.** Do cliente só passam `Accept`, `Accept-Language`, `Content-Type`,
+`User-Agent`, `If-*` e `Range`; o resto cai, inclusive `Authorization`, `Cookie`,
+`X-Forwarded-*`, `Forwarded`, `X-Real-IP` e `X-Refresh-Token`. O gateway sempre
+injeta `X-Internal-Token`, `X-Request-ID` e `X-Forwarded-For` (um único IP, o
+real) e, nas rotas protegidas, `X-User-Id`, `X-User-Email` e `X-Session-Id`.
+O `X-Session-Id` vem da claim `sid` (o `family_id` da sessão, que o auth emite) e
+só vai quando a claim existe; o `get_current_user` do auth o lê, por exemplo para
+a troca de senha encerrar as outras sessões e manter a atual. `X-User-Email` vai em UTF-8: um upstream
+Starlette lê em latin-1, então quem precisar do e-mail Unicode faz
+`value.encode("latin-1").decode()`.
+
+**IP real.** O `X-Forwarded-For` só vale quando a conexão vem de um proxy em
+`TRUSTED_PROXIES` (CIDRs separados por vírgula), lido da direita para a
+esquerda. Vazio (padrão do `make dev`): o XFF é ignorado. No compose, o padrão
+são as faixas privadas da rede do Docker, porque a web (BFF) é quem chama o
+gateway e repassa o XFF que recebeu. Isso só é confiável porque, no compose, web
+e gateway escutam só no loopback do host: ninguém de fora fala com eles.
+
+Fora do Docker essa garantia não existe: o `next dev` do `make dev-web` escuta em
+`0.0.0.0` e repassa o `X-Forwarded-For` do cliente. Com `TRUSTED_PROXIES=127.0.0.1`,
+uma máquina da LAN chamaria `http://<host>:3000` com um XFF forjado e o gateway
+adotaria esse IP. No `make dev`, deixe `TRUSTED_PROXIES` vazio (o gateway usa o IP
+da conexão) ou suba a web presa ao loopback
+(`npm run dev -w @veriditi/web -- -H 127.0.0.1`) antes de confiar em `127.0.0.1`.
+
+Em
+produção, a borda (Caddy, #17) precisa **sobrescrever** o `X-Forwarded-For` com
+o IP da conexão, nunca anexar ao que o cliente mandou, senão o valor forjado
+chega intacto ao gateway através da web. O uvicorn roda com `--no-proxy-headers`
+para não decidir isso antes.
+
+**Rate limit.** Token bucket em memória por processo (`InMemoryTokenBucket`):
+uma ficha por tentativa, consumida antes de chamar o upstream; o `429
+rate_limited` traz `Retry-After` em segundos. Reiniciar o gateway zera os
+limites; a Sprint 2 troca por Redis atrás da mesma porta `RateLimiter`.
+
+**Erros de upstream.** `503 upstream_unavailable` (conexão recusada, DNS,
+conexão caída), `504 upstream_timeout` (`UPSTREAM_TIMEOUT_SECONDS`, 5 s) e
+`502 upstream_auth_failed` quando o upstream responde `401` com
+`code: "unauthorized"`. Esse código é reservado para o token interno recusado
+(configuração errada, não sessão expirada); um 401 legítimo de sessão, como
+uma sessão revogada, precisa de outro código (ex.: `session_revoked`) para
+chegar à web sem tradução. As demais respostas do upstream passam intactas.
+
+**CORS e corpo.** CORS só para a origem do `WEB_URL`, sem credenciais. Corpo
+acima de `MAX_BODY_BYTES` (1 MiB) dá 413; o do login, acima de 16 KiB.
+
 ### Web sem o backend (gateway mock)
 
-Enquanto o roteamento do API Gateway (#11) não existe, a web roda contra um mock em memória
+O gateway real só responde às rotas de auth quando o auth com os endpoints
+(#7–#10) estiver no ar. Para desenvolver a web sem ele, há um mock em memória
 que implementa os contratos da Sprint 1 (cadastro, verificação, login, refresh,
 logout e perfil):
 

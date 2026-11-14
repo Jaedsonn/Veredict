@@ -47,3 +47,22 @@ async def test_ready_aggregates_only_auth(client: AsyncClient) -> None:
     resp = await client.get("/health/ready")
 
     assert set(resp.json()["services"]) == {"auth"}
+
+
+@respx.mock
+async def test_probe_uses_health_timeout(client: AsyncClient) -> None:
+    route = respx.get(AUTH_READY).respond(200)
+
+    await client.get("/health/ready")
+
+    assert route.calls.last.request.extensions["timeout"]["read"] == 2.0
+
+
+@respx.mock
+async def test_ready_is_503_when_probe_times_out(client: AsyncClient) -> None:
+    respx.get(AUTH_READY).mock(side_effect=httpx.ReadTimeout("lento"))
+
+    resp = await client.get("/health/ready")
+
+    assert resp.status_code == 503
+    assert resp.json()["services"] == {"auth": "down"}

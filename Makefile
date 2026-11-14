@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install up down reset logs db dev dev-web migrate migration test lint format check \
+.PHONY: help install keys up down reset logs db dev dev-web migrate migration test lint format check \
 	db-test db-test-contract db-test-migrations _migrations-check
 
 # Variáveis da linha de comando vão para o ambiente das receitas, e exportar expande o valor:
@@ -15,6 +15,9 @@ PORT_gateway := 8080
 PORT_auth := 8001
 PORT_notification := 8002
 PORT_monitoring := 8003
+
+# O IP real do gateway vem do TRUSTED_PROXIES; o uvicorn não reescreve o peer pelo XFF
+DEV_FLAGS_gateway := --no-proxy-headers
 
 # Usuário de runtime, variável do .env com a senha dele e banco (padrão veriditi)
 DB_USER_auth := auth_svc
@@ -44,10 +47,15 @@ help:
 	@grep -E '^[a-zA-Z-][a-zA-Z_-]*:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install: ## Instala dependências e cria o .env a partir do .env.example
+install: ## Instala dependências e cria o .env a partir do .env.example, com o par RS256
 	@test -f .env || cp .env.example .env
 	npm install
 	uv sync
+	uv run python scripts/jwt_keys.py
+
+keys: ## Gera o par RS256 de dev no .env (force=1 troca o par)
+	@test -f .env || cp .env.example .env
+	uv run python scripts/jwt_keys.py $(if $(force),--force)
 
 up: ## Sobe o stack completo e espera todos ficarem saudáveis
 	docker compose up -d --build --wait
@@ -70,7 +78,8 @@ db: ## Sobe só o MySQL no Docker
 
 dev: ## Serviço com hot reload (s=gateway|auth|notification|monitoring)
 	$(need_s)@$(svc_env) uv run uvicorn $(s)_service.main:create_app --factory --reload \
-		--port $(PORT_$(s)) --reload-dir services/$(s)/src --reload-dir libs/python/common/src
+		--port $(PORT_$(s)) --reload-dir services/$(s)/src --reload-dir libs/python/common/src \
+		$(DEV_FLAGS_$(s))
 
 dev-web: ## Web com hot reload
 	npm run dev:web
