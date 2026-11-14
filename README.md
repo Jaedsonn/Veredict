@@ -101,7 +101,8 @@ conhecida, que assina token válido para qualquer usuário.
 | MySQL (host)              | localhost:3307                     |
 
 O gateway **não expõe `/docs`, `/redoc` nem `/openapi.json`**
-([ADR-018](docs/adr/0018-api-gateway-como-servico-fastapi.md)): a documentação das rotas é a tabela
+(`docs_url`, `redoc_url` e `openapi_url` ficam `None` em
+[`main.py`](services/gateway/src/gateway_service/main.py#L59-L61)): a documentação das rotas é a tabela
 de [API Gateway](#api-gateway). O `/docs` de cada serviço interno existe só na rede do compose.
 
 As portas do host vêm do `.env` (`WEB_PORT`, `GATEWAY_PORT`, `MAILPIT_UI_PORT`,
