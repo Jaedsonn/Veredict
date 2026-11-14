@@ -173,7 +173,11 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-Veriditi <no-reply@veriditi.app>}
       SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
+      SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-10}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
+    # Pior caso, entrega na 3ª tentativa: 4 × 10 s (2 falhas, envio, QUIT) + 3 s de espera + 5 s do UPDATE + 8 s da auditoria = 56 s
+    stop_grace_period: 65s
     healthcheck: *ready
     depends_on:
       notification-migrate:

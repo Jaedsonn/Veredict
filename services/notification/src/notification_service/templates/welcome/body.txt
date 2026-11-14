@@ -1,0 +1,7 @@
+Olá{% if name %}, {{ name }}{% endif %}!
+
+Seu e-mail foi confirmado e sua conta no Veriditi está ativa.
+
+Entre em {{ web_url }}/entrar para registrar suas primeiras provas digitais.
+
+Equipe Veriditi

@@ -49,7 +49,7 @@ O RF11 é contado na Sprint 1 porque os dois e-mails exigidos pelos RFs da sprin
 | RF08 | Compra via PIX (checkout transparente) | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #22, #25 |
 | RF09 | Confirmação de pagamento e faturamento | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #23 |
 | RF10 | Saldo e extrato de créditos | Pagamento | — | 4.2.2 | 2 | planejado | #24, #25 |
-| RF11 | Notificações transacionais por e-mail | Notificação | [016](adr/0016-comunicacao-interna-http-fire-and-forget.md) | 4.2.3 | 1 (verificação, boas-vindas) / 2 (demais) | planejado | #6, #33 |
+| RF11 | Notificações transacionais por e-mail | Notificação | [016](adr/0016-comunicacao-interna-http-fire-and-forget.md) | 4.2.3 | 1 (verificação, boas-vindas) / 2 (demais) | em andamento | #6, #33 |
 | RF12 | Registro de captura (prova) com débito de crédito | Captura | [005](adr/0005-arquitetura-baseada-em-servicos.md) | 4.2.4 | 2 | planejado | #29, #32 |
 | RF13 | Captura de tela de URL | Captura | [005](adr/0005-arquitetura-baseada-em-servicos.md) | 4.2.4 | 2 | planejado | #30, #32 |
 | RF14 | Gravação de vídeo de navegação | Captura | [005](adr/0005-arquitetura-baseada-em-servicos.md) | 4.2.4 | 2 | planejado | #31, #32 |
@@ -277,7 +277,7 @@ Nenhum RF fora da lista RF01–RF21. Uma funcionalidade nova entra primeiro aqui
 | RF02 | #8, #6, #13 (PR #45) | `app/(public)/verificar-email/`, `components/ui/otp-input.tsx` | `services/auth`, `services/notification` (a criar) | `email_verification_codes` (5.2) |
 | RF03 | #9, #14 (PR #46) | `app/(public)/entrar/`, `app/(app)/actions.ts`, `lib/gateway.ts`, `lib/tokens.ts`, `lib/session.ts`, `proxy.ts`, `app/sessao/expirada/` | `services/auth` (a criar) | `refresh_tokens` (5.3) |
 | RF06 | #10, #14 (PR #46) | `app/(app)/perfil/`, `lib/user.ts` | `services/auth` (a criar) | `users` (5.1) |
-| RF11 | #6 | — | `services/notification` (a criar) | `notifications_sent` (5.4) |
+| RF11 | #6 | — | `services/notification` | `notifications_sent` (5.4) |
 | RF18 | #4, #5, #41 (PR #49) | `lib/gateway.ts` (repassa IP e User-Agent) | `services/monitoring` (a criar); `docker/mysql/init/` | `veriditi_logs.audit_events` (5.5) |
 | RF21 | #11, #3 | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` (PR #44/#47) | `services/gateway` (a criar) | — |
 

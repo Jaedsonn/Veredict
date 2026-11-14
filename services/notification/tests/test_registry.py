@@ -1,0 +1,150 @@
+from typing import Any
+
+import pytest
+from pydantic import JsonValue
+
+from notification_service.catalog import EmailVerificationData, WelcomeData, build_registry
+from notification_service.domain import InvalidTemplateDataError, UnknownTemplateError
+from notification_service.registry import TemplateRegistry, TemplateSpec
+from veriditi_common.notifications import NotificationTemplate
+
+VALID: dict[str, JsonValue] = {"name": "João", "code": "042137", "expires_in_minutes": 15}
+
+
+def _errors(template: str, data: dict[str, JsonValue]) -> list[dict[str, Any]]:
+    with pytest.raises(InvalidTemplateDataError) as exc:
+        build_registry().parse(template, data)
+    return exc.value.errors
+
+
+def test_names_are_sorted_and_cover_the_producer_catalog() -> None:
+    names = build_registry().names
+
+    assert names == ("email_verification", "welcome")
+    assert set(names) >= {template.value for template in NotificationTemplate}
+
+
+def test_unknown_template_lists_valid_names() -> None:
+    with pytest.raises(UnknownTemplateError) as exc:
+        build_registry().parse("password_reset", {})
+
+    assert exc.value.template == "password_reset"
+    assert exc.value.valid == ("email_verification", "welcome")
+
+
+def test_duplicate_name_is_rejected() -> None:
+    with pytest.raises(ValueError, match="welcome"):
+        TemplateRegistry(
+            [TemplateSpec("welcome", WelcomeData), TemplateSpec("welcome", WelcomeData)]
+        )
+
+
+def test_valid_email_verification_data() -> None:
+    data = build_registry().parse("email_verification", VALID)
+
+    assert data == EmailVerificationData(name="João", code="042137", expires_in_minutes=15)
+
+
+@pytest.mark.parametrize("field", ["name", "code", "expires_in_minutes"])
+def test_each_missing_field_is_reported(field: str) -> None:
+    data = {key: value for key, value in VALID.items() if key != field}
+
+    assert _errors("email_verification", data) == [
+        {"type": "missing", "loc": (field,), "msg": "Field required"}
+    ]
+
+
+def test_extra_field_is_forbidden() -> None:
+    [error] = _errors("email_verification", {**VALID, "link": "http://evil"})
+
+    assert (error["type"], error["loc"]) == ("extra_forbidden", ("link",))
+
+
+@pytest.mark.parametrize("code", ["12345", "1234567", "12a456", "123456\n", "١٢٣٤٥٦"])
+def test_code_needs_six_ascii_digits(code: str) -> None:
+    [error] = _errors("email_verification", {**VALID, "code": code})
+
+    assert (error["type"], error["loc"]) == ("string_pattern_mismatch", ("code",))
+
+
+def test_code_as_int_is_rejected() -> None:
+    [error] = _errors("email_verification", {**VALID, "code": 123456})
+
+    assert (error["type"], error["loc"]) == ("string_type", ("code",))
+
+
+@pytest.mark.parametrize("value", [0, 1441, True, "15", 15.0])
+def test_expires_in_minutes_is_strict_int_in_range(value: JsonValue) -> None:
+    [error] = _errors("email_verification", {**VALID, "expires_in_minutes": value})
+
+    assert error["loc"] == ("expires_in_minutes",)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", "   ", "\r\n\t", "\x00\x7f", "\u2028\u2029"],
+    ids=["empty", "blank", "only-crlf-tab", "only-nul-del", "only-line-separators"],
+)
+@pytest.mark.parametrize("template", ["email_verification", "welcome"])
+def test_names_empty_after_normalization_are_accepted(template: str, name: str) -> None:
+    data = {**VALID, "name": name} if template == "email_verification" else {"name": name}
+
+    # O template troca a saudação por "Olá!": 422 aqui deixaria a conta presa em pending
+    parsed = build_registry().parse(template, data)
+
+    assert parsed.model_dump()["name"] == ""
+
+
+def test_names_too_long_are_rejected() -> None:
+    [error] = _errors("email_verification", {**VALID, "name": "a" * 121})
+
+    assert (error["type"], error["loc"]) == ("string_too_long", ("name",))
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (" Ana ", "Ana"),
+        ("Ana\r\nSilva", "Ana Silva"),
+        ("Ana\tSilva", "Ana Silva"),
+        ("Ana\x85Silva", "Ana Silva"),
+        ("Ana\x00\x7fSilva", "Ana Silva"),
+        ("Ana\u2028Silva\u2029", "Ana Silva"),
+        ("Ana   \t  Maria\nSilva", "Ana Maria Silva"),
+        ("Ana\r\nBcc: x@evil.com", "Ana Bcc: x@evil.com"),
+    ],
+    ids=["strip", "crlf", "tab", "nel", "nul-del", "line-separators", "runs", "header-injection"],
+)
+def test_names_are_normalized_instead_of_rejected(raw: str, expected: str) -> None:
+    assert build_registry().parse("welcome", {"name": raw}) == WelcomeData(name=expected)
+
+
+def test_120_chars_fit_even_with_breaks_collapsed() -> None:
+    registry = build_registry()
+
+    assert registry.parse("welcome", {"name": "a" * 120}) == WelcomeData(name="a" * 120)
+    padded = "\t" + "a" * 59 + "\r\n" + "b" * 59 + "\n"
+    assert registry.parse("welcome", {"name": padded}) == WelcomeData(
+        name="a" * 59 + " " + "b" * 59
+    )
+
+
+def test_name_must_be_text() -> None:
+    [error] = _errors("welcome", {"name": 42})
+
+    assert (error["type"], error["loc"]) == ("string_type", ("name",))
+
+
+def test_welcome_requires_name_and_forbids_extra() -> None:
+    assert [e["type"] for e in _errors("welcome", {})] == ["missing"]
+    assert [e["type"] for e in _errors("welcome", {"name": "Ana", "code": "1"})] == [
+        "extra_forbidden"
+    ]
+
+
+def test_errors_never_carry_input_or_context() -> None:
+    errors = _errors("email_verification", {"name": "x" * 200, "code": "999999x", "y": "z"})
+
+    assert errors
+    assert all(set(error) == {"type", "loc", "msg"} for error in errors)
+    assert "999999x" not in repr(errors)

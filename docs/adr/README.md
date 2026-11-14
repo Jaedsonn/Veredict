@@ -40,7 +40,7 @@ Nenhuma ADR de desvio pode ser marcada como **Aceita** sem o registro do aceite.
 |---|---|---|---|---|---|
 | [014](0014-mysql-como-banco-de-dados-central.md) | MySQL 8.4 como Banco de Dados Central | Proposta | 010 | Em uso | #2 |
 | [015](0015-log-storage-em-database-mysql-separada.md) | Log Storage como database MySQL separada (`veriditi_logs`) | Proposta | 001, 010, 012 | Em uso: `audit_events` append-only (`SELECT, INSERT`); `operational_logs` na Sprint 2 | #3, #5 |
-| [016](0016-comunicacao-interna-http-fire-and-forget.md) | Comunicação interna por HTTP "fire-and-forget" na Sprint 1 | Proposta | 005, 012 | Em uso: consumidor no monitoring (#5); produtores emitem a partir do #6/#7 | #4, #5 |
+| [016](0016-comunicacao-interna-http-fire-and-forget.md) | Comunicação interna por HTTP "fire-and-forget" na Sprint 1 | Proposta | 005, 012 | Em uso: consumidores no monitoring (#5) e no notification (#6); produtores a partir do #7 | #4, #5, #6 |
 | [017](0017-aplicacao-web-nextjs-com-bff.md) | Aplicação Web em Next.js com padrão BFF | Proposta | 006 | Em uso | #12 |
 | [018](0018-api-gateway-como-servico-fastapi.md) | API Gateway como serviço FastAPI próprio | Proposta | 005 | Planejada (mock em `apps/web/mock`) | #11 |
 | [019](0019-minio-como-object-storage.md) | MinIO como Object Storage | Proposta | 004, 010 | Planejada (Sprint 2) | #26 |

@@ -1,0 +1,9 @@
+Olá{% if name %}, {{ name }}{% endif %}!
+
+Seu código de verificação do Veriditi é: {{ code }}
+
+O código expira em {{ expires_in_minutes }} {{ "minuto" if expires_in_minutes == 1 else "minutos" }}. Informe-o em {{ web_url }}/verificar-email para concluir o cadastro.
+
+Se você não criou uma conta no Veriditi, ignore este e-mail.
+
+Equipe Veriditi

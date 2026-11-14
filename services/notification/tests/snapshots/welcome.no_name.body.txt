@@ -1,0 +1,7 @@
+Olá!
+
+Seu e-mail foi confirmado e sua conta no Veriditi está ativa.
+
+Entre em http://localhost:3000/entrar para registrar suas primeiras provas digitais.
+
+Equipe Veriditi

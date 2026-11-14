@@ -189,6 +189,72 @@ O `metadata` passa pela mesma redação dos logs antes de ser gravado: o valor d
 sensível vira `[redacted]` e a chave fica. A redação é por nome de chave, então o
 produtor não deve pôr segredo no valor de chaves neutras (`note`, `detail`).
 
+### Notificações por e-mail
+
+O notification envia os e-mails transacionais (RF11) a partir de pedidos dos outros
+serviços, feitos com o `HttpNotifier` da lib. A rota é interna, exige
+`X-Internal-Token` e não passa pelo gateway:
+
+```http
+POST /internal/notifications
+{"idempotency_key": "email_verification:42", "template": "email_verification",
+ "to": "joao@exemplo.com", "data": {"name": "João", "code": "042137", "expires_in_minutes": 15}}
+```
+
+- `202 {"status":"accepted"}` sai logo depois de reservar a chave em
+  `veriditi.notifications_sent`; o SMTP roda depois da resposta. A resposta é a
+  mesma para uma chave repetida, que **não** reenvia, esteja ela `sent`, `pending` (em
+  andamento) ou `failed` (terminal na Sprint 1; o reenvio do código no auth gera uma
+  chave nova);
+- template desconhecido ou `data` inválido dão 422 no formato de validação do FastAPI
+  (`unknown_template` traz a lista dos válidos no `msg`), sem ecoar o valor recebido;
+  corpo acima de 16 KiB dá `413 payload_too_large`;
+- no máximo 3 tentativas, com esperas de 1 s e 2 s; um 5xx do SMTP (destinatário
+  recusado, credencial errada), um servidor sem STARTTLS ou SMTPUTF8 e um certificado
+  inválido encerram na hora. O fim vira `notification.email.sent`
+  ou `notification.email.failed` no monitoring, só com o template, o e-mail mascarado
+  (`j***@exemplo.com`), a chave, o `message_id` ou o erro, sem o conteúdo.
+
+Templates disponíveis: `email_verification` (`name`, `code` com 6 dígitos em texto,
+`expires_in_minutes`) e `welcome` (`name`). O `name` é obrigatório, mas não é recusado
+pelo conteúdo: quebras de linha e caracteres de controle viram espaço, os espaços
+repetidos colapsam e, se nada sobrar, a saudação vira "Olá!" em vez de 422 (que deixaria
+a chave do auth sem e-mail). Só acima de 120 caracteres ele dá 422. Cada um fica em
+`services/notification/src/notification_service/templates/<nome>/` com `subject.txt`,
+`body.txt` e `body.html` (este estende o `_layout.html` e é escapado). Para acrescentar
+um e-mail:
+
+1. crie a pasta `templates/<nome>/` com os 3 arquivos;
+2. crie o model do `data` em `catalog.py`, herdando de `TemplateData`;
+3. acrescente o `TemplateSpec("<nome>", <Model>)` em `build_registry()`.
+
+O caso de uso não muda. Um template registrado sem os 3 arquivos derruba a subida do
+serviço, e um snapshot em `tests/snapshots/` fixa o corpo renderizado.
+
+| Variável | Uso |
+| -------- | --- |
+| `SMTP_HOST`, `SMTP_PORT` | Só no `make dev` (padrão `localhost:1025`, o Mailpit publicado); o compose fixa `mailpit:1025` |
+| `SMTP_USER`, `SMTP_PASSWORD` | Vazios no Mailpit; usuário sem senha impede a subida, e usuário sem `SMTP_USE_TLS` nem `SMTP_STARTTLS` também, exceto no SMTP local (`localhost`, `127.0.0.1`, `::1`, `mailpit`) |
+| `SMTP_FROM` | Remetente, padrão `Veriditi <no-reply@veriditi.app>`; o domínio dele vai no `Message-ID` |
+| `SMTP_STARTTLS` | `false` no Mailpit; `true` num provedor na porta 587 (#17) |
+| `SMTP_USE_TLS` | TLS implícito, para um provedor na porta 465; excludente com o `SMTP_STARTTLS` |
+| `SMTP_TIMEOUT_SECONDS` | Timeout total de cada tentativa (conexão, TLS, AUTH e envio juntos), padrão 10 (máximo 60); o `QUIT` depois da entrega tem um teto igual, fora dele. Acima de 10, suba o `stop_grace_period` do compose para pelo menos 4 × o valor + 16 s |
+| `WEB_URL` | Base dos links `/verificar-email` e `/entrar` dos e-mails |
+
+Em dev os e-mails chegam ao Mailpit, em http://localhost:8025. Para disparar um pelo
+próprio container:
+
+```bash
+docker compose exec notification python -c "import json, os, urllib.request as u; r = u.Request('http://127.0.0.1:8000/internal/notifications', data=json.dumps({'idempotency_key': 'teste:welcome:1', 'template': 'welcome', 'to': 'teste@exemplo.com', 'data': {'name': 'Teste'}}).encode(), headers={'Content-Type': 'application/json', 'X-Internal-Token': os.environ['INTERNAL_API_TOKEN']}); print(u.urlopen(r).status)"
+```
+
+Troque a `idempotency_key` para enviar de novo. Um risco aceito na Sprint 1: se o
+processo morrer entre a reserva e o fim do envio, a linha fica `pending` e a chave
+fica bloqueada, porque o destinatário não é gravado. O `stop_grace_period: 65s` do
+compose deixa o envio terminar num `docker compose stop` (pior caso de 56 s, com
+4 × `SMTP_TIMEOUT_SECONDS`), e a conta e a consulta de detecção estão em
+`docs/banco-de-dados.md` §5.4.
+
 ### Web sem o backend (gateway mock)
 
 Enquanto o roteamento do API Gateway (#11) não existe, a web roda contra um mock em memória

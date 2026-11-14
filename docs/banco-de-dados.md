@@ -298,12 +298,45 @@ CREATE TABLE notifications_sent (
 |---|---|---|---|---|---|
 | `idempotency_key` | VARCHAR(128) ascii | não | — | Gerada pelo produtor (ex.: `email_verification:<code_id>`) | não |
 | `template` | VARCHAR(64) | não | — | Ex.: `email_verification`, `welcome` | não |
-| `status` | ENUM | não | `pending` | `failed` depois das 3 tentativas do #6 | não |
-| `attempts` | TINYINT | não | 0 | Tentativas de envio SMTP | não |
-| `message_id` | VARCHAR(255) | sim | — | `Message-ID` devolvido pelo SMTP | não |
+| `status` | ENUM | não | `pending` | `pending` na reserva; `sent` ou `failed` só pelo UPDATE condicional do fim do envio (`failed` depois das 3 tentativas ou de um erro 5xx) | não |
+| `attempts` | TINYINT | não | 0 | Tentativas de envio SMTP, gravadas só no fim: 0 enquanto `pending` | não |
+| `message_id` | VARCHAR(255) | sim | — | `Message-ID` (com `<>`) gerado pelo notification no domínio do `SMTP_FROM`, igual em todas as tentativas. Gravado só em `sent`; em `failed` fica NULL | não |
 | `sent_at` | DATETIME(6) | sim | — | Obrigatório quando `status = 'sent'` | não |
 
 O destinatário **não** é gravado: deduplicar não precisa dele, e a auditoria já registra o e-mail mascarado (#6).
+
+**Ciclo de vida (#6).** O `POST /internal/notifications` valida o `data`, renderiza o e-mail e só então reserva a chave com um `INSERT` (`pending`, `attempts = 0`), sem SELECT antes. O `202` sai depois do COMMIT, e o envio roda depois da resposta. No fim, um `UPDATE … SET status, attempts, message_id, sent_at WHERE id = :id AND status = 'pending'` grava `sent` ou `failed`; uma linha terminada nunca regride.
+
+| Situação no POST | Ação | E-mail | Auditoria |
+|---|---|---|---|
+| Chave nova | `INSERT` `pending`, COMMIT, agenda o envio | sim, depois da resposta | `notification.email.sent` ou `.failed` no fim |
+| Chave existente `pending` | 1062 → `SELECT status` só para o log `notification_duplicate` | não (em andamento ou órfã) | não |
+| Chave existente `sent` | idem | não | não |
+| Chave existente `failed` | idem: **terminal na Sprint 1** | não | não |
+
+O `failed` não reenvia porque a deduplicação é permanente (§14), o `HttpNotifier` não repete o POST e o reenvio do código no auth (#8/#13) gera um código novo, com chave nova. O reprocessamento fica para o outbox do #37; só um `welcome` que falhar se perde.
+
+**`pending` órfão.** Se o processo morrer entre o COMMIT da reserva e o fim do envio (SIGKILL, OOM, deploy), a linha fica `pending` para sempre e a chave fica bloqueada. Não há como retomar: destinatário e `data` não são gravados, por desenho. Mitigações: `stop_grace_period: 65s` no compose (o uvicorn espera o envio terminar), o reenvio do código no auth e esta consulta de detecção (sem índice: a tabela é pequena; o índice entra no #35/#37):
+
+```sql
+SELECT id, idempotency_key, template, created_at
+FROM notifications_sent
+WHERE status = 'pending' AND created_at < UTC_TIMESTAMP(6) - INTERVAL 10 MINUTE;
+```
+
+O `stop_grace_period` cobre o pior caso de um envio, com `SMTP_TIMEOUT_SECONDS = 10` (T). Envios simultâneos correm em paralelo, então o pior caso não soma entre eles:
+
+| Etapa | Teto | Entrega na 3ª tentativa | 3 tentativas falhas |
+|---|---|---|---|
+| Tentativa que falha (conexão, TLS, AUTH e envio, num `asyncio.timeout` só) | T | 2 × 10 s | 3 × 10 s |
+| Esperas entre tentativas | 1 s + 2 s | 3 s | 3 s |
+| Tentativa que entrega | T | 10 s | — |
+| `QUIT` depois da entrega, fora do timeout da tentativa e sem mudar o resultado | T | 10 s | — |
+| `UPDATE` final (conexão do pool e lock incluídos); estourado, vira `notification_status_update_failed` e a linha fica `pending` | 5 s | 5 s | 5 s |
+| Auditoria: o `timeout=2.0` do httpx vale por fase (pool, conexão, escrita e leitura) | 4 × 2 s | 8 s | 8 s |
+| **Total** | 4T + 16 s | **56 s** | **46 s** |
+
+Os 65 s deixam 9 s para o resto do shutdown. Com `SMTP_TIMEOUT_SECONDS` maior que 10, suba o `stop_grace_period` para pelo menos 4T + 16 s mais a folga.
 
 ### 5.5 `veriditi_logs.audit_events` (dono: monitoring)
 
@@ -359,7 +392,7 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 | `ix_email_verification_codes_user_id_consumed_at` | Código ativo: `SELECT … WHERE user_id = :uid AND consumed_at IS NULL AND purpose = :p ORDER BY id DESC LIMIT 1 FOR UPDATE`. Invalidar os anteriores: `UPDATE … SET consumed_at = :now WHERE user_id = :uid AND consumed_at IS NULL`. Cooldown e limite de reenvio: `SELECT COUNT(*) … WHERE user_id = :uid AND created_at >= :since` (o prefixo `user_id` reduz a busca a poucas linhas por usuário) | #8 |
 | `uq_refresh_tokens_token_hash` | Refresh e logout: `SELECT … FROM refresh_tokens WHERE token_hash = :h FOR UPDATE` | #9 |
 | `ix_refresh_tokens_user_id_revoked_at` | Reuso detectado revoga **todos** os tokens do usuário: `UPDATE refresh_tokens SET revoked_at = :now, revoke_reason = 'reuse_detected' WHERE user_id = :uid AND revoked_at IS NULL` | #9 |
-| `uq_notifications_sent_idempotency_key` | Reserva idempotente: `INSERT …`. A violação significa "já enviado ou em andamento", e então `SELECT status … WHERE idempotency_key = :k` | #6 |
+| `uq_notifications_sent_idempotency_key` | Reserva idempotente: `INSERT …`. A violação significa "já enviado, em andamento ou falhou", e então `SELECT status … WHERE idempotency_key = :k` só para o log. Deadlock (1213) repete o INSERT uma vez; 1205 sobe. O fim do envio atualiza pela PK: `UPDATE … WHERE id = :id AND status = 'pending'` | #6 |
 | `uq_audit_events_event_id` | Ingestão idempotente: `INSERT …`. `IntegrityError` → 202 sem duplicar. Deadlock (1213) repete o INSERT uma vez; lock wait timeout (1205) não, porque já esperou 50 s | #5 |
 | `ix_audit_events_actor_id_occurred_at` | `GET /internal/events?actor_id=&from=&to=` e as atividades do usuário (RF20): `WHERE actor_id = :uid AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n`. O `ORDER BY id` faz filesort só das linhas filtradas | #5, #34 |
 | `ix_audit_events_action_occurred_at` | `GET /internal/events?action=&from=&to=`: `WHERE action = :a AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n` (filesort só das linhas filtradas) | #5 |
@@ -459,7 +492,7 @@ Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAM
 ## 11. Política de migrations
 
 - **Uma pasta `migrations/` e uma `version_table` por serviço**: `alembic_version_<serviço>`. Sem isso, dois serviços no mesmo banco disputariam a mesma `alembic_version`.
-- **Histórico linear**: no máximo 1 head por serviço (0 enquanto o serviço ainda não tem revisão, como o notification até o #6). Se dois PRs criarem a mesma revisão, quem mergear por último rebaseia e renumera.
+- **Histórico linear**: no máximo 1 head por serviço (0 enquanto o serviço ainda não tem revisão; desde o #6, os 3 serviços com banco têm 1 head). Se dois PRs criarem a mesma revisão, quem mergear por último rebaseia e renumera.
 - Revisões sequenciais (`0001`, `0002`, …) em arquivos `YYYYMMDD_<rev>_<slug>.py`.
 - **Uma revisão mergeada na `main` nunca é editada**; a mudança vem numa nova. A única exceção é o rebaseline do #3 (`users` → `auth`), aceito porque ainda não existe ambiente implantado e a troca de `version_table` já exige recriar o volume.
 - **Migrations não importam models**: usam tipos físicos explícitos (`mysql.DATETIME(fsp=6)`, `mysql.CHAR(64, charset="ascii", collation="ascii_bin")`, `sa.text("CURRENT_TIMESTAMP(6)")`). Assim uma migration antiga continua igual mesmo que o model mude.
@@ -524,16 +557,23 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 | #5 | `occurred_at BETWEEN :from AND :to` | `occurred_at >= :from AND occurred_at < :to`; `from > to` dá 422 no formato de validação, com `type` `invalid_time_range` em `["query","from"]` | Janelas vizinhas não contam o mesmo evento duas vezes |
 | #5 | `metadata JSON NULL` sem regra | `{}` vira NULL de SQL (`JSON(none_as_null=True)`) e NULL volta como `{}` | Sem `none_as_null`, o SQLAlchemy gravaria o JSON `null` |
 | #5 | Corpo do 202 não definido | `{"status":"accepted"}`, igual para evento novo e reenvio, só depois do COMMIT | O produtor trata o 202 como "gravado"; falha no banco é 500 e cai no fallback |
-| #6 | `notifications_sent(idempotency_key PK, template, sent_at)` | `id` PK + `uq_notifications_sent_idempotency_key`, mais `status`, `attempts` e `message_id` | Mesma garantia de deduplicação. A PK curta e sequencial evita *page splits* no índice clusterizado, e os índices secundários não carregam uma chave de 128 bytes. O status permite retomar um envio interrompido |
+| #6 | `notifications_sent(idempotency_key PK, template, sent_at)` | `id` PK + `uq_notifications_sent_idempotency_key`, mais `status`, `attempts` e `message_id` | Mesma garantia de deduplicação. A PK curta e sequencial evita *page splits* no índice clusterizado, e os índices secundários não carregam uma chave de 128 bytes. O status distingue entregue, falha e em andamento, e deixa detectar o `pending` órfão (§5.4) |
 | #6 | "repetida em até 24 h não reenvia" | A deduplicação é permanente até a limpeza (#35/#37) | Mais forte que o pedido e sem consulta por janela |
+| #6 | Envio em `BackgroundTasks` | Fila `defer` do `RequestContextMiddleware`, atrás da porta `Scheduler` | As `BackgroundTasks` se perdem numa resposta de erro; a fila mantém o `request_id`, e o evento de auditoria herda o `X-Request-ID` do produtor |
+| #6 | "até 3 tentativas com backoff (1 s, 2 s, 4 s)" | No máximo 3 envios, com esperas de 1 s e 2 s; 5xx encerra na hora | O §5.4 e o RF11 dizem 3 tentativas, e o 4 s só existiria numa 4ª. Trocar é mudar o `RetryPolicy.delays` para `(1.0, 2.0, 4.0)` |
+| #6 | `message_id` "devolvido pelo SMTP" (este documento) | Gerado pelo notification (`make_msgid`), igual em todas as tentativas, gravado só em `sent` | O aiosmtplib não devolve o id; o Message-ID repetido deixa o MTA deduplicar uma entrega dupla |
+| #6 | Status `failed` sem regra | `failed` é terminal: a chave repetida não reenvia | Recuperação pelo reenvio do código no auth (chave nova); reprocessamento no #37 |
+| #6 | Sucesso registra "só template, destinatário mascarado e `message_id`" | Mais `attempts` e `idempotency_key` no `metadata`; `resource_id` = `notifications_sent.id` | Nenhum dos dois é conteúdo nem PII; a chave (até 128) não cabe no `resource_id` (até 64) |
+| #6 | "422 com a lista de templates válidos" | Formato de validação do FastAPI: `type` `unknown_template` em `["body","template"]`, com a lista ordenada no `msg` | Um único formato de 422 por endpoint, como o `invalid_time_range` do #5 |
+| #6 | Link de boas-vindas não definido | `{WEB_URL}/entrar`; a verificação aponta para `{WEB_URL}/verificar-email` | Rotas existentes em `apps/web/src/app/(public)` |
 | #8 | Sem `purpose`; `TINYINT` | `purpose ENUM('email_verification','mfa')` (DER do #41) | O MFA por e-mail (#18) reaproveita a tabela |
 | #8, #9 | `REFERENCES users(id)` sem regra | FK nomeada com `RESTRICT` | Usuário nunca é apagado |
 | #9 | Sem motivo da revogação | `revoke_reason` + CHECK de consistência | Distingue rotação, logout e roubo na auditoria |
 | #9 | `family_id` sem índice; o harness sugeria um | Sem índice na Sprint 1 | O reuso revoga por usuário; nenhuma consulta usa `family_id` |
 | #3, #5 | `LOGS_DB_MIGRATOR_*` separado | Um único `migrator` para os dois bancos | Uma credencial de DDL a menos para gerenciar; o runtime continua separado |
 | #3 | `LogsDbSettings` / `env_prefix="LOGS_DB_"` para o monitoring | O monitoring usa o `ServiceSettings` com `db_name = "veriditi_logs"` como padrão; o compose mapeia `LOGS_DB_PASSWORD` para `DB_PASSWORD` | Um único `migrator` (acima); nome do banco e do usuário são fixos pelo init, então só a senha vai para o `.env` |
-| #3 | Compose sobe 9 serviços, sem `notification-migrate` | Entra o `notification-migrate` | O notification é dono de `notifications_sent` (seções 7 e 12) e a seção 10 exige `<serviço>-migrate` antes do serviço; com `versions/` vazia ele só cria a `alembic_version_notification` |
-| #3 | Healthcheck em `/health/ready` checa o banco | O `auth` checa, e o `monitoring` também desde o #5; o `notification` responde o ready sem abrir conexão até o #6, que cria a tabela dele | Sem nenhum GRANT o usuário de runtime nem conecta (1044, seção 10), e o compose ficaria `unhealthy` |
+| #3 | Compose sobe 9 serviços, sem `notification-migrate` | Entra o `notification-migrate` | O notification é dono de `notifications_sent` (seções 7 e 12) e a seção 10 exige `<serviço>-migrate` antes do serviço; até o #6, com `versions/` vazia, ele só criava a `alembic_version_notification` |
+| #3 | Healthcheck em `/health/ready` checa o banco | Os três serviços com banco checam: o `auth` desde o #3, o `monitoring` desde o #5 e o `notification` desde o #6, que cria a tabela dele | Antes do #6, sem nenhum GRANT, o `notification_svc` nem conectava (1044, seção 10), e o compose ficaria `unhealthy` |
 | #3 | Job `database`: `alembic heads` com 1 linha | No máximo 1 linha (0 enquanto o serviço não tem revisão) | Notification e monitoring nascem sem revisão; com qualquer revisão, a regra de 1 head continua (seção 11) |
 | #3 | `01-logs-db.sql` cria o usuário `veriditi_logs_writer` | O usuário é criado em `02-service-users.sh` | A senha vem do ambiente, e `.sql` não expande `${VAR}` |
 | #41 (exemplo) | `02-service-users.sql` com `${AUTH_DB_PASSWORD}` e GRANT no init | `.sh` + GRANT na migration | Mesmo motivo; GRANT de SELECT/INSERT exige tabela existente |
@@ -549,12 +589,14 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 - **`ENUM` nativo**: adicionar valor no fim é um `ALTER` instantâneo; remover ou reordenar exige migration cuidadosa.
 - **Retenção e LGPD** de `actor_ip`, `created_ip` e `user_agent`: definir prazos com o time (#35).
 - **Cursor por `id` e escritas concorrentes**: o `AUTO_INCREMENT` é reservado no INSERT e fica visível só no COMMIT, fora de ordem. Ler a cauda por `after_id` pode pular eventos confirmados depois. O #34 precisa de uma marca d'água atrasada (`received_at < now() - Δ`) ou de uma sequência gerada sob lock (§5.5).
+- **`pending` órfão em `notifications_sent`**: uma queda entre a reserva e o fim do envio bloqueia a chave para sempre, sem retomada (§5.4). Mitigado pelo `stop_grace_period`, pelo reenvio do código no auth e pela consulta de detecção; o outbox com payload do #37 resolve.
+- **Entrega duplicada de e-mail**: se o MTA aceitou o `DATA` e a conexão caiu antes do `250`, o retry reenvia. O Message-ID igual em todas as tentativas deixa o MTA ou o cliente deduplicar. "No máximo uma vez por chave" vale para POSTs repetidos; o SMTP fica em "pelo menos uma vez" dentro das 3 tentativas.
 - **Auditoria na Sprint 1** usa HTTP *fire-and-forget* (ADR-016). Um evento pode se perder se o monitoring estiver fora; a mitigação é o outbox (#37).
 - **Revisão do modelo**: o #41 pede revisão de pelo menos 1 pessoa de backend e 1 da equipe arquiteta. O desvio "banco central compartilhado" está na ADR-020.
 
 ## Como verificar
 
 - `uv run pytest`: tipos, convenções e helpers em SQLite.
-- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos, a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade) e a 0001 do monitoring (DDL de `audit_events`, 1142 em UPDATE, DELETE, TRUNCATE e ALTER para o `veriditi_logs_writer`, REVOKE no downgrade e reenvios concorrentes gravando uma linha só).
+- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos, a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade) a 0001 do monitoring (DDL de `audit_events`, 1142 em UPDATE, DELETE, TRUNCATE e ALTER para o `veriditi_logs_writer`, REVOKE no downgrade e reenvios concorrentes gravando uma linha só) e a 0001 do notification (DDL de `notifications_sent`, GRANT de SELECT, INSERT e UPDATE sem DELETE, 1142 em DELETE, TRUNCATE e ALTER, CHECKs com 3819, REVOKE no downgrade, reserva concorrente gravando uma linha só e UPDATE condicional que não regride).
 - `make db-test-migrations`: num MySQL descartável igual, roda os 5 passos da seção 11 para cada serviço com banco.
 - `make db-test`: os dois acima; é o que o job `database` do CI executa.

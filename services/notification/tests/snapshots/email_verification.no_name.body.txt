@@ -1,0 +1,9 @@
+Olá!
+
+Seu código de verificação do Veriditi é: 042137
+
+O código expira em 15 minutos. Informe-o em http://localhost:3000/verificar-email para concluir o cadastro.
+
+Se você não criou uma conta no Veriditi, ignore este e-mail.
+
+Equipe Veriditi
