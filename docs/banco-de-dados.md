@@ -209,12 +209,14 @@ CREATE TABLE users (
 | `email` | VARCHAR(255) | não | — | E-mail normalizado pela aplicação (trim + minúsculas, #7) | **sim** |
 | `name` | VARCHAR(120) | não | — | Nome exibido | **sim** |
 | `password_hash` | VARCHAR(255) | não | — | String PHC do Argon2id (#7). Nunca a senha | não |
-| `status` | ENUM | não | `pending_verification` | `blocked` substitui a exclusão (seção 9) | não |
-| `email_verified_at` | DATETIME(6) | sim | — | Quando o código foi confirmado (#8) | não |
+| `status` | ENUM | não | `pending_verification` | `blocked` substitui a exclusão (seção 9). `active` exige `email_verified_at` preenchido (`ck_users_active_requires_verified`, #7) | não |
+| `email_verified_at` | DATETIME(6) | sim | — | Quando o código foi confirmado (#8). Obrigatório com `status = 'active'` (CHECK) | não |
 | `created_at` | DATETIME(6) | não | agora (UTC) | Cadastro | não |
 | `updated_at` | DATETIME(6) | não | agora (UTC) | Atualizado pelo banco (`ON UPDATE`) e pela aplicação (`onupdate=utcnow`) | não |
 
 O `ON UPDATE` aparece só no DDL do MySQL, escrito na migration. O SQLite dos testes não tem esse recurso, e por isso o model também usa `onupdate=utcnow`.
+
+O CHECK `ck_users_active_requires_verified` (`status <> 'active' OR email_verified_at IS NOT NULL`) impede uma conta ativa sem e-mail verificado, mesmo que a aplicação erre. A migration `0002` só o cria no MySQL, então o SQLite dos testes não o aplica.
 
 ### 5.2 `veriditi.email_verification_codes` (dono: auth)
 
