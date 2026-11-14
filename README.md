@@ -1,6 +1,39 @@
 # Veriditi
 [![CI](https://github.com/Jaedsonn/Veredict/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jaedsonn/Veredict/actions/workflows/ci.yml?query=branch%3Amain)
 
+O Veriditi é uma plataforma de captura e preservação de provas digitais, construída em
+**Arquitetura Baseada em Serviços** ([ADR-005](docs/adr/0005-arquitetura-baseada-em-servicos.md)):
+uma web Next.js (BFF) fala com um único gateway, que valida o JWT e repassa as chamadas aos serviços de
+autenticação, notificação e monitoramento, com bancos separados por serviço no MySQL. A Sprint 1
+entrega cadastro com verificação de e-mail, login, perfil e trilha de auditoria; o restante do
+escopo está em [`docs/requisitos.md`](docs/requisitos.md).
+
+```mermaid
+flowchart LR
+    U(["Usuário"]) --> WEB["web (Next.js BFF)"]
+    WEB --> GW["gateway"]
+    GW --> AUTH["auth"]
+    AUTH -- "pede e-mail" --> NOTIF["notification"]
+    AUTH -- "eventos" --> MON["monitoring"]
+    NOTIF -- "eventos" --> MON
+    NOTIF --> MAIL["Mailpit (SMTP de dev)"]
+    AUTH --> DB1[("MySQL: veriditi")]
+    NOTIF --> DB1
+    MON --> DB2[("MySQL: veriditi_logs")]
+
+    REDIS["Redis: rate limit distribuído"]:::s2 -.-> GW
+    OUTBOX["Outbox de notificação"]:::s2 -.-> NOTIF
+    MFA["MFA e recuperação de conta"]:::s2 -.-> AUTH
+    OUTROS["Pagamento, captura e armazenamento (ADR-005)"]:::s2 -.-> GW
+
+    classDef s2 stroke-dasharray: 5 5,fill:none
+```
+
+Linhas tracejadas são a Sprint 2, ainda não implementadas. As chamadas entre serviços são HTTP
+internas com `X-Internal-Token`, sem passar pelo gateway
+([ADR-016](docs/adr/0016-comunicacao-interna-http-fire-and-forget.md)); `auth` e `notification` usam o banco
+`veriditi` (cada um com seu usuário e suas tabelas), e só o `monitoring` escreve em `veriditi_logs`.
+
 ```
 veriditi/
 ├── apps/
@@ -31,6 +64,10 @@ veriditi/
 | [Requisitos e escopo](docs/requisitos.md) | RF01–RF21, RNF01–RNF08, escopo da Sprint 1 (30%) e rastreabilidade |
 | [ADRs](docs/adr/README.md) | Decisões de arquitetura e desvios em relação ao documento original |
 | [Banco de dados](docs/banco-de-dados.md) | Modelo de dados, posse por serviço e privilégios |
+| [SOLID e arquitetura](docs/solid.md) | Onde e por que cada princípio SOLID foi aplicado, com links para o código |
+| [Uso de IA](docs/uso-de-ia.md) | Declaração do autor sobre as ferramentas de IA usadas |
+
+Sistema publicado: **pendente** (entrega via VM no #17).
 
 ## Pré-requisitos
 
@@ -58,10 +95,14 @@ conhecida, que assina token válido para qualquer usuário.
 | ------------------------- | ---------------------------------- |
 | Web                       | http://localhost:3000              |
 | Health agregado (web)     | http://localhost:3000/api/health   |
-| Gateway                   | http://127.0.0.1:8080/health/ready |
+| Gateway (só `/api/*` e `/health/*`) | http://127.0.0.1:8080/health/ready |
 | Mailpit (e-mails de dev)  | http://localhost:8025              |
 | Mailpit SMTP              | localhost:1025 (`MAILPIT_SMTP_PORT`) |
 | MySQL (host)              | localhost:3307                     |
+
+O gateway **não expõe `/docs`, `/redoc` nem `/openapi.json`**
+([ADR-018](docs/adr/0018-api-gateway-como-servico-fastapi.md)): a documentação das rotas é a tabela
+de [API Gateway](#api-gateway). O `/docs` de cada serviço interno existe só na rede do compose.
 
 As portas do host vêm do `.env` (`WEB_PORT`, `GATEWAY_PORT`, `MAILPIT_UI_PORT`,
 `MAILPIT_SMTP_PORT`, `DB_PORT`). `auth`, `notification` e `monitoring` não
@@ -75,6 +116,60 @@ publicado, por decisão consciente: sem ele o `make dev s=notification` fora do
 Docker não teria onde entregar e-mail. Ao mudar o `MAILPIT_SMTP_PORT`, mude
 também o `SMTP_PORT` do `.env`, que é a porta usada pelo notification fora do
 Docker. Dentro do compose o notification usa sempre `mailpit:1025`.
+
+## Demonstração
+
+Com `make up` rodando (web em http://localhost:3000, Mailpit em http://localhost:8025, gateway em
+http://127.0.0.1:8080):
+
+1. Abra http://localhost:3000/cadastro e crie uma conta (senha com 10+ caracteres, letra e número).
+2. Abra o Mailpit em http://localhost:8025 e copie o código de 6 dígitos do e-mail de verificação.
+3. Informe o código em http://localhost:3000/verificar-email.
+4. Entre em http://localhost:3000/entrar com o e-mail e a senha.
+5. Em http://localhost:3000/perfil, edite o nome e salve.
+6. Num terminal, rode `make audit-tail`: aparecem `auth.user.registered`, `notification.email.sent`
+   e os demais eventos do fluxo (Ctrl-C para sair; `n=30` mostra mais histórico).
+
+## Variáveis de ambiente
+
+Todas vêm do `.env`, criado pelo `make install` a partir do `.env.example`, que traz os
+comentários completos e as regras de formato. Esta tabela é o índice:
+
+| Variável | Para quê | Detalhes |
+| -------- | -------- | -------- |
+| `MYSQL_ROOT_PASSWORD` | Senha do root, só no initdb do MySQL | [Banco](#banco) |
+| `DB_MIGRATOR_PASSWORD` | Senha do `migrator`, que faz o DDL | [Banco](#banco) |
+| `AUTH_DB_PASSWORD` | Senha do usuário de runtime do auth | [Banco](#banco) |
+| `NOTIFICATION_DB_PASSWORD` | Senha do usuário de runtime do notification | [Banco](#banco) |
+| `LOGS_DB_PASSWORD` | Senha do `veriditi_logs_writer`, do monitoring | [Banco](#banco) |
+| `DB_HOST` | Host do MySQL no `make dev`/`migrate`; no compose é `mysql` | [Hot reload](#desenvolvimento-com-hot-reload) |
+| `DB_PORT` | Porta do MySQL publicada no host (3307) | [Hot reload](#desenvolvimento-com-hot-reload) |
+| `MONITORING_URL` | URL do monitoring no `make dev` | [Logs](#logs-e-x-request-id) |
+| `NOTIFICATION_URL` | URL do notification no `make dev` | [Logs](#logs-e-x-request-id) |
+| `INTERNAL_API_TOKEN` | Token das chamadas internas (mínimo de 16 caracteres) | [Logs](#logs-e-x-request-id) |
+| `LOG_LEVEL` | Nível dos logs JSON | [Logs](#logs-e-x-request-id) |
+| `JWT_PRIVATE_KEY` | Chave privada RS256 do auth, gerada por `make keys` | [Setup](#setup) |
+| `JWT_PUBLIC_KEY` | Chave pública RS256 do gateway, gerada por `make keys` | [Setup](#setup) |
+| `JWT_ISSUER` | Claim `iss`, igual no auth e no gateway | [API Gateway](#api-gateway) |
+| `JWT_AUDIENCE` | Claim `aud`, igual no auth e no gateway | [API Gateway](#api-gateway) |
+| `TRUSTED_PROXIES` | Proxies cujo `X-Forwarded-For` o gateway aceita | [API Gateway](#api-gateway) |
+| `VERIFICATION_PEPPER` | Pepper do HMAC dos códigos de verificação (mínimo de 16 caracteres) | [`docs/solid.md`](docs/solid.md) |
+| `SMTP_HOST` | Servidor SMTP do notification fora do Docker | [Notificações](#notificações-por-e-mail) |
+| `SMTP_PORT` | Porta SMTP fora do Docker | [Notificações](#notificações-por-e-mail) |
+| `SMTP_USER` | Usuário SMTP, vazio no Mailpit | [Notificações](#notificações-por-e-mail) |
+| `SMTP_PASSWORD` | Senha SMTP, vazia no Mailpit | [Notificações](#notificações-por-e-mail) |
+| `SMTP_FROM` | Remetente dos e-mails | [Notificações](#notificações-por-e-mail) |
+| `SMTP_STARTTLS` | STARTTLS, para provedor na porta 587 | [Notificações](#notificações-por-e-mail) |
+| `SMTP_USE_TLS` | TLS implícito, para provedor na porta 465 | [Notificações](#notificações-por-e-mail) |
+| `SMTP_TIMEOUT_SECONDS` | Timeout de cada tentativa de envio | [Notificações](#notificações-por-e-mail) |
+| `WEB_URL` | Base dos links dos e-mails e origem do CORS | [Notificações](#notificações-por-e-mail) |
+| `GATEWAY_URL` | URL do gateway para a web fora do Docker | [Web sem o backend](#web-sem-o-backend-gateway-mock) |
+| `WEB_PORT` | Porta da web no host (3000) | [Setup](#setup) |
+| `GATEWAY_PORT` | Porta do gateway no host (8080) | [Setup](#setup) |
+| `MAILPIT_UI_PORT` | Porta da UI do Mailpit no host (8025) | [Setup](#setup) |
+| `MAILPIT_SMTP_PORT` | Porta SMTP do Mailpit no host (1025) | [Setup](#setup) |
+
+## Operação e referência
 
 ### Banco
 
@@ -138,7 +233,7 @@ make db-test                     # contrato + migrations num MySQL descartável 
 | Contrato | Rotas do gateway existem no OpenAPI do auth | `services/auth/tests/test_gateway_contract.py` | `make test s=auth` | `tests (auth)` |
 | MySQL real | Privilégios (1142/1044), DDL físico, UTC e migrations | `tests/mysql/` (marcador `mysql`) | `make db-test` | `database` |
 
-`make cov` roda o mesmo comando da matriz `tests` do CI e falha abaixo de 70% (linhas e desvios) em cada serviço e na lib comum (`s=common`). Os testes `mysql` não entram na medição: rodam no job `database`. O `UPDATE` e o `DELETE` negados em `audit_events` são provados por `test_writer_can_only_append`, em `services/monitoring/tests/mysql/`. O teste de contrato fica em skip, com o motivo no log, enquanto o auth só tiver `/health/*`; quando o PR #54 entrar, o skip sai do teste e o contrato passa a ser sempre exigido.
+`make cov` roda o mesmo comando da matriz `tests` do CI e falha abaixo de 70% (linhas e desvios) em cada serviço e na lib comum (`s=common`). Os testes `mysql` não entram na medição: rodam no job `database`. O `UPDATE` e o `DELETE` negados em `audit_events` são provados por `test_writer_can_only_append`, em `services/monitoring/tests/mysql/`. O teste de contrato roda sempre: toda rota do gateway com upstream `auth` precisa existir no OpenAPI do auth.
 
 ### Logs e X-Request-ID
 
@@ -211,6 +306,10 @@ internas, exigem `X-Internal-Token` e não passam pelo gateway:
   `%2B00:00`: um `+` cru na URL vira espaço e dá 422. O cursor pagina eventos já
   gravados; não use `after_id` para acompanhar a cauda, porque um `id` menor pode ser
   confirmado depois de um maior.
+
+Para acompanhar os eventos em tempo real, `make audit-tail` (`n=<qtd>` define quantos eventos
+do histórico aparecem primeiro; Ctrl-C sai). Ele consulta o monitoring de 2 em 2 segundos
+por `from=` e imprime só `event_id` novos. Para uma consulta pontual com filtros:
 
 ```bash
 docker compose exec monitoring python -c "import os, urllib.request as u; r = u.Request('http://127.0.0.1:8000/internal/events?actor_id=42&from=2026-11-12T00:00:00Z&limit=20', headers={'X-Internal-Token': os.environ['INTERNAL_API_TOKEN']}); print(u.urlopen(r).read().decode())"
