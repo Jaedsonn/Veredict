@@ -147,6 +147,7 @@ services:
       NOTIFICATION_URL: http://notification:8000
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      VERIFICATION_PEPPER: ${VERIFICATION_PEPPER:-change-me-verification-pepper}
       # Os mesmos do gateway: um iss/aud diferente daria 401 em todo token
       JWT_ISSUER: ${JWT_ISSUER:-veriditi-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-veriditi}

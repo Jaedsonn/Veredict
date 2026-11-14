@@ -274,15 +274,15 @@ Nenhum RF fora da lista RF01–RF21. Uma funcionalidade nova entra primeiro aqui
 
 | RF | Issues | Web (`apps/web/src`) | Back-end | Banco |
 |---|---|---|---|---|
-| RF01 | #7, #13 (PR #45) | `app/(public)/cadastro/`, `components/auth/password-strength.tsx`, `lib/validation/auth.ts` | `services/auth` (a criar, #3/#7) | `users` (seção 5.1) |
-| RF02 | #8, #6, #13 (PR #45) | `app/(public)/verificar-email/`, `components/ui/otp-input.tsx` | `services/auth`, `services/notification` (a criar) | `email_verification_codes` (5.2) |
-| RF03 | #9, #14 (PR #46) | `app/(public)/entrar/`, `app/(app)/actions.ts`, `lib/gateway.ts`, `lib/tokens.ts`, `lib/session.ts`, `proxy.ts`, `app/sessao/expirada/` | `services/auth` (a criar) | `refresh_tokens` (5.3) |
-| RF06 | #10, #14 (PR #46) | `app/(app)/perfil/`, `lib/user.ts` | `services/auth` (a criar) | `users` (5.1) |
+| RF01 | #7, #13 (PR #45) | `app/(public)/cadastro/`, `components/auth/password-strength.tsx`, `lib/validation/auth.ts` | `services/auth` (implementado em #7) | `users` (seção 5.1) |
+| RF02 | #8, #6, #13 (PR #45) | `app/(public)/verificar-email/`, `components/ui/otp-input.tsx` | `services/auth` (#8), `services/notification` | `email_verification_codes` (5.2) |
+| RF03 | #9, #14 (PR #46) | `app/(public)/entrar/`, `app/(app)/actions.ts`, `lib/gateway.ts`, `lib/tokens.ts`, `lib/session.ts`, `proxy.ts`, `app/sessao/expirada/` | `services/auth` (implementado em #9) | `refresh_tokens` (5.3) |
+| RF06 | #10, #14 (PR #46) | `app/(app)/perfil/`, `lib/user.ts` | `services/auth` (implementado em #10) | `users` (5.1) |
 | RF11 | #6 | — | `services/notification` | `notifications_sent` (5.4) |
 | RF18 | #4, #5, #41 (PR #49) | `lib/gateway.ts` (repassa IP e User-Agent) | `services/monitoring` (a criar); `docker/mysql/init/` | `veriditi_logs.audit_events` (5.5) |
 | RF21 | #11, #3 | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` (PR #44/#47) | `services/gateway` | — |
 
-As seções de banco referem-se a [`banco-de-dados.md`](banco-de-dados.md). Hoje, o único serviço Python no repositório é o template `services/users`, que vira `services/auth` no #3.
+As seções de banco referem-se a [`banco-de-dados.md`](banco-de-dados.md). O serviço Python de identidade e autenticação encontra-se em `services/auth`, estruturado com princípios SOLID documentados em [`solid.md`](solid.md) e transparência de IA em [`uso-de-ia.md`](uso-de-ia.md).
 
 ## 8. Como manter este documento
 
