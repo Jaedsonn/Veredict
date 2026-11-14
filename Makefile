@@ -106,10 +106,12 @@ test: ## Testes Python sem MySQL (s=<serviço> opcional)
 
 # Cobertura mínima por alvo (RNF05); o CI roda este mesmo comando na matriz
 COV_TARGETS := $(SERVICES) common
-COV_MIN := 70
+COV_MIN ?= 70
 COV_PATH_common := libs/python/common
 COV_PKG_common := veriditi_common
-need_cov_s = $(if $(filter $(s),$(COV_TARGETS)),,$(error use s=<$(subst $(space),|,$(COV_TARGETS))>))
+# Exatamente um alvo: com dois, o pytest receberia um caminho e um pacote tortos
+need_cov_s = $(if $(and $(filter 1,$(words $(s))),$(filter $(s),$(COV_TARGETS))),,\
+	$(error use s=<$(subst $(space),|,$(COV_TARGETS))>))
 
 cov: ## Testes com cobertura mínima de 70% (s=<serviço>|common ou todos)
 ifdef s
