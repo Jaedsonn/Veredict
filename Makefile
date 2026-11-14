@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install keys up down reset logs db dev dev-web migrate migration test lint format check \
-	db-test db-test-contract db-test-migrations _migrations-check
+	db-test db-test-contract db-test-migrations _migrations-check cov
 
 # Variáveis da linha de comando vão para o ambiente das receitas, e exportar expande o valor:
 # um m='$(shell ...)' executaria. As receitas leem m e s por $(value), nunca do ambiente
@@ -103,6 +103,24 @@ migration: ## Nova revisão autogerada com id sequencial (s=<serviço> m="mensag
 
 test: ## Testes Python sem MySQL (s=<serviço> opcional)
 	uv run pytest $(if $(s),services/$(s))
+
+# Cobertura mínima por alvo (RNF05); o CI roda este mesmo comando na matriz
+COV_TARGETS := $(SERVICES) common
+COV_MIN := 70
+COV_PATH_common := libs/python/common
+COV_PKG_common := veriditi_common
+need_cov_s = $(if $(filter $(s),$(COV_TARGETS)),,$(error use s=<$(subst $(space),|,$(COV_TARGETS))>))
+
+cov: ## Testes com cobertura mínima de 70% (s=<serviço>|common ou todos)
+ifdef s
+	$(need_cov_s)uv run pytest $(or $(COV_PATH_$(s)),services/$(s)) \
+		--cov=$(or $(COV_PKG_$(s)),$(s)_service) --cov-report=term-missing \
+		--cov-fail-under=$(COV_MIN) -rs
+else
+	@for target in $(COV_TARGETS); do \
+		$(MAKE) --no-print-directory cov s=$$target || exit 1; \
+	done
+endif
 
 # MySQL descartável na 3317 com docker/mysql/init (mesmo comando local e no CI, ADR-023)
 DB_TEST := veriditi-db-test
