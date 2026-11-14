@@ -55,3 +55,7 @@ addopts = "--import-mode=importlib -m 'not mysql'"
 markers = ["mysql: precisa de um MySQL real com docker/mysql/init aplicado"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+# O pacote medido vem do --cov de `make cov`
+branch = true
