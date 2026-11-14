@@ -19,6 +19,7 @@ Vários serviços criam tabelas no mesmo servidor MySQL. Com a tabela de versão
     1. `make db-test-contract`: testes com o marcador `mysql` (privilégios com os erros 1142 e 1044, sessão em UTC, collation, DDL físico e as migrations com GRANT/REVOKE);
     2. `make db-test-migrations`: para cada serviço com `alembic.ini`, `alembic heads` (no máximo 1 linha) → `upgrade head` → `alembic check` → `downgrade base` → `upgrade head`, e confere que a `alembic_version_<serviço>` existe no banco do serviço.
 - **CI**: o job `database` (criado no #3) roda o mesmo `make db-test`.
+- **Cobertura** (#15): o job `tests` roda `make cov s=<alvo>` em matriz, com mínimo de 70% por serviço e na lib comum, só sobre a camada SQLite. Os testes `mysql` não entram na medição.
 
 ## Consequências (positivas / negativas)
 

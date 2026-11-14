@@ -1,4 +1,5 @@
 # Veriditi
+[![CI](https://github.com/Jaedsonn/Veredict/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jaedsonn/Veredict/actions/workflows/ci.yml?query=branch%3Amain)
 
 ```
 veriditi/
@@ -115,6 +116,7 @@ make dev s=auth                  # terminal 1 (s=gateway|auth|notification|monit
 make dev-web                     # terminal 2
 make migration s=auth m="msg"    # nova revisão autogerada
 make test                        # testes sem MySQL (ou s=auth)
+make cov                         # testes com cobertura mínima de 70% (ou s=auth|common)
 make db-test                     # contrato + migrations num MySQL descartável (porta 3317)
 ```
 
@@ -126,6 +128,17 @@ make db-test                     # contrato + migrations num MySQL descartável 
 | monitoring   | 8003       |
 
 `make help` lista todos os comandos.
+
+### Testes
+
+| Camada | O que prova | Onde | Local | CI |
+| --- | --- | --- | --- | --- |
+| Unitário | Casos de uso e adaptadores com fakes em memória | `services/<s>/tests/test_*.py` | `make test` | `tests (<s>)` |
+| API | Rotas com `httpx.AsyncClient` + `ASGITransport`, sem rede | `test_*_api.py`, `test_health.py` | `make test` | `tests (<s>)` |
+| Contrato | Rotas do gateway existem no OpenAPI do auth | `services/auth/tests/test_gateway_contract.py` | `make test s=auth` | `tests (auth)` |
+| MySQL real | Privilégios (1142/1044), DDL físico, UTC e migrations | `tests/mysql/` (marcador `mysql`) | `make db-test` | `database` |
+
+`make cov` roda o mesmo comando da matriz `tests` do CI e falha abaixo de 70% (linhas e desvios) em cada serviço e na lib comum (`s=common`). Os testes `mysql` não entram na medição: rodam no job `database`. O `UPDATE` e o `DELETE` negados em `audit_events` são provados por `test_writer_can_only_append`, em `services/monitoring/tests/mysql/`. O teste de contrato fica em skip, com o motivo no log, até o auth ter endpoints (PR #54).
 
 ### Logs e X-Request-ID
 
