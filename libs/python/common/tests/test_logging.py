@@ -20,6 +20,7 @@ from veriditi_common.logging import (
     get_logger,
     is_sensitive_key,
     mask_email,
+    redact,
     redact_sensitive,
 )
 
@@ -180,6 +181,44 @@ def test_redact_sensitive_compares_case_and_separator_insensitively() -> None:
         "pepper",
         "x-csrf-token",
         "mfa_code",
+        # Falsos negativos da revisão do #5: plural, acento, separadores e semente de TOTP
+        "codes",
+        "recovery_codes",
+        "recoveryCodes",
+        "backup_codes",
+        "verification_codes",
+        "código",
+        "CÓDIGO",
+        "códigos",
+        "códigoVerificação",
+        "codigos_recuperacao",
+        "auth_codigo",
+        "señha",
+        "auth.code",
+        "otp code",
+        "pass word",
+        "otpauth",
+        "otpauth_uri",
+        "otpAuthUrl",
+        "seed",
+        "totp_seed",
+        "ｐａｓｓｗｏｒｄ",
+        # 2ª revisão do #5: 2FA, passcode, novos prefixos e separadores : e /
+        "2FA_code",
+        "2FACode",
+        "user2faCode",
+        "2_fa_code",
+        "passcode",
+        "userPasscode",
+        "activation_code",
+        "verify_code",
+        "confirm_code",
+        "two_factor_code",
+        "twoFactorCode",
+        "tfa_code",
+        "magic_code",
+        "auth:code",
+        "auth/code",
     ],
 )
 def test_sensitive_key_variants(key: str | bytes) -> None:
@@ -226,6 +265,33 @@ def test_sensitive_key_variants(key: str | bytes) -> None:
         "attempts_remaining",
         "has_password",
         "otp_attempts",
+        "status_codes",
+        "error_codes",
+        "zip_codes",
+        "country.code",
+        "http status code",
+        "códigos_count",
+        "seed_count",
+        # Códigos de diagnóstico: o prefixo de segredo só vale logo antes de code(s)
+        "email_error_code",
+        "sms_status_code",
+        "sms_provider_error_code",
+        "email_bounce_code",
+        "login_failure_code",
+        "access_denied_code",
+        "email_template_code",
+        "login_response_code",
+        "email_error_codes",
+        "sms_delivery_status_codes",
+        "codigo_ibge",
+        "código_postal",
+        "codigos_erro",
+        "activation_error_code",
+        "verify_status_code",
+        "magic_link_status_code",
+        "two_factor_error_code",
+        "2fa_enabled",
+        "api/status_code",
     ],
 )
 def test_non_sensitive_keys(key: object) -> None:
@@ -424,3 +490,37 @@ def test_header_pair_with_list_value_is_redacted(json_logs: JsonLogs) -> None:
 
     [line] = json_logs()
     assert line["headers"] == [["authorization", REDACTED]]
+
+
+def test_redact_covers_the_names_from_the_audit_issue() -> None:
+    data = {"password": "p", "token": "t", "code": "c", "secret": "s", "email_masked": "a***"}
+
+    assert redact(data) == {
+        "password": REDACTED,
+        "token": REDACTED,
+        "code": REDACTED,
+        "secret": REDACTED,
+        "email_masked": "a***",
+    }
+
+
+def test_redact_is_recursive_and_keeps_metadata_about_secrets() -> None:
+    data = {
+        "nested": {"apiKey": "k", "status_code": 401},
+        "items": [{"verification_code": "123456"}, {"token_type": "bearer"}],
+        "headers": [["Authorization", "Bearer x"], ["Accept", "*/*"]],
+    }
+
+    assert redact(data) == {
+        "nested": {"apiKey": REDACTED, "status_code": 401},
+        "items": [{"verification_code": REDACTED}, {"token_type": "bearer"}],
+        "headers": [["Authorization", REDACTED], ["Accept", "*/*"]],
+    }
+
+
+def test_redact_does_not_mutate_the_original() -> None:
+    data = {"nested": {"password": "p"}, "items": [{"secret": "s"}]}
+
+    redact(data)
+
+    assert data == {"nested": {"password": "p"}, "items": [{"secret": "s"}]}

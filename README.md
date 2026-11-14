@@ -128,15 +128,19 @@ acesso a `/health/*` só aparece com `LOG_LEVEL=DEBUG`.
 A redação troca por `[redacted]` o valor de chaves sensíveis, em qualquer
 nível do evento (`is_sensitive_key` em `veriditi_common/logging.py`):
 
-- o nome é normalizado (`apiKey` e `X-Api-Key` viram `api_key`/`x_api_key`);
+- o nome é normalizado: camelCase, acentos, `-`, `.`, `:`, `/`, espaço e `2FA`
+  (`apiKey`, `X-Api-Key`, `auth.code`, `código` e `2FACode` viram `api_key`, `x_api_key`,
+  `auth_code`, `codigo` e `2fa_code`);
 - é sensível o nome que contém `password`, `passphrase`, `secret`, `token`,
   `authorization`, `cookie`, `credential`, `signature`, `private_key`,
-  `api_key`, `access_key`, `signing_key`, `encryption_key`, `session_key` ou
-  `database_url`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`, `jwt`,
-  `dsn`, `hmac` e afins;
-- `code` é sensível, e `*_code` só com prefixo de segredo (`verification_code`,
-  `otp_code`, `reset_code`...). `status_code`, `zip_code` e `error_code` não são:
-  por isso o código de erro de negócio vai em `error_code`;
+  `api_key`, `access_key`, `signing_key`, `encryption_key`, `session_key`,
+  `database_url`, `otpauth` ou `passcode`, ou que tem um segmento `otp`, `pin`, `pwd`, `senha`,
+  `jwt`, `dsn`, `hmac`, `seed` e afins;
+- `code`, `codes`, `codigo` e `codigos` sozinhos são sensíveis; com mais segmentos, só
+  quando o segmento logo antes é prefixo de segredo (`verification_code`,
+  `recovery_codes`, `one_time_code`...) ou, em português, quando o logo depois é um
+  qualificador (`codigo_verificacao`). `status_code`, `email_error_code`, `zip_code` e
+  `codigo_postal` não são: por isso o código de erro de negócio vai em `error_code`;
 - metadados do segredo não são redigidos (`token_type`, `token_id`,
   `password_changed_at`, `has_password`...);
 - pares `(nome, valor)` são tratados como headers quando o nome é bytes ou a
@@ -148,7 +152,8 @@ nome de chave: não logue `str(exc)` nem interpole valores no evento.
 
 Os erros seguem `{"detail": {"code": "...", "message": "...", ...extras}}`, o
 formato lido por `apps/web/src/lib/errors.ts`; o 422 de validação mantém o
-formato do FastAPI. Falhas de entrega ao monitoring e ao notification não
+formato do FastAPI (`loc`, `msg` e `type`), sem `input` nem `ctx`, que repetiriam a
+entrada. Falhas de entrega ao monitoring e ao notification não
 quebram a requisição: aparecem no log com `audit_fallback=true` e
 `notification_fallback=true`.
 
@@ -157,6 +162,32 @@ quebram a requisição: aparecem no log com `audit_fallback=true` e
 | `LOG_LEVEL` | `DEBUG`, `INFO` (padrão), `WARNING` ou `ERROR` |
 | `INTERNAL_API_TOKEN` | Mínimo de 16 caracteres; auth, notification e monitoring não sobem sem ele |
 | `MONITORING_URL`, `NOTIFICATION_URL` | Só no `make dev`; o compose fixa `http://monitoring:8000` e `http://notification:8000` |
+
+### Trilha de auditoria
+
+O monitoring grava os eventos do `HttpAuditLogger` em `veriditi_logs.audit_events`,
+append-only: o `veriditi_logs_writer` só tem `SELECT` e `INSERT`
+([ADR-015](docs/adr/0015-log-storage-em-database-mysql-separada.md)). As rotas são
+internas, exigem `X-Internal-Token` e não passam pelo gateway:
+
+- `POST /internal/events` responde `202 {"status":"accepted"}`, inclusive no reenvio
+  do mesmo `event_id`, que não duplica;
+- o corpo vai até 64 KiB (acima, `413 payload_too_large`) e o `metadata` até 16 KiB em
+  JSON e 8 níveis de aninhamento (acima, 422; com uns 10 mil níveis o `json.loads` desiste
+  antes e a resposta é `400 http_error`);
+- `GET /internal/events` filtra por `actor_id`, `action` e `[from, to)` e pagina por
+  `after_id` (`limit` até 200, `next_cursor` nulo na última página). No fuso, use `Z` ou
+  `%2B00:00`: um `+` cru na URL vira espaço e dá 422. O cursor pagina eventos já
+  gravados; não use `after_id` para acompanhar a cauda, porque um `id` menor pode ser
+  confirmado depois de um maior.
+
+```bash
+docker compose exec monitoring python -c "import os, urllib.request as u; r = u.Request('http://127.0.0.1:8000/internal/events?actor_id=42&from=2026-11-12T00:00:00Z&limit=20', headers={'X-Internal-Token': os.environ['INTERNAL_API_TOKEN']}); print(u.urlopen(r).read().decode())"
+```
+
+O `metadata` passa pela mesma redação dos logs antes de ser gravado: o valor de chave
+sensível vira `[redacted]` e a chave fica. A redação é por nome de chave, então o
+produtor não deve pôr segredo no valor de chaves neutras (`note`, `detail`).
 
 ### Web sem o backend (gateway mock)
 

@@ -331,16 +331,23 @@ CREATE TABLE audit_events (
 
 | Coluna | Tipo | Nulo | Padrão | Descrição | PII |
 |---|---|---|---|---|---|
-| `event_id` | CHAR(36) ascii | não | — | UUID gerado pelo produtor; deduplica reenvios | não |
+| `event_id` | CHAR(36) ascii | não | — | UUID gerado pelo produtor; deduplica reenvios. A primeira escrita vence; um reenvio com conteúdo diferente gera o warning `audit_event_conflict` com os nomes dos campos divergentes, sem valores | não |
 | `occurred_at` | DATETIME(6) | não | — | Relógio do produtor | não |
-| `received_at` | DATETIME(6) | não | agora (UTC) | Relógio confiável do monitoring (#5) | não |
+| `received_at` | DATETIME(6) | não | agora (UTC) | Relógio confiável do monitoring (#5), gravado explicitamente pelo caso de uso. O DEFAULT é a defesa para INSERT manual | não |
 | `service` / `action` | VARCHAR | não | — | `action` segue `<serviço>.<entidade>.<verbo_passado>` (#4) | não |
 | `actor_id` | BIGINT | sim | — | `veriditi.users.id` lógico; `NULL` = anônimo ou sistema | não |
 | `actor_ip` | VARCHAR(45) | sim | — | IP de origem | **sim** |
 | `request_id` | CHAR(36) ascii | sim | — | Correlação com os logs da aplicação (`X-Request-ID`) | não |
-| `metadata` | JSON | sim | — | Nunca guarda senha, token ou código (filtro do #5). No model, o atributo Python se chama `metadata_`, porque `metadata` é reservado no SQLAlchemy declarativo | depende |
+| `metadata` | JSON | sim | — | Nunca guarda senha, token ou código: o valor de toda chave sensível, em qualquer nível, vira `[redacted]` pelo `veriditi_common.logging.redact` (a mesma regra `is_sensitive_key` dos logs) e a chave fica. `{}` é gravado como NULL e NULL volta como `{}` na API. No model, o atributo Python se chama `metadata_`, porque `metadata` é reservado no SQLAlchemy declarativo | depende |
 
 `prev_hash` e `hash` (`CHAR(64)`, `hash` UNIQUE) entram na migration do **#34**, junto com o encadeamento.
+
+- Limites de entrada (#5): o `metadata` tem no máximo 16 KiB em JSON compacto (UTF-8) e 8 níveis de aninhamento, contando o próprio objeto; acima disso, 422. O corpo do `POST /internal/events` tem no máximo 64 KiB (`BodySizeLimitMiddleware` da lib, pelo `Content-Length` ou contando o stream), acima disso, `413 payload_too_large`. Um aninhamento acima do limite de recursão do `json.loads` (por volta de 10 mil níveis, o que cabe em 64 KiB) nem chega à validação: o FastAPI responde `400 http_error` ao ler o corpo. Por consequência, uma página do `GET` com `limit=200` fica em torno de 200 × 17 KiB ≈ 3,4 MB.
+- O JSON do MySQL guarda número com casa decimal como double e o devolve com 16 dígitos significativos (`1794481488.1332421` volta `1794481488.133242`): o `metadata` não preserva os 17 dígitos que o Python escreve. Por isso a comparação do `audit_event_conflict` usa `math.isclose(rel_tol=1e-15)` para floats. Valores que precisam de precisão exata devem ir como string ou inteiro.
+- As regras abaixo e os limites do `metadata` ficam no `AuditEvent` da lib, então o produtor nem consegue montar um evento que o monitoring recusaria; o `AuditEventIn` só tira os defaults. Viram 422 na entrada, não 500 no INSERT: `occurred_at` fora dos anos 1000 a 9999 depois da conversão para UTC (inclusive o estouro de `astimezone`, também no `from`/`to` do GET); `NaN` e `Infinity`; texto com surrogate solto (`\ud800`), em chaves e valores do `metadata` e em `resource_type`/`resource_id`. Também viram 422 os inteiros fora da faixa do BIGINT com sinal (−2⁶³ a 2⁶³−1). Esse limite não é uma recusa do MySQL: acima dele, o JSON guarda o número como uint64 ou o converte em double sem avisar, perdendo precisão; um número que não cabe nem em double, aí sim, é recusado.
+- A redação do `metadata` é por **nome de chave**: um segredo no valor de uma chave neutra (`note: "Bearer …"`) passa. Não pôr segredo em valores é responsabilidade do produtor.
+- Um INSERT duplicado consome um `id` (o InnoDB não devolve o `AUTO_INCREMENT`), então os ids não são contíguos.
+- A ordem do `id` é a da reserva do `AUTO_INCREMENT`, não a dos COMMITs: uma transação lenta pode confirmar o `id` 6 depois que o 7 já está visível. O cursor `after_id` é estável para paginar dados já confirmados, mas **não serve para acompanhar a cauda** com escritas concorrentes: quem leu até o 7 nunca verá o 6. Nota para o #34: o encadeamento e qualquer leitura incremental precisam de uma marca d'água atrasada (`received_at < now() - Δ`, com Δ maior que a transação mais longa) ou de uma sequência gerada sob lock na mesma transação do INSERT. `occurred_at` também não serve, porque depende do relógio do produtor.
 
 ## 6. Índices e as consultas que eles atendem
 
@@ -353,13 +360,14 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 | `uq_refresh_tokens_token_hash` | Refresh e logout: `SELECT … FROM refresh_tokens WHERE token_hash = :h FOR UPDATE` | #9 |
 | `ix_refresh_tokens_user_id_revoked_at` | Reuso detectado revoga **todos** os tokens do usuário: `UPDATE refresh_tokens SET revoked_at = :now, revoke_reason = 'reuse_detected' WHERE user_id = :uid AND revoked_at IS NULL` | #9 |
 | `uq_notifications_sent_idempotency_key` | Reserva idempotente: `INSERT …`. A violação significa "já enviado ou em andamento", e então `SELECT status … WHERE idempotency_key = :k` | #6 |
-| `uq_audit_events_event_id` | Ingestão idempotente: `INSERT …`. `IntegrityError` → 202 sem duplicar | #5 |
-| `ix_audit_events_actor_id_occurred_at` | `GET /internal/events?actor_id=&from=&to=` e as atividades do usuário (RF20): `WHERE actor_id = :uid AND occurred_at BETWEEN :from AND :to` | #5, #34 |
-| `ix_audit_events_action_occurred_at` | `GET /internal/events?action=&from=&to=`: `WHERE action = :a AND occurred_at BETWEEN :from AND :to` | #5 |
+| `uq_audit_events_event_id` | Ingestão idempotente: `INSERT …`. `IntegrityError` → 202 sem duplicar. Deadlock (1213) repete o INSERT uma vez; lock wait timeout (1205) não, porque já esperou 50 s | #5 |
+| `ix_audit_events_actor_id_occurred_at` | `GET /internal/events?actor_id=&from=&to=` e as atividades do usuário (RF20): `WHERE actor_id = :uid AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n`. O `ORDER BY id` faz filesort só das linhas filtradas | #5, #34 |
+| `ix_audit_events_action_occurred_at` | `GET /internal/events?action=&from=&to=`: `WHERE action = :a AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n` (filesort só das linhas filtradas) | #5 |
 
 Índices que **não** existem, e por quê:
 - `refresh_tokens.family_id`: nenhuma consulta da Sprint 1 filtra por família, porque o reuso revoga por usuário. O índice entra junto com a primeira consulta por família.
 - `notifications_sent.status` e `created_at`: entram com a limpeza ou o reprocessamento (#35/#37).
+- `audit_events.occurred_at` sozinho: o `GET /internal/events` só com `from`/`to` varre a PK até completar o `limit`. A rota é interna; um keyset `(occurred_at, id)` fica para o volume do RF20 (#34).
 
 Índices previstos para a Sprint 2 (#41): `ix_credit_ledger_user_id_id` (extrato paginado), `ix_captures_user_id_requested_at` ("Minhas provas") e `ix_evidence_files_sha256` (verificação pública por hash).
 
@@ -451,7 +459,7 @@ Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAM
 ## 11. Política de migrations
 
 - **Uma pasta `migrations/` e uma `version_table` por serviço**: `alembic_version_<serviço>`. Sem isso, dois serviços no mesmo banco disputariam a mesma `alembic_version`.
-- **Histórico linear**: no máximo 1 head por serviço (0 enquanto o serviço ainda não tem revisão, como notification e monitoring até o #6 e o #5). Se dois PRs criarem a mesma revisão, quem mergear por último rebaseia e renumera.
+- **Histórico linear**: no máximo 1 head por serviço (0 enquanto o serviço ainda não tem revisão, como o notification até o #6). Se dois PRs criarem a mesma revisão, quem mergear por último rebaseia e renumera.
 - Revisões sequenciais (`0001`, `0002`, …) em arquivos `YYYYMMDD_<rev>_<slug>.py`.
 - **Uma revisão mergeada na `main` nunca é editada**; a mudança vem numa nova. A única exceção é o rebaseline do #3 (`users` → `auth`), aceito porque ainda não existe ambiente implantado e a troca de `version_table` já exige recriar o volume.
 - **Migrations não importam models**: usam tipos físicos explícitos (`mysql.DATETIME(fsp=6)`, `mysql.CHAR(64, charset="ascii", collation="ascii_bin")`, `sa.text("CURRENT_TIMESTAMP(6)")`). Assim uma migration antiga continua igual mesmo que o model mude.
@@ -508,6 +516,14 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 | #7 | `updated_at … ON UPDATE CURRENT_TIMESTAMP` | Mantido com fsp 6 no DDL do MySQL, mais `onupdate=utcnow` no model | O SQLite dos testes não tem `ON UPDATE` |
 | #5 | Índices `ix_actor_time` e `ix_action_time` | `ix_audit_events_actor_id_occurred_at`, `ix_audit_events_action_occurred_at` | `naming_convention` |
 | #5 | `audit_events` sem `prev_hash`/`hash`; o #41 os tem no DER | Entram na migration do #34 | O #5 adia o encadeamento para o #34 |
+| #5 | `services/ingest_event.py` | `use_cases/ingest_event.py` e `use_cases/list_events.py`, atrás de `ports.AuditEventRepository` | Padrão do projeto: `ports.py` + `adapters/` + `use_cases/` + `dependencies.py` |
+| #5 | Filtrar `password`, `token`, `code` e `secret` do `metadata` | `redact` da lib (`is_sensitive_key`, superconjunto desses nomes): o valor vira `[redacted]` e a chave fica | A mesma regra dos logs; a chave preservada mostra o bug no produtor |
+| #5 | O endpoint "recebe um `AuditEvent`" | `AuditEventIn(AuditEvent)` com `event_id`, `occurred_at` e `request_id` obrigatórios (`request_id` aceita `null` explícito) | Os defaults do produtor gerariam um `event_id` novo a cada reenvio, usariam o relógio do monitoring e herdariam o `X-Request-ID` do próprio POST |
+| #5 | `received_at DEFAULT CURRENT_TIMESTAMP(6)` | DEFAULT mantido, mas o caso de uso grava o relógio injetado | Testável; o DEFAULT cobre INSERT manual |
+| #5 | "Paginado por cursor `id`" | `after_id` exclusivo, `id` crescente, `limit` 50 (máx. 200, fora disso 422) e `next_cursor` | Paginação estável dos eventos já confirmados. Não acompanha a cauda com escritas concorrentes (§5.5 e §15) |
+| #5 | `occurred_at BETWEEN :from AND :to` | `occurred_at >= :from AND occurred_at < :to`; `from > to` dá 422 no formato de validação, com `type` `invalid_time_range` em `["query","from"]` | Janelas vizinhas não contam o mesmo evento duas vezes |
+| #5 | `metadata JSON NULL` sem regra | `{}` vira NULL de SQL (`JSON(none_as_null=True)`) e NULL volta como `{}` | Sem `none_as_null`, o SQLAlchemy gravaria o JSON `null` |
+| #5 | Corpo do 202 não definido | `{"status":"accepted"}`, igual para evento novo e reenvio, só depois do COMMIT | O produtor trata o 202 como "gravado"; falha no banco é 500 e cai no fallback |
 | #6 | `notifications_sent(idempotency_key PK, template, sent_at)` | `id` PK + `uq_notifications_sent_idempotency_key`, mais `status`, `attempts` e `message_id` | Mesma garantia de deduplicação. A PK curta e sequencial evita *page splits* no índice clusterizado, e os índices secundários não carregam uma chave de 128 bytes. O status permite retomar um envio interrompido |
 | #6 | "repetida em até 24 h não reenvia" | A deduplicação é permanente até a limpeza (#35/#37) | Mais forte que o pedido e sem consulta por janela |
 | #8 | Sem `purpose`; `TINYINT` | `purpose ENUM('email_verification','mfa')` (DER do #41) | O MFA por e-mail (#18) reaproveita a tabela |
@@ -517,7 +533,7 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 | #3, #5 | `LOGS_DB_MIGRATOR_*` separado | Um único `migrator` para os dois bancos | Uma credencial de DDL a menos para gerenciar; o runtime continua separado |
 | #3 | `LogsDbSettings` / `env_prefix="LOGS_DB_"` para o monitoring | O monitoring usa o `ServiceSettings` com `db_name = "veriditi_logs"` como padrão; o compose mapeia `LOGS_DB_PASSWORD` para `DB_PASSWORD` | Um único `migrator` (acima); nome do banco e do usuário são fixos pelo init, então só a senha vai para o `.env` |
 | #3 | Compose sobe 9 serviços, sem `notification-migrate` | Entra o `notification-migrate` | O notification é dono de `notifications_sent` (seções 7 e 12) e a seção 10 exige `<serviço>-migrate` antes do serviço; com `versions/` vazia ele só cria a `alembic_version_notification` |
-| #3 | Healthcheck em `/health/ready` checa o banco | O `auth` checa; `notification` e `monitoring` respondem o ready sem abrir conexão até a issue que cria a tabela deles (#6, #5) | Sem nenhum GRANT o usuário de runtime nem conecta (1044, seção 10), e o compose ficaria `unhealthy` |
+| #3 | Healthcheck em `/health/ready` checa o banco | O `auth` checa, e o `monitoring` também desde o #5; o `notification` responde o ready sem abrir conexão até o #6, que cria a tabela dele | Sem nenhum GRANT o usuário de runtime nem conecta (1044, seção 10), e o compose ficaria `unhealthy` |
 | #3 | Job `database`: `alembic heads` com 1 linha | No máximo 1 linha (0 enquanto o serviço não tem revisão) | Notification e monitoring nascem sem revisão; com qualquer revisão, a regra de 1 head continua (seção 11) |
 | #3 | `01-logs-db.sql` cria o usuário `veriditi_logs_writer` | O usuário é criado em `02-service-users.sh` | A senha vem do ambiente, e `.sql` não expande `${VAR}` |
 | #41 (exemplo) | `02-service-users.sql` com `${AUTH_DB_PASSWORD}` e GRANT no init | `.sh` + GRANT na migration | Mesmo motivo; GRANT de SELECT/INSERT exige tabela existente |
@@ -532,12 +548,13 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 - **`migrator` com `GRANT OPTION`** nos dois bancos é a credencial mais sensível depois do root. Em produção, ela deve ficar só no job de migração.
 - **`ENUM` nativo**: adicionar valor no fim é um `ALTER` instantâneo; remover ou reordenar exige migration cuidadosa.
 - **Retenção e LGPD** de `actor_ip`, `created_ip` e `user_agent`: definir prazos com o time (#35).
+- **Cursor por `id` e escritas concorrentes**: o `AUTO_INCREMENT` é reservado no INSERT e fica visível só no COMMIT, fora de ordem. Ler a cauda por `after_id` pode pular eventos confirmados depois. O #34 precisa de uma marca d'água atrasada (`received_at < now() - Δ`) ou de uma sequência gerada sob lock (§5.5).
 - **Auditoria na Sprint 1** usa HTTP *fire-and-forget* (ADR-016). Um evento pode se perder se o monitoring estiver fora; a mitigação é o outbox (#37).
 - **Revisão do modelo**: o #41 pede revisão de pelo menos 1 pessoa de backend e 1 da equipe arquiteta. O desvio "banco central compartilhado" está na ADR-020.
 
 ## Como verificar
 
 - `uv run pytest`: tipos, convenções e helpers em SQLite.
-- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos e a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade).
+- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos, a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade) e a 0001 do monitoring (DDL de `audit_events`, 1142 em UPDATE, DELETE, TRUNCATE e ALTER para o `veriditi_logs_writer`, REVOKE no downgrade e reenvios concorrentes gravando uma linha só).
 - `make db-test-migrations`: num MySQL descartável igual, roda os 5 passos da seção 11 para cada serviço com banco.
 - `make db-test`: os dois acima; é o que o job `database` do CI executa.

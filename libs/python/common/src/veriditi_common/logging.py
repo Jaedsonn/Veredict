@@ -3,6 +3,7 @@
 import logging
 import re
 import sys
+import unicodedata
 from collections.abc import Mapping
 from typing import Any, Final, TextIO
 
@@ -30,6 +31,8 @@ SENSITIVE_KEY_PARTS: Final[frozenset[str]] = frozenset(
         "access_key",
         "session_key",
         "database_url",
+        "otpauth",
+        "passcode",
     }
 )
 # Sensíveis quando são um segmento inteiro do nome (otp, mas não footprint)
@@ -41,17 +44,56 @@ _SENSITIVE_SEGMENTS: Final = frozenset(
         "pwd",
         "pass",
         "senha",
-        "codigo",
         "jwt",
         "bearer",
         "dsn",
         "hmac",
         "pepper",
+        "seed",
+        "senhas",
     }
 )
-# *_code só é segredo com um destes prefixos; status_code, zip_code, error_code não são
+# *_code(s) só é segredo com um destes prefixos logo antes; status_code e email_error_code não são
 _SECRET_CODE_PREFIXES: Final = frozenset(
-    {"verification", "otp", "mfa", "auth", "reset", "confirmation", "recovery", "pin"}
+    {
+        "verification",
+        "verify",
+        "activation",
+        "confirm",
+        "magic",
+        "tfa",
+        "otp",
+        "totp",
+        "mfa",
+        "2fa",
+        "auth",
+        "reset",
+        "confirmation",
+        "recovery",
+        "backup",
+        "security",
+        "access",
+        "login",
+        "sms",
+        "email",
+        "pin",
+    }
+)
+# Prefixos de dois segmentos: one_time_code, two_factor_code
+_SECRET_CODE_COMPOUNDS: Final = frozenset({("one", "time"), ("two", "factor")})
+_CODE_SEGMENTS: Final = frozenset({"code", "codes", "codigo", "codigos"})
+# Em português o qualificador vem depois: codigo_verificacao, codigos_recuperacao
+_SECRET_CODE_QUALIFIERS_PT: Final = frozenset(
+    {
+        "verificacao",
+        "confirmacao",
+        "recuperacao",
+        "acesso",
+        "ativacao",
+        "seguranca",
+        "autenticacao",
+        "redefinicao",
+    }
 )
 # Metadados sobre o segredo (token_type, password_changed_at, has_password), não o segredo
 _METADATA_SUFFIXES: Final = (
@@ -75,24 +117,34 @@ _UNTOUCHED_KEYS: Final = frozenset({"exc_info", "stack_info", "_record", "_from_
 
 
 _CAMEL_BOUNDARY: Final = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_SEPARATORS: Final = re.compile(r"[\s.\-:/]+")
+# 2FA_code, 2FACode e user2faCode chegam como 2_fa, 2fa colado ou com o 2 separado
+_TWO_FA: Final = re.compile(r"_?2_?fa(?=_|$)")
+
+
+def _strip_accents(key: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", key) if not unicodedata.combining(c))
 
 
 def _normalize(key: str) -> str:
-    """apiKey, privateKey e X-Api-Key viram api_key, private_key e x_api_key"""
-    return _CAMEL_BOUNDARY.sub("_", key).lower().replace("-", "_")
+    """apiKey, X-Api-Key, auth:code e código viram api_key, x_api_key, auth_code e codigo"""
+    normalized = _SEPARATORS.sub("_", _CAMEL_BOUNDARY.sub("_", _strip_accents(key)).lower())
+    return _TWO_FA.sub("_2fa", normalized).lstrip("_")
 
 
 def _is_secret_code(segments: list[str]) -> bool:
-    """code sozinho ou com prefixo de segredo; o hash de um código é tão sensível quanto ele"""
+    """code sozinho ou com prefixo de segredo logo antes; o hash de um código é tão sensível"""
     if segments[-1] == "hash":
         segments = segments[:-1]
-    if not segments or segments[-1] != "code":
+    if len(segments) >= 2 and segments[-2] in {"codigo", "codigos"}:
+        return segments[-1] in _SECRET_CODE_QUALIFIERS_PT
+    if not segments or segments[-1] not in _CODE_SEGMENTS:
         return False
     prefix = segments[:-1]
     return (
         not prefix
-        or any(s in _SECRET_CODE_PREFIXES for s in prefix)
-        or ("one_time" in "_".join(prefix))
+        or prefix[-1] in _SECRET_CODE_PREFIXES
+        or tuple(prefix[-2:]) in _SECRET_CODE_COMPOUNDS
     )
 
 
@@ -137,6 +189,11 @@ def _redact(value: Any, in_headers: bool = False) -> Any:
 
 def _is_header_key(key: object) -> bool:
     return isinstance(key, str) and "header" in _normalize(key)
+
+
+def redact(value: Any) -> Any:
+    """Mesma redação dos logs para dados com outro destino, como o metadata da auditoria"""
+    return _redact(value)
 
 
 def redact_sensitive(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:

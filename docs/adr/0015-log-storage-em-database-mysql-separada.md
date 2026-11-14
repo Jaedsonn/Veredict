@@ -15,7 +15,9 @@ A ADR-001 exige que os registros de auditoria fiquem isolados dos logs comuns e 
   - `docker/mysql/init/01-logs-db.sql` cria a database `veriditi_logs` no mesmo servidor MySQL do Banco Central.
   - `docker/mysql/init/02-service-users.sh` cria o usuário `veriditi_logs_writer`, sem privilégio nenhum. O `GRANT SELECT, INSERT` nasce na migration do monitoring que cria `audit_events` (#5), pela regra da [ADR-020](0020-banco-central-compartilhado-com-posse-por-servico.md).
   - `make db-test-contract` prova que o `auth_svc` não abre `veriditi_logs` (erro 1044).
-  - O serviço de monitoramento (#5) e a montagem dos scripts de init no `docker-compose.yml` (#3) ainda não existem.
+  - O serviço de monitoramento existe desde o #5. A migration `0001` cria `audit_events` e roda no `monitoring-migrate` como **`migrator`**, o único usuário com DDL. O `LOGS_DB_MIGRATOR_*` da issue não existe: um único `migrator` serve aos dois bancos (`docs/banco-de-dados.md` §14).
+  - O app roda como **`veriditi_logs_writer`**, com só `SELECT, INSERT` em `audit_events`, concedidos na mesma revisão.
+  - `services/monitoring/tests/mysql/test_audit_events_mysql.py` prova o erro 1142 em `UPDATE`, `DELETE`, `TRUNCATE` e `ALTER`, e o REVOKE no downgrade.
 - **Motivação:** obter o isolamento e a imutabilidade pedidos sem acrescentar uma nova tecnologia de armazenamento na Sprint 1.
 
 ## Decisão

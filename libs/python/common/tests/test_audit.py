@@ -60,6 +60,16 @@ def test_occurred_at_must_be_aware_and_becomes_utc() -> None:
     assert _event(occurred_at=bahia).occurred_at.utcoffset() == timedelta(0)
 
 
+@pytest.mark.parametrize(
+    "raw", ["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"], ids=["below", "above"]
+)
+def test_occurred_at_overflowing_utc_is_a_validation_error(raw: str) -> None:
+    with pytest.raises(ValidationError) as exc:
+        _event(occurred_at=raw)
+
+    assert exc.value.errors()[0]["loc"] == ("occurred_at",)
+
+
 @pytest.mark.parametrize("action", ["auth.user.registered", "auth.session.login_failed"])
 def test_valid_actions(action: str) -> None:
     assert _event(action=action).action == action
@@ -368,3 +378,54 @@ async def test_circular_metadata_falls_back_to_minimal_event() -> None:
         "outcome": "success",
         "occurred_at": event.occurred_at.isoformat(),
     }
+
+
+def _nested(depth: int) -> dict[str, Any]:
+    value: dict[str, Any] = {"leaf": 1}
+    for _ in range(depth - 1):
+        value = {"k": value}
+    return value
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"metadata": {"x": float("nan")}}, id="nan"),
+        pytest.param({"metadata": {"x": [float("inf")]}}, id="infinity"),
+        pytest.param({"metadata": {"x": 2**63}}, id="int-above-bigint"),
+        pytest.param({"metadata": {"x": -(2**63) - 1}}, id="int-below-bigint"),
+        pytest.param({"metadata": {"x": "\ud800"}}, id="surrogate-value"),
+        pytest.param({"metadata": {"\udc00": "x"}}, id="surrogate-key"),
+        pytest.param({"resource_id": "\ud800"}, id="surrogate-resource_id"),
+        pytest.param({"resource_type": "\udc00"}, id="surrogate-resource_type"),
+        pytest.param({"metadata": _nested(9)}, id="depth-9"),
+        pytest.param({"metadata": {"blob": "a" * (16 * 1024 - 10)}}, id="16-kib-plus-1"),
+        pytest.param({"occurred_at": "0999-12-31T23:59:59Z"}, id="year-999"),
+        pytest.param({"occurred_at": "1000-01-01T00:30:00+01:00"}, id="year-999-in-utc"),
+    ],
+)
+def test_producer_cannot_build_what_the_monitoring_refuses(overrides: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        _event(**overrides)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"metadata": {"x": 2**63 - 1, "y": -(2**63), "f": 1e308}}, id="bounds"),
+        pytest.param({"metadata": _nested(8)}, id="depth-8"),
+        pytest.param({"metadata": {"blob": "a" * (16 * 1024 - 11)}}, id="16-kib"),
+        pytest.param({"occurred_at": "1000-01-01T00:00:00Z"}, id="first-datetime"),
+        pytest.param({"occurred_at": "9999-12-31T23:59:59.999999Z"}, id="last-datetime"),
+    ],
+)
+def test_values_at_the_limits_are_valid(overrides: dict[str, Any]) -> None:
+    _event(**overrides)
+
+
+async def test_in_memory_logger_revalidates_mutated_metadata() -> None:
+    event = _event()
+    event.metadata["x"] = float("nan")
+
+    with pytest.raises(ValidationError):
+        await InMemoryAuditLogger().record(event)
