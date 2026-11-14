@@ -13,8 +13,9 @@ from gateway_service.routes import ROUTES
 AUTH_ROUTES = tuple(route for route in ROUTES if route.upstream == "auth")
 
 
-def _is_endpoint(path: str) -> bool:
-    return path.startswith(("/auth/", "/me/")) or path == "/me"
+def has_only_health(paths: Iterable[str]) -> bool:
+    """Auth ainda sem endpoints: o OpenAPI só declara /health/*"""
+    return all(path.startswith("/health") for path in paths)
 
 
 def missing_operations(paths: Mapping[str, Any], routes: Iterable[Route]) -> list[str]:
@@ -44,9 +45,28 @@ def test_missing_operations_lists_path_and_method() -> None:
     assert missing_operations(paths, routes) == ["PATCH /me", "POST /auth/x"]
 
 
+def test_only_health_paths_skip_the_contract() -> None:
+    assert has_only_health({"/health/live": {}, "/health/ready": {}})
+
+
+def test_single_auth_path_enforces_the_contract() -> None:
+    assert not has_only_health({"/health/live": {}, "/auth/login": {"post": {}}})
+
+
+def test_routes_under_another_prefix_fail_the_contract() -> None:
+    paths = {"/health/live": {}, "/v1/auth/login": {"post": {}}, "/v1/me": {"get": {}}}
+    every_operation = sorted(
+        f"{method} {route.upstream_path}" for route in AUTH_ROUTES for method in route.methods
+    )
+
+    assert not has_only_health(paths)
+    assert missing_operations(paths, AUTH_ROUTES) == every_operation
+
+
 def test_gateway_routes_exist_in_auth_openapi(settings: Settings) -> None:
     paths = create_app(settings=settings).openapi()["paths"]
-    if not any(_is_endpoint(path) for path in paths):
+    # Remover este skip quando o #54 entrar: depois disso, auth sem rota voltaria a pular
+    if has_only_health(paths):
         pytest.skip("auth sem endpoints nesta branch: o contrato passa a valer com o PR #54")
 
     assert missing_operations(paths, AUTH_ROUTES) == []
