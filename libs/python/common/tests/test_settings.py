@@ -1,6 +1,7 @@
 import pytest
+from sqlalchemy.engine import make_url
 
-from veriditi_common.settings import ServiceSettings
+from veriditi_common.settings import BaseServiceSettings, ServiceSettings
 
 
 def _settings(**overrides: object) -> ServiceSettings:
@@ -48,3 +49,21 @@ def test_migration_url_requires_migrator_credentials(missing: str) -> None:
 def test_passwords_are_not_leaked_in_repr() -> None:
     rendered = repr(_settings(db_password="s3nh4-runtime", db_migrator_password="s3nh4-ddl"))
     assert "s3nh4" not in rendered
+
+
+def test_base_settings_work_without_database_variables() -> None:
+    settings = BaseServiceSettings(_env_file=None, service_name="gateway")  # type: ignore[call-arg]
+
+    assert settings.service_name == "gateway"
+    assert settings.debug is False
+    assert issubclass(ServiceSettings, BaseServiceSettings)
+
+
+@pytest.mark.parametrize("password", ["p@ss", "a%41b", "x/y:z", "@%/:"])
+def test_special_characters_in_password_survive_the_url(password: str) -> None:
+    settings = _settings(db_password=password, db_migrator_password=password)
+
+    for raw in (settings.database_url, settings.migration_database_url):
+        url = make_url(raw)
+        assert url.password == password
+        assert (url.host, url.port, url.database) == ("mysql", 3306, "veriditi")

@@ -20,6 +20,18 @@ jobs:
       - run: uv run mypy services/*/src libs/python/*/src
       - run: uv run pytest
 
+  # MySQL real com docker/mysql/init via docker run, igual ao local (ADR-023);
+  # services: do GitHub não aceita o bind mount dos scripts de init
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: make db-test
+
   # galera de web, adicionem os testes aqui depois ( se for ter )
   web:
     runs-on: ubuntu-latest
@@ -34,9 +46,31 @@ jobs:
       - run: npm run typecheck:web
       - run: npm run build:web
 
-  docker:
+  # Uma imagem por serviço: quem cria serviço novo acrescenta um item aqui
+  images:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: auth
+            dockerfile: services/auth/Dockerfile
+          - name: gateway
+            dockerfile: services/gateway/Dockerfile
+          - name: notification
+            dockerfile: services/notification/Dockerfile
+          - name: monitoring
+            dockerfile: services/monitoring/Dockerfile
+          - name: web
+            dockerfile: apps/web/Dockerfile
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -f services/users/Dockerfile .
-      - run: docker build -f apps/web/Dockerfile .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          tags: veriditi-${{ matrix.name }}:ci
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

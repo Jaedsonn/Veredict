@@ -1,19 +1,19 @@
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 
-class ServiceSettings(BaseSettings):
-    """Configuração base de qualquer serviço, lida de variáveis de ambiente
-
-    Cada serviço conecta com dois usuários MySQL: o de runtime (DB_USER), só com
-    DML nas próprias tabelas, e o `migrator` (DB_MIGRATOR_USER), com DDL, usado
-    apenas pelo Alembic
-    """
+class BaseServiceSettings(BaseSettings):
+    """Configuração comum a todo serviço, inclusive os que não usam banco (gateway)"""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     service_name: str
     debug: bool = False
+
+
+class ServiceSettings(BaseServiceSettings):
+    """Serviço com banco: runtime (DB_USER) só com DML e `migrator` com DDL para o Alembic"""
 
     db_host: str = "localhost"
     db_port: int = 3306
@@ -24,11 +24,17 @@ class ServiceSettings(BaseSettings):
     db_migrator_password: SecretStr | None = None
 
     def _url(self, user: str, password: SecretStr) -> str:
-        pwd = password.get_secret_value()
-        return (
-            f"mysql+aiomysql://{user}:{pwd}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
+        """URL.create escapa @, %, / e : da senha, que quebrariam uma f-string"""
+        url = URL.create(
+            drivername="mysql+aiomysql",
+            username=user,
+            password=password.get_secret_value(),
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+            query={"charset": "utf8mb4"},
         )
+        return url.render_as_string(hide_password=False)
 
     @property
     def database_url(self) -> str:

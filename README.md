@@ -5,13 +5,17 @@ veriditi/
 ├── apps/
 │   └── web/                  # Next.js 16 (App Router, TS, Tailwind)
 ├── services/
-│   └── users/                # Serviço FastAPI (exemplo/template)
-│       ├── src/users_service/
-│       ├── migrations/       # Alembic do serviço
-│       ├── tests/
-│       └── Dockerfile
+│   ├── gateway/              # API Gateway (sem banco), único backend com porta pública
+│   ├── auth/                 # Autenticação (banco veriditi)
+│   │   ├── src/auth_service/
+│   │   ├── migrations/       # Alembic do serviço (alembic_version_auth)
+│   │   ├── tests/
+│   │   └── Dockerfile
+│   ├── notification/         # Notificações por e-mail (banco veriditi)
+│   └── monitoring/           # Trilha de auditoria (banco veriditi_logs)
 ├── libs/
-│   └── python/common/        # Infra compartilhada: settings, conexão, health
+│   └── python/common/        # Infra compartilhada: settings, conexão, tipos, health
+├── docker/mysql/init/        # Bancos e usuários MySQL (só rodam com o volume vazio)
 ├── packages/                 # (futuro) pacotes TS compartilhados
 ├── docker-compose.yml
 ├── Makefile
@@ -38,27 +42,79 @@ make install   # npm install + uv sync + cria .env
 make up        # sobe mysql + migrations + serviços + web
 ```
 
-| O quê            | URL                              |
-| ---------------- | -------------------------------- |
-| Web              | http://localhost:3000            |
-| Health agregado  | http://localhost:3000/api/health |
-| API users (docs) | http://localhost:8001/docs       |
-| MySQL (host)     | localhost:3307                   |
+| O quê                     | URL                                |
+| ------------------------- | ---------------------------------- |
+| Web                       | http://localhost:3000              |
+| Health agregado (web)     | http://localhost:3000/api/health   |
+| Gateway                   | http://localhost:8080/health/ready |
+| Mailpit (e-mails de dev)  | http://localhost:8025              |
+| Mailpit SMTP              | localhost:1025 (`MAILPIT_SMTP_PORT`) |
+| MySQL (host)              | localhost:3307                     |
+
+As portas do host vêm do `.env` (`WEB_PORT`, `GATEWAY_PORT`, `MAILPIT_UI_PORT`,
+`MAILPIT_SMTP_PORT`, `DB_PORT`). `auth`, `notification` e `monitoring` não
+publicam porta: só o gateway e a web são acessíveis de fora da rede do compose.
+MySQL e Mailpit ficam presos a `127.0.0.1`. O SMTP do Mailpit também é
+publicado, por decisão consciente: sem ele o `make dev s=notification` fora do
+Docker não teria onde entregar e-mail. Ao mudar o `MAILPIT_SMTP_PORT`, mude
+também o `SMTP_PORT` do `.env`, que é a porta usada pelo notification fora do
+Docker. Dentro do compose o notification usa sempre `mailpit:1025`.
+
+### Banco
+
+Os scripts de `docker/mysql/init` (bancos `veriditi` e `veriditi_logs`,
+usuário `migrator` e um usuário de runtime por serviço) **só rodam com o volume
+vazio**. Ao atualizar para esta versão, ou ao mudar o init:
+
+1. Atualize o `.env` a partir do `.env.example`. As senhas agora são por
+   usuário (`DB_MIGRATOR_PASSWORD`, `AUTH_DB_PASSWORD`,
+   `NOTIFICATION_DB_PASSWORD`, `LOGS_DB_PASSWORD`), e o compose recusa subir
+   sem elas. Quem não tinha `.env` pode rodar `make install`.
+2. Recrie o volume e suba de novo:
+
+   ```bash
+   make reset     # docker compose down -v --remove-orphans
+   make up
+   ```
+
+`make down`, `make reset` e `make logs` funcionam mesmo com o `.env` antigo
+(o `.env.example` preenche só as senhas que faltam), para dar para derrubar o
+stack anterior.
+
+As imagens se chamam `veriditi-<serviço>` em qualquer projeto do compose: dois
+clones lado a lado (`COMPOSE_PROJECT_NAME` diferente) compartilham a tag, e o
+último build vence.
+
+Se o `mysql` ficar `unhealthy` logo na primeira subida, o init falhou (veja
+`make logs`, geralmente senha faltando ou com `'`/`\`): corrija o `.env` e rode
+`make reset`, porque o init não roda de novo sobre um volume já criado.
+
+O modelo de dados está em [`docs/banco-de-dados.md`](docs/banco-de-dados.md).
 
 ### Desenvolvimento com hot reload
 
 ```bash
-make db          # só o MySQL no Docker
-make migrate     # aplica migrations
-make dev-users   # terminal 1
-make dev-web     # terminal 2
+make db                          # só o MySQL no Docker
+make migrate                     # migrations de todos os serviços (ou s=auth)
+make dev s=auth                  # terminal 1 (s=gateway|auth|notification|monitoring)
+make dev-web                     # terminal 2
+make migration s=auth m="msg"    # nova revisão autogerada
+make test                        # testes sem MySQL (ou s=auth)
+make db-test                     # contrato + migrations num MySQL descartável (porta 3317)
 ```
+
+| Serviço      | `make dev` |
+| ------------ | ---------- |
+| gateway      | 8080       |
+| auth         | 8001       |
+| notification | 8002       |
+| monitoring   | 8003       |
 
 `make help` lista todos os comandos.
 
 ### Web sem o backend (gateway mock)
 
-Enquanto o API Gateway (#11) não existe, a web roda contra um mock em memória
+Enquanto o roteamento do API Gateway (#11) não existe, a web roda contra um mock em memória
 que implementa os contratos da Sprint 1 (cadastro, verificação, login, refresh,
 logout e perfil):
 
@@ -68,3 +124,5 @@ npm run dev:web        # terminal 2 — http://localhost:3000 (usa GATEWAY_URL, 
 ```
 
 `MOCK_ACCESS_TTL_S=20 npm run mock:gateway` encurta o access token para testar a renovação de sessão.
+
+O mock usa a mesma porta 8080 do gateway do compose: pare o stack (`make down`) antes de rodá-lo.
