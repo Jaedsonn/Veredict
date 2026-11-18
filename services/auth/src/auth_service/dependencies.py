@@ -159,6 +159,7 @@ def get_register_user_use_case(
     notifier: NotifierDep,
     audit: AuditLoggerDep,
     clock: ClockDep,
+    cpf_protector: CpfProtectorDep,
 ) -> RegisterUser:
     return RegisterUser(
         users=users,
@@ -169,6 +170,7 @@ def get_register_user_use_case(
         notifier=notifier,
         audit=audit,
         clock=clock,
+        cpf_protector=cpf_protector,
     )
 
 

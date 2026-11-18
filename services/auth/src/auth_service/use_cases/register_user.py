@@ -1,14 +1,20 @@
-"""Caso de uso [S1-07]: Cadastro de conta com senha forte (RF01, ADR-002, ADR-007, ADR-012)"""
+"""Caso de uso [S1-07]: Cadastro de conta com senha forte (RF01, ADR-002, ADR-007, ADR-012)
+
+Na #60 (RF22) a conta ganha tipo, CPF cifrado (ADR-024) e, para advogado, a inscrição na OAB.
+"""
 
 import uuid
 from dataclasses import dataclass
 
+from auth_service.domain.cpf import Cpf
 from auth_service.domain.entities import RequestContext, UserEntity
+from auth_service.domain.oab import Oab, check_oab_matches_type
 from auth_service.domain.password_policy import PasswordPolicy
 from auth_service.domain.verification_code import VerificationCodeService
-from auth_service.models import VerificationPurpose
+from auth_service.models import UserType, VerificationPurpose
 from auth_service.ports import (
     Clock,
+    CpfProtector,
     PasswordHasher,
     UserRepository,
     VerificationCodeRepository,
@@ -33,6 +39,9 @@ class RegisterCommand:
     name: str
     email: str
     password: str
+    user_type: UserType
+    cpf: Cpf
+    oab: Oab | None = None
 
 
 class RegisterUser:
@@ -53,6 +62,7 @@ class RegisterUser:
         notifier: Notifier,
         audit: AuditLogger,
         clock: Clock,
+        cpf_protector: CpfProtector,
     ) -> None:
         self._users = users
         self._codes = codes
@@ -62,11 +72,13 @@ class RegisterUser:
         self._notifier = notifier
         self._audit = audit
         self._clock = clock
+        self._cpf_protector = cpf_protector
 
     async def execute(self, cmd: RegisterCommand, ctx: RequestContext) -> UserEntity:
         normalized_email = cmd.email.strip().lower()
         normalized_name = cmd.name.strip()
 
+        check_oab_matches_type(cmd.user_type, cmd.oab)
         self._password_policy.validate(cmd.password, field="password")
 
         now = self._clock.now()
@@ -77,6 +89,10 @@ class RegisterUser:
             email=normalized_email,
             name=normalized_name,
             password_hash=password_hash,
+            user_type=cmd.user_type,
+            cpf_enc=self._cpf_protector.encrypt(cmd.cpf),
+            cpf_hmac=self._cpf_protector.blind_index(cmd.cpf),
+            oab=cmd.oab,
             now=now,
             commit=False,
         )
@@ -117,6 +133,8 @@ class RegisterUser:
                 request_id=ctx.request_uuid,
                 resource_type="user",
                 resource_id=str(user.id),
+                # Só o tipo: CPF e OAB são dados pessoais e não entram na auditoria
+                metadata={"user_type": user.user_type.value},
             )
         )
 

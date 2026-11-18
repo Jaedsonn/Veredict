@@ -16,14 +16,23 @@ OAB_NOT_ALLOWED_MESSAGE = "Só advogados informam OAB."
 _NUMBER = re.compile(r"\d{1,6}")
 
 
-def _parse_uf(raw: object) -> OabUf:
+def parse_oab_number(raw: object) -> str:
+    """1 a 6 dígitos, sem zeros à esquerda, para `001234/BA` e `1234/BA` serem a mesma inscrição"""
+    if not isinstance(raw, str) or not _NUMBER.fullmatch(cleaned := raw.strip()):
+        raise InvalidOabError(OAB_NUMBER_MESSAGE, field="oab.number")
+    if int(cleaned) == 0:
+        raise InvalidOabError(OAB_NUMBER_MESSAGE, field="oab.number")
+    return str(int(cleaned))
+
+
+def parse_oab_uf(raw: object) -> OabUf:
     cleaned = raw.strip().upper() if isinstance(raw, str) else ""
     if cleaned not in OabUf.__members__:
         raise InvalidOabError(OAB_UF_MESSAGE, field="oab.uf")
     return OabUf(cleaned)
 
 
-def _parse_kind(raw: object) -> OabKind:
+def parse_oab_kind(raw: object) -> OabKind:
     cleaned = raw.strip().lower() if isinstance(raw, str) else ""
     if cleaned not in {kind.value for kind in OabKind}:
         raise InvalidOabError(OAB_KIND_MESSAGE, field="oab.kind")
@@ -32,7 +41,7 @@ def _parse_kind(raw: object) -> OabKind:
 
 @dataclass(frozen=True, slots=True)
 class Oab:
-    """Número sem zeros à esquerda, para `001234/BA` e `1234/BA` serem a mesma inscrição"""
+    """Inscrição normalizada; cada parte também valida sozinha, para o 422 apontar o campo"""
 
     number: str
     uf: OabUf
@@ -40,11 +49,7 @@ class Oab:
 
     @classmethod
     def parse(cls, *, number: object, uf: object, kind: object) -> Self:
-        if not isinstance(number, str) or not _NUMBER.fullmatch(cleaned := number.strip()):
-            raise InvalidOabError(OAB_NUMBER_MESSAGE, field="oab.number")
-        if int(cleaned) == 0:
-            raise InvalidOabError(OAB_NUMBER_MESSAGE, field="oab.number")
-        return cls(number=str(int(cleaned)), uf=_parse_uf(uf), kind=_parse_kind(kind))
+        return cls(number=parse_oab_number(number), uf=parse_oab_uf(uf), kind=parse_oab_kind(kind))
 
     def __str__(self) -> str:
         return f"{self.number}/{self.uf}"

@@ -15,7 +15,9 @@ from auth_service.dependencies import (
     get_reset_password_use_case,
     get_verify_email_use_case,
 )
+from auth_service.domain.cpf import Cpf
 from auth_service.domain.entities import AuthenticatedResult
+from auth_service.domain.oab import Oab
 from auth_service.schemas import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
@@ -68,10 +70,19 @@ async def register(
             name=payload.name,
             email=payload.email,
             password=payload.password,
+            user_type=payload.user_type,
+            cpf=Cpf(payload.cpf),
+            oab=(
+                Oab(number=payload.oab.number, uf=payload.oab.uf, kind=payload.oab.kind)
+                if payload.oab
+                else None
+            ),
         ),
         ctx,
     )
-    return RegisterResponse(id=user.id, email=user.email, status=user.status)
+    return RegisterResponse(
+        id=user.id, email=user.email, status=user.status, user_type=user.user_type
+    )
 
 
 @router.post(

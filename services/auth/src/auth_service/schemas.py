@@ -1,7 +1,9 @@
 """Schemas Pydantic (contratos de entrada e saída HTTP) do serviço de Autenticação"""
 
 import re
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from pydantic import (
     BaseModel,
@@ -10,10 +12,21 @@ from pydantic import (
     Field,
     TypeAdapter,
     ValidationError,
+    ValidationInfo,
     field_validator,
 )
+from pydantic_core import PydanticCustomError
 
-from auth_service.models import UserStatus
+from auth_service.domain.cpf import Cpf
+from auth_service.domain.errors import InvalidFieldError
+from auth_service.domain.oab import (
+    OAB_NOT_ALLOWED_MESSAGE,
+    OAB_REQUIRED_MESSAGE,
+    parse_oab_kind,
+    parse_oab_number,
+    parse_oab_uf,
+)
+from auth_service.models import OabKind, OabUf, UserStatus, UserType
 
 _EMAIL_ADAPTER = TypeAdapter(EmailStr)
 _DIGITS_6_RE = re.compile(r"^\d{6}$")
@@ -32,14 +45,85 @@ def _validate_and_normalize_email(value: str) -> str:
     return cleaned
 
 
-class RegisterRequest(BaseModel):
-    """Contrato de entrada de `POST /auth/register` ([S1-07], RF01)"""
+def _domain_rule[T](parse: Callable[[object], T], value: object) -> T:
+    """Roda a regra do domínio e devolve o erro dela com a mensagem exata, sem o valor"""
+    try:
+        return parse(value)
+    except InvalidFieldError as exc:
+        raise PydanticCustomError(exc.code, exc.message) from None
 
-    model_config = ConfigDict(extra="ignore")
+
+def _parse_user_type(raw: object) -> UserType:
+    if isinstance(raw, str) and raw in {kind.value for kind in UserType}:
+        return UserType(raw)
+    raise PydanticCustomError("invalid_user_type", "Escolha o tipo de conta.")
+
+
+class OabRequest(BaseModel):
+    """Inscrição na OAB aninhada no cadastro; cada parte com o seu `loc` no 422 (#60)"""
+
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+
+    number: str = Field(default="", validate_default=True)
+    uf: OabUf = Field(default=None, validate_default=True)
+    kind: OabKind = Field(default=None, validate_default=True)
+
+    @field_validator("number", mode="plain")
+    @classmethod
+    def _validate_number(cls, value: object) -> str:
+        return _domain_rule(parse_oab_number, value)
+
+    @field_validator("uf", mode="plain")
+    @classmethod
+    def _validate_uf(cls, value: object) -> OabUf:
+        return _domain_rule(parse_oab_uf, value)
+
+    @field_validator("kind", mode="plain")
+    @classmethod
+    def _validate_kind(cls, value: object) -> OabKind:
+        return _domain_rule(parse_oab_kind, value)
+
+
+class RegisterRequest(BaseModel):
+    """Contrato de entrada de `POST /auth/register` ([S1-07], RF01; tipo, CPF e OAB na #60)"""
+
+    # O CPF não aparece no repr nem volta no 422 (veriditi_common.errors já tira o input)
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
 
     name: str
     email: str
-    password: str
+    password: str = Field(repr=False)
+    user_type: UserType = Field(default=None, validate_default=True)
+    # Dígitos já normalizados; a máscara é só da web
+    cpf: str = Field(default="", repr=False, validate_default=True)
+    oab: OabRequest | None = Field(default=None, validate_default=True)
+
+    @field_validator("user_type", mode="plain")
+    @classmethod
+    def _validate_user_type(cls, value: object) -> UserType:
+        return _parse_user_type(value)
+
+    @field_validator("cpf", mode="plain")
+    @classmethod
+    def _validate_cpf(cls, value: object) -> str:
+        return _domain_rule(Cpf.parse, value).digits
+
+    @field_validator("oab", mode="before")
+    @classmethod
+    def _oab_must_be_object(cls, value: Any) -> Any:
+        if value is not None and not isinstance(value, dict):
+            raise PydanticCustomError("invalid_oab", OAB_REQUIRED_MESSAGE)
+        return value
+
+    @field_validator("oab")
+    @classmethod
+    def _oab_matches_type(cls, value: OabRequest | None, info: ValidationInfo) -> OabRequest | None:
+        user_type = info.data.get("user_type")
+        if user_type is UserType.LAWYER and value is None:
+            raise PydanticCustomError("invalid_oab", OAB_REQUIRED_MESSAGE)
+        if user_type is UserType.COMMON and value is not None:
+            raise PydanticCustomError("invalid_oab", OAB_NOT_ALLOWED_MESSAGE)
+        return value
 
     @field_validator("name")
     @classmethod
@@ -65,6 +149,7 @@ class RegisterResponse(BaseModel):
     id: int
     email: str
     status: UserStatus
+    user_type: UserType
 
 
 class VerifyEmailRequest(BaseModel):

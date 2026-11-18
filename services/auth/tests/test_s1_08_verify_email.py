@@ -1,5 +1,6 @@
 """Testes da Issue [S1-08] (#8): Verificação de e-mail por código de 6 dígitos (RF02, ADR-007)."""
 
+from auth_test_data import common_identity
 from httpx import AsyncClient
 from sqlalchemy import select, update
 
@@ -17,7 +18,12 @@ async def _register_and_extract_code(
 ) -> str:
     r = await client.post(
         "/auth/register",
-        json={"name": "Usuária Teste", "email": email, "password": "SenhaForte123"},
+        json={
+            "name": "Usuária Teste",
+            "email": email,
+            "password": "SenhaForte123",
+            **common_identity(email),
+        },
     )
     assert r.status_code == 201
     sent = [n for n in notifier.sent if n.template == "email_verification"]

@@ -17,11 +17,12 @@ from auth_service.config import Settings, get_settings
 from auth_service.dependencies import get_session
 from auth_service.domain.errors import (
     AccountBlockedError,
+    AlreadyRegisteredError,
     DomainError,
-    EmailAlreadyRegisteredError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     InvalidCurrentPasswordError,
+    InvalidFieldError,
     InvalidRefreshTokenError,
     InvalidResetTokenError,
     InvalidVerificationCodeError,
@@ -46,13 +47,26 @@ from veriditi_common.security import install_internal_auth
 def _register_exception_handlers(app: FastAPI) -> None:
     """Converte erros de domínio puros em respostas HTTP padronizadas"""
 
-    @app.exception_handler(EmailAlreadyRegisteredError)
-    async def handle_email_conflict(
-        _request: Request, exc: EmailAlreadyRegisteredError
+    # Um só ponto para o 409 por campo: a #61 troca aqui pela resposta uniforme
+    @app.exception_handler(AlreadyRegisteredError)
+    async def handle_already_registered(
+        _request: Request, exc: AlreadyRegisteredError
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            content={"detail": {"code": exc.code, "message": exc.message}},
+            content={"detail": {"code": exc.code, "message": exc.message, "field": exc.field}},
+        )
+
+    @app.exception_handler(InvalidFieldError)
+    async def handle_invalid_field(_request: Request, exc: InvalidFieldError) -> JSONResponse:
+        field = exc.field or "body"
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "detail": [
+                    {"loc": ["body", *field.split(".")], "msg": exc.message, "type": exc.code}
+                ]
+            },
         )
 
     @app.exception_handler(WeakPasswordError)

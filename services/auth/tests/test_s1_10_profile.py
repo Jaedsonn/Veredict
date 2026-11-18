@@ -1,5 +1,6 @@
 """Testes da Issue [S1-10] (#10): Perfil e senha (`GET /me`, `PATCH /me`, `POST /me/password`)."""
 
+from auth_test_data import common_identity
 from httpx import AsyncClient
 
 from auth_service.adapters.token_issuer import PyJwtTokenIssuer
@@ -34,7 +35,12 @@ async def _setup_active_user(
 ) -> int:
     reg = await client.post(
         "/auth/register",
-        json={"name": "Nome Inicial", "email": email, "password": password},
+        json={
+            "name": "Nome Inicial",
+            "email": email,
+            "password": password,
+            **common_identity(email),
+        },
     )
     assert reg.status_code == 201
     user_id: int = reg.json()["id"]
