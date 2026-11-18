@@ -8,6 +8,12 @@ from auth_service.use_cases.authenticate_user import (
     RefreshCommand,
     RefreshSession,
 )
+from auth_service.use_cases.password_reset import (
+    RequestPasswordReset,
+    RequestPasswordResetCommand,
+    ResetPassword,
+    ResetPasswordCommand,
+)
 from auth_service.use_cases.profile import (
     ChangePassword,
     ChangePasswordCommand,
@@ -35,8 +41,12 @@ __all__ = [
     "RefreshSession",
     "RegisterCommand",
     "RegisterUser",
+    "RequestPasswordReset",
+    "RequestPasswordResetCommand",
     "ResendVerificationCode",
     "ResendVerificationCommand",
+    "ResetPassword",
+    "ResetPasswordCommand",
     "UpdateProfile",
     "UpdateProfileCommand",
     "VerifyEmail",

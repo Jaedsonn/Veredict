@@ -152,6 +152,36 @@ class LogoutRequest(BaseModel):
     refresh_token: str = ""
 
 
+class ForgotPasswordRequest(BaseModel):
+    """Contrato de entrada de `POST /auth/password/forgot` ([S2-02], RF05)"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, value: str) -> str:
+        return _validate_and_normalize_email(value)
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Contrato de saída de `POST /auth/password/forgot` (`202 Accepted`, exista a conta ou não)"""
+
+    status: str = "accepted"
+
+
+class ResetPasswordRequest(BaseModel):
+    """Contrato de entrada de `POST /auth/password/reset` ([S2-02], RF05)"""
+
+    # O 422 já não repete a entrada (veriditi_common.errors); o token fica fora do repr
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+
+    token: str = Field(repr=False)
+    # Sem min_length: a PasswordPolicy dá a mensagem em PT-BR também para a senha vazia
+    new_password: str = Field(repr=False)
+
+
 class ProfileRead(BaseModel):
     """Contrato de saída de `GET /me` e `PATCH /me` ([S1-10], RF06)"""
 

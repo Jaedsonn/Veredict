@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_service.domain.entities import (
+    PasswordResetTokenEntity,
     RefreshTokenEntity,
     UserEntity,
     VerificationCodeEntity,
@@ -19,6 +20,7 @@ from auth_service.domain.errors import (
 )
 from auth_service.models import (
     EmailVerificationCode,
+    PasswordResetToken,
     RefreshToken,
     RevokeReason,
     User,
@@ -64,6 +66,18 @@ def _to_refresh_entity(model: RefreshToken) -> RefreshTokenEntity:
         revoke_reason=model.revoke_reason,
         created_ip=model.created_ip,
         user_agent=model.user_agent,
+        created_at=model.created_at,
+    )
+
+
+def _to_reset_entity(model: PasswordResetToken) -> PasswordResetTokenEntity:
+    return PasswordResetTokenEntity(
+        id=model.id,
+        user_id=model.user_id,
+        token_hash=model.token_hash,
+        expires_at=model.expires_at,
+        consumed_at=model.consumed_at,
+        requested_ip=model.requested_ip,
         created_at=model.created_at,
     )
 
@@ -464,3 +478,73 @@ class SqlAlchemyRefreshTokenRepository:
         result = await self._session.execute(stmt)
         await self._session.commit()
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+
+class SqlAlchemyPasswordResetTokenRepository:
+    """Implementação SQLAlchemy de `PasswordResetTokenRepository`"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create_and_invalidate_previous(
+        self,
+        *,
+        user_id: int,
+        token_hash: str,
+        expires_at: datetime,
+        requested_ip: str | None,
+        now: datetime,
+    ) -> PasswordResetTokenEntity:
+        invalidate_stmt = (
+            update(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.consumed_at.is_(None),
+            )
+            .values(consumed_at=now)
+        )
+        await self._session.execute(invalidate_stmt)
+
+        record = PasswordResetToken(
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            consumed_at=None,
+            requested_ip=requested_ip,
+            created_at=now,
+        )
+        self._session.add(record)
+        await self._session.commit()
+        await self._session.refresh(record)
+        return _to_reset_entity(record)
+
+    async def consume(
+        self,
+        token_hash: str,
+        *,
+        now: datetime,
+        commit: bool = True,
+    ) -> PasswordResetTokenEntity | None:
+        # UPDATE condicional: duas requisições com o mesmo link não consomem as duas
+        stmt = (
+            update(PasswordResetToken)
+            .where(
+                PasswordResetToken.token_hash == token_hash.lower(),
+                PasswordResetToken.consumed_at.is_(None),
+                PasswordResetToken.expires_at > now,
+            )
+            .values(consumed_at=now)
+        )
+        result = await self._session.execute(stmt)
+        if int(result.rowcount or 0) != 1:  # type: ignore[attr-defined]
+            return None
+        if commit:
+            await self._session.commit()
+        else:
+            await self._session.flush()
+        return await self.get_by_hash(token_hash)
+
+    async def get_by_hash(self, token_hash: str) -> PasswordResetTokenEntity | None:
+        stmt = select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash.lower())
+        record = await self._session.scalar(stmt.execution_options(populate_existing=True))
+        return _to_reset_entity(record) if record is not None else None

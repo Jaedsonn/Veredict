@@ -133,3 +133,14 @@ class InvalidCurrentPasswordError(DomainError):
             message="A senha atual está incorreta.",
             field="current_password",
         )
+
+
+class InvalidResetTokenError(DomainError):
+    """Link de redefinição malformado, inexistente, expirado, usado ou substituído (`400`)"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="invalid_reset_token",
+            message="Link inválido ou expirado. Solicite um novo.",
+            field="token",
+        )

@@ -1,4 +1,4 @@
-"""Rotas de registro, verificação de e-mail e sessão (`/auth/*`) ([S1-07], [S1-08], [S1-09])"""
+"""Rotas de registro, verificação de e-mail, sessão e recuperação de senha (`/auth/*`)"""
 
 from typing import Annotated
 
@@ -10,11 +10,15 @@ from auth_service.dependencies import (
     get_logout_user_use_case,
     get_refresh_session_use_case,
     get_register_user_use_case,
+    get_request_password_reset_use_case,
     get_resend_code_use_case,
+    get_reset_password_use_case,
     get_verify_email_use_case,
 )
 from auth_service.domain.entities import AuthenticatedResult
 from auth_service.schemas import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
@@ -22,6 +26,7 @@ from auth_service.schemas import (
     RegisterResponse,
     ResendVerificationRequest,
     ResendVerificationResponse,
+    ResetPasswordRequest,
     TokenPairResponse,
     VerifyEmailRequest,
     VerifyEmailResponse,
@@ -35,8 +40,12 @@ from auth_service.use_cases import (
     RefreshSession,
     RegisterCommand,
     RegisterUser,
+    RequestPasswordReset,
+    RequestPasswordResetCommand,
     ResendVerificationCode,
     ResendVerificationCommand,
+    ResetPassword,
+    ResetPasswordCommand,
     VerifyEmail,
     VerifyEmailCommand,
 )
@@ -151,6 +160,37 @@ async def logout(
 ) -> Response:
     await use_case.execute(
         LogoutCommand(refresh_token=payload.refresh_token),
+        ctx,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/password/forgot",
+    response_model=ForgotPasswordResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    ctx: RequestContextDep,
+    use_case: Annotated[RequestPasswordReset, Depends(get_request_password_reset_use_case)],
+) -> ForgotPasswordResponse:
+    await use_case.execute(RequestPasswordResetCommand(email=payload.email), ctx)
+    return ForgotPasswordResponse(status="accepted")
+
+
+@router.post(
+    "/password/reset",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    ctx: RequestContextDep,
+    use_case: Annotated[ResetPassword, Depends(get_reset_password_use_case)],
+) -> Response:
+    await use_case.execute(
+        ResetPasswordCommand(token=payload.token, new_password=payload.new_password),
         ctx,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

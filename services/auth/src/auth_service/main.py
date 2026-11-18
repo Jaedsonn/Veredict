@@ -22,6 +22,7 @@ from auth_service.domain.errors import (
     InvalidCredentialsError,
     InvalidCurrentPasswordError,
     InvalidRefreshTokenError,
+    InvalidResetTokenError,
     InvalidVerificationCodeError,
     RefreshTokenReuseDetectedError,
     UserNotFoundError,
@@ -89,6 +90,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(VerificationCodeExpiredError)
     @app.exception_handler(VerificationCodeTooManyAttemptsError)
     @app.exception_handler(InvalidCurrentPasswordError)
+    @app.exception_handler(InvalidResetTokenError)
     async def handle_bad_request_domain_error(_request: Request, exc: DomainError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,

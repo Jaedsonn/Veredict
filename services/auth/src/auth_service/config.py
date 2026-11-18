@@ -3,7 +3,7 @@
 from functools import lru_cache
 
 from cryptography.hazmat.primitives import serialization
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 
 from veriditi_common.settings import ServiceSettings
 
@@ -25,6 +25,9 @@ class Settings(ServiceSettings):
     verification_max_attempts: int = 5
     verification_resend_cooldown_seconds: int = 60
     verification_max_resends_per_hour: int = 5
+
+    # Validade do link de redefinição de senha (#19)
+    password_reset_ttl_minutes: int = Field(default=30, ge=1, le=1440)
 
     # Opcionais na instanciação porque o container `auth-migrate` (Alembic) não recebe chaves JWT;
     # `create_app` exige `jwt_private_key_pem` em fail-fast na subida do serviço HTTP.
