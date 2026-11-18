@@ -58,6 +58,7 @@ jobs:
       - run: npm ci
       - run: npm run lint:web
       - run: npm run typecheck:web
+      - run: npm run test:web
       - run: npm run build:web
 
   # Uma imagem por serviço: quem cria serviço novo acrescenta um item aqui

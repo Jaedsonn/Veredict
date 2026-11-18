@@ -233,6 +233,7 @@ make db-test                     # contrato + migrations num MySQL descartável 
 | API | Rotas pela fixture `client` (`httpx.AsyncClient` + `ASGITransport`), sem rede | Testes que pedem `client`: `test_health.py` (auth), `test_proxy_api.py` e `test_cors.py` (gateway), `test_notifications_api.py` (notification), `test_events_api.py` (monitoring) | `make test` | `tests (<s>)` |
 | Contrato | Rotas do gateway existem no OpenAPI do auth | `services/auth/tests/test_gateway_contract.py` | `make test s=auth` | `tests (auth)` |
 | MySQL real | Privilégios (1142/1044), DDL físico, UTC e migrations | `tests/mysql/` (marcador `mysql`) | `make db-test` | `database` |
+| Web | Funções puras de `src/lib` (vitest) | `apps/web/src/**/*.test.ts` | `npm run test:web` | `web` |
 
 `make cov` roda o mesmo comando da matriz `tests` do CI e falha abaixo de 70% (linhas e desvios) em cada serviço e na lib comum (`s=common`). Os testes `mysql` não entram na medição: rodam no job `database`. O `UPDATE` e o `DELETE` negados em `audit_events` são provados por `test_writer_can_only_append`, em `services/monitoring/tests/mysql/`. O teste de contrato roda sempre: toda rota do gateway com upstream `auth` precisa existir no OpenAPI do auth.
 
