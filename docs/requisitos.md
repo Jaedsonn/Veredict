@@ -43,7 +43,7 @@ O RF11 é contado na Sprint 1 porque os dois e-mails exigidos pelos RFs da sprin
 | RF02 | Verificação de e-mail por código | Autenticação + Notificação | [007](adr/0007-verificacao-do-email-do-usuario.md) | 4.2.1 | 1 | em andamento | #8, #13 |
 | RF03 | Login/logout com sessão JWT | Autenticação | [002](adr/0002-seguranca.md), [017](adr/0017-aplicacao-web-nextjs-com-bff.md) | 4.2.1 | 1 | em andamento | #9, #14 |
 | RF04 | MFA obrigatório (TOTP / e-mail) | Autenticação | [009](adr/0009-verificacao-em-multiplas-etapas.md) | 4.2.1 | 2 | planejado | #18, #20 |
-| RF05 | Recuperação de senha por link via e-mail | Autenticação + Notificação | [008](adr/0008-recuperacao-da-conta-por-link-via-email.md) | 4.2.1 | 2 | planejado | #19, #20 |
+| RF05 | Recuperação de senha por link via e-mail | Autenticação + Notificação | [008](adr/0008-recuperacao-da-conta-por-link-via-email.md) | 4.2.1 | 2 | em andamento | #19, #20 |
 | RF06 | Perfil do usuário (ver/editar) | Autenticação | — | 4.2.1 | 1 | em andamento | #10, #14 |
 | RF07 | Catálogo de pacotes de créditos | Pagamento | — | 4.2.2 | 2 | planejado | #21, #25 |
 | RF08 | Compra via PIX (checkout transparente) | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #22, #25 |
@@ -191,7 +191,7 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 | ID | Critério de verificação objetivo | Issues |
 |---|---|---|
 | RF04 | Primeiro login após verificar o e-mail exige configurar o TOTP; logins seguintes retornam `mfa_required: true` sem tokens até `POST /api/auth/mfa/verify` com código válido | #18, #20 |
-| RF05 | `POST /api/auth/password/forgot` sempre `202`; o link do e-mail redefine a senha uma única vez em até 30 min e encerra todas as sessões | #19, #20 |
+| RF05 | `POST /api/auth/password/forgot` sempre `202`; o link do e-mail redefine a senha uma única vez em até 30 min e encerra todas as sessões. Link malformado, expirado, usado ou substituído → `400 invalid_reset_token`; senha fraca → `422` sem gastar o link; 4.º pedido do mesmo e-mail na hora → `429`. Entregue no back-end (#19) e nas telas `/esqueci-senha` e `/redefinir-senha` (parte do #20); o MFA do #20 continua pendente | #19, #20 |
 | RF07 | `GET /api/packages` (sem login) lista os pacotes ativos ordenados por preço, com valores em centavos | #21, #25 |
 | RF08 | `POST /api/orders` com `Idempotency-Key` devolve QR Code e copia-e-cola PIX; repetir a chamada devolve o mesmo pedido | #22, #25 |
 | RF09 | Webhook com assinatura inválida → `401`; o mesmo evento entregue N vezes credita uma única vez | #23 |
@@ -280,6 +280,7 @@ Nenhum RF fora da lista RF01–RF21. Uma funcionalidade nova entra primeiro aqui
 | RF06 | #10, #14 (PR #46) | `app/(app)/perfil/`, `lib/user.ts` | `services/auth` (implementado em #10) | `users` (5.1) |
 | RF11 | #6 | — | `services/notification` | `notifications_sent` (5.4) |
 | RF18 | #4, #5, #41 (PR #49) | `lib/gateway.ts` (repassa IP e User-Agent) | `services/monitoring` (a criar); `docker/mysql/init/` | `veriditi_logs.audit_events` (5.5) |
+| RF05 (Sprint 2) | #19, #20 (só a recuperação) | `app/(public)/esqueci-senha/`, `app/(public)/redefinir-senha/`, link em `app/(public)/entrar/login-form.tsx`, headers em `next.config.ts` | `services/auth` (`use_cases/password_reset.py`), `services/notification` (`password_reset`, `password_changed`), `services/gateway` (rotas e limites) | `password_reset_tokens` (5.6), `refresh_tokens.revoke_reason` (5.3) |
 | RF21 | #11, #3 | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` (PR #44/#47) | `services/gateway` | — |
 
 As seções de banco referem-se a [`banco-de-dados.md`](banco-de-dados.md). O serviço Python de identidade e autenticação encontra-se em `services/auth`, estruturado com princípios SOLID documentados em [`solid.md`](solid.md) e transparência de IA em [`uso-de-ia.md`](uso-de-ia.md).
