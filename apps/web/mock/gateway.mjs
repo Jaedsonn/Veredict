@@ -1,5 +1,6 @@
 // Gateway MOCK para desenvolver a web sem o backend (#12: "pode começar com o gateway mockado").
-// Implementa em memória os contratos da Sprint 1 (#7, #8, #9, #10, #11) e a recuperação de senha (#19).
+// Implementa em memória os contratos da Sprint 1 (#7, #8, #9, #10, #11), a recuperação de senha (#19)
+// e o cadastro com tipo, CPF e OAB (#60). O CPF nunca vai para o console.
 // NÃO usar em produção. Uso: npm run mock:gateway -w @veriditi/web  (porta 8080)
 // Os códigos de verificação e os links de redefinição aparecem no console (no lugar do Mailpit).
 
@@ -26,7 +27,7 @@ const send = (res, status, body, headers = {}) => {
 const fail = (res, status, code, message, extra = {}, headers = {}) =>
   send(res, status, { detail: { code, message, ...extra } }, headers);
 const invalid = (res, field, msg) =>
-  send(res, 422, { detail: [{ loc: ["body", field], msg, type: "value_error" }] });
+  send(res, 422, { detail: [{ loc: ["body", ...field.split(".")], msg, type: "value_error" }] });
 
 const readBody = (req) =>
   new Promise((resolve) => {
@@ -48,7 +49,23 @@ const publicUser = (u) => ({
   status: u.status,
   email_verified_at: u.emailVerifiedAt,
   created_at: u.createdAt,
+  user_type: u.userType,
+  cpf_masked: `***.${u.cpf.slice(3, 6)}.${u.cpf.slice(6, 9)}-**`,
+  oab: u.oab,
 });
+
+// Versão curta do value object Cpf do auth; os vetores completos estão em cpf-vectors.json
+const cpfDigits = (raw) => {
+  if (typeof raw !== "string" || !/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/.test(raw.trim())) return null;
+  const d = raw.trim().replace(/[.-]/g, "");
+  if (/^(\d)\1{10}$/.test(d)) return null;
+  const dv = (s) => ([...s].reduce((t, c, i) => t + Number(c) * (s.length + 1 - i), 0) * 10) % 11 % 10;
+  const first = dv(d.slice(0, 9));
+  return d.slice(9) === `${first}${dv(d.slice(0, 9) + first)}` ? d : null;
+};
+
+const OAB_UFS = "AC AL AM AP BA CE DF ES GO MA MG MS MT PA PB PE PI PR RJ RN RO RR RS SC SE SP TO".split(" ");
+const OAB_KINDS = ["principal", "suplementar", "transitoria"];
 
 const newCode = (email) => {
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
@@ -88,7 +105,28 @@ const routes = {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return invalid(res, "email", "E-mail inválido.");
     const pw = passwordProblem(b.password);
     if (pw) return invalid(res, "password", pw);
-    if (users.has(email)) return fail(res, 409, "email_already_registered", "E-mail já cadastrado.");
+    if (!["common", "lawyer"].includes(b.user_type)) return invalid(res, "user_type", "Escolha o tipo de conta.");
+    const cpf = cpfDigits(b.cpf);
+    if (!cpf) return invalid(res, "cpf", "CPF inválido.");
+    let oab = null;
+    if (b.user_type === "common" && b.oab != null) return invalid(res, "oab", "Só advogados informam OAB.");
+    if (b.user_type === "lawyer") {
+      if (!b.oab || typeof b.oab !== "object") return invalid(res, "oab", "Informe a inscrição na OAB.");
+      const number = String(b.oab.number ?? "").trim();
+      const uf = String(b.oab.uf ?? "").trim().toUpperCase();
+      const kind = String(b.oab.kind ?? "").trim().toLowerCase();
+      if (!/^\d{1,6}$/.test(number) || Number(number) === 0)
+        return invalid(res, "oab.number", "Informe o número da OAB com até 6 dígitos.");
+      if (!OAB_UFS.includes(uf)) return invalid(res, "oab.uf", "Escolha a UF da seccional.");
+      if (!OAB_KINDS.includes(kind)) return invalid(res, "oab.kind", "Escolha o tipo de inscrição.");
+      oab = { number: String(Number(number)), uf, kind };
+    }
+    const all = [...users.values()];
+    if (users.has(email)) return fail(res, 409, "email_already_registered", "E-mail já cadastrado.", { field: "email" });
+    if (all.some((u) => u.cpf === cpf))
+      return fail(res, 409, "cpf_already_registered", "Este CPF já está cadastrado.", { field: "cpf" });
+    if (oab && all.some((u) => u.oab?.uf === oab.uf && u.oab?.number === oab.number))
+      return fail(res, 409, "oab_already_registered", "Esta inscrição na OAB já está cadastrada.", { field: "oab" });
     const user = {
       id: nextId++,
       name,
@@ -97,10 +135,13 @@ const routes = {
       status: "pending_verification",
       emailVerifiedAt: null,
       createdAt: new Date().toISOString(),
+      userType: b.user_type,
+      cpf,
+      oab,
     };
     users.set(email, user);
     newCode(email);
-    send(res, 201, { id: user.id, email, status: user.status });
+    send(res, 201, { id: user.id, email, status: user.status, user_type: user.userType });
   },
 
   "POST /api/auth/verify-email": async (_req, res, b) => {
