@@ -2,11 +2,12 @@
 
 import ipaddress
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from ipaddress import IPv4Address, IPv6Address
 
-from auth_service.models import RevokeReason, UserStatus, VerificationPurpose
+from auth_service.domain.oab import Oab
+from auth_service.models import RevokeReason, UserStatus, UserType, VerificationPurpose
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,10 @@ class UserEntity:
     email_verified_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    user_type: UserType
+    # Cifrado (ADR-024); só o perfil decifra, e para mascarar
+    cpf_enc: bytes = field(repr=False)
+    oab: Oab | None
 
 
 @dataclass(slots=True)

@@ -3,6 +3,7 @@
 import enum
 import re
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -100,6 +101,61 @@ class HashHex(TypeDecorator[str]):
         if not _HEX64.match(normalized):
             raise ValueError("HashHex espera 64 caracteres hexadecimais (SHA-256)")
         return normalized
+
+
+class _UnhexOnMySql(FunctionElement[bytes]):
+    type = sa.LargeBinary()
+    inherit_cache = True
+    name = "unhex_on_mysql"
+
+
+@compiles(_UnhexOnMySql, "mysql")
+def _unhex_mysql(element: _UnhexOnMySql, compiler: SQLCompiler, **kw: Any) -> str:
+    return f"UNHEX({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(_UnhexOnMySql)
+def _unhex_default(element: _UnhexOnMySql, compiler: SQLCompiler, **kw: Any) -> str:
+    return compiler.process(element.clauses, **kw)
+
+
+class VarBinary(TypeDecorator[bytes]):
+    """VARBINARY(n); no MySQL o valor viaja em hex e o UNHEX volta aos bytes
+
+    O aiomysql 0.3.2 quebra ao escapar bytes com o PyMySQL 1.2 (PyMySQL#1274); hex é texto
+    """
+
+    impl = sa.LargeBinary
+    cache_ok = True
+
+    def __init__(self, length: int) -> None:
+        super().__init__(length)
+        self.length = length
+
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
+        if dialect.name == "mysql":
+            return dialect.type_descriptor(mysql.VARBINARY(self.length))
+        return dialect.type_descriptor(sa.LargeBinary(self.length))
+
+    def bind_expression(self, bindvalue: Any) -> Any:
+        return _UnhexOnMySql(bindvalue)
+
+    def process_bind_param(self, value: bytes | None, dialect: Dialect) -> bytes | str | None:
+        if value is None:
+            return None
+        if len(value) > self.length:
+            raise ValueError(f"VarBinary aceita até {self.length} bytes")
+        return value.hex() if dialect.name == "mysql" else value
+
+    def bind_processor(self, dialect: Dialect) -> Callable[[Any], Any]:
+        # Sem o processor do impl: o Binary() do DBAPI recusaria o hex (str) do MySQL
+        def process(value: Any) -> Any:
+            return self.process_bind_param(value, dialect)
+
+        return process
+
+    def process_result_value(self, value: bytes | None, dialect: Dialect) -> bytes | None:
+        return bytes(value) if value is not None else None
 
 
 class UUIDStr(TypeDecorator[uuid.UUID]):

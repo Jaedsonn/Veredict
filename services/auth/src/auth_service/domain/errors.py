@@ -11,7 +11,11 @@ class DomainError(Exception):
         self.field = field
 
 
-class EmailAlreadyRegisteredError(DomainError):
+class AlreadyRegisteredError(DomainError):
+    """Dado único já cadastrado (`409` com `code` por campo); a #61 troca por resposta uniforme"""
+
+
+class EmailAlreadyRegisteredError(AlreadyRegisteredError):
     """E-mail já cadastrado na base (`409 Conflict`)"""
 
     def __init__(self, email: str) -> None:
@@ -21,6 +25,28 @@ class EmailAlreadyRegisteredError(DomainError):
             field="email",
         )
         self.email = email
+
+
+class CpfAlreadyRegisteredError(AlreadyRegisteredError):
+    """CPF já cadastrado (`409 Conflict`); nunca carrega o CPF"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="cpf_already_registered",
+            message="Este CPF já está cadastrado.",
+            field="cpf",
+        )
+
+
+class OabAlreadyRegisteredError(AlreadyRegisteredError):
+    """Inscrição na OAB (UF e número) já cadastrada (`409 Conflict`)"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="oab_already_registered",
+            message="Esta inscrição na OAB já está cadastrada.",
+            field="oab",
+        )
 
 
 class InvalidFieldError(DomainError):

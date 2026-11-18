@@ -1,7 +1,10 @@
 """Adaptadores de repositório em SQLAlchemy assíncrono"""
 
+import re
 import uuid
+from collections.abc import Callable
 from datetime import datetime
+from typing import Final
 
 from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -14,10 +17,14 @@ from auth_service.domain.entities import (
     VerificationCodeEntity,
 )
 from auth_service.domain.errors import (
+    AlreadyRegisteredError,
+    CpfAlreadyRegisteredError,
     EmailAlreadyRegisteredError,
+    OabAlreadyRegisteredError,
     UserNotFoundError,
     VerificationCodeExpiredError,
 )
+from auth_service.domain.oab import Oab
 from auth_service.models import (
     EmailVerificationCode,
     PasswordResetToken,
@@ -25,8 +32,39 @@ from auth_service.models import (
     RevokeReason,
     User,
     UserStatus,
+    UserType,
     VerificationPurpose,
 )
+
+# Único lugar que traduz UNIQUE violado em erro de domínio por campo (a #61 muda só aqui)
+_DUPLICATE_ERRORS: Final[dict[str, Callable[[str], AlreadyRegisteredError]]] = {
+    "uq_users_email": EmailAlreadyRegisteredError,
+    "uq_users_cpf_hmac": lambda _email: CpfAlreadyRegisteredError(),
+    "uq_users_oab_uf_oab_number": lambda _email: OabAlreadyRegisteredError(),
+}
+# O MySQL (1062) nomeia a constraint; o SQLite dos testes lista as colunas
+_MYSQL_DUPLICATE_KEY: Final = re.compile(r"for key '(?:[^'.]+\.)?([^']+)'")
+_SQLITE_UNIQUE_COLUMNS: Final = re.compile(r"UNIQUE constraint failed: (.+)")
+_SQLITE_UNIQUES: Final = {
+    "users.email": "uq_users_email",
+    "users.cpf_hmac": "uq_users_cpf_hmac",
+    "users.oab_uf, users.oab_number": "uq_users_oab_uf_oab_number",
+}
+
+
+def _violated_unique(exc: IntegrityError) -> str | None:
+    message = str(exc.orig)
+    if match := _MYSQL_DUPLICATE_KEY.search(message):
+        return match.group(1)
+    if match := _SQLITE_UNIQUE_COLUMNS.search(message):
+        return _SQLITE_UNIQUES.get(match.group(1).strip())
+    return None
+
+
+def _to_oab(model: User) -> Oab | None:
+    if model.oab_number is None or model.oab_uf is None or model.oab_kind is None:
+        return None
+    return Oab(number=model.oab_number, uf=model.oab_uf, kind=model.oab_kind)
 
 
 def _to_user_entity(model: User) -> UserEntity:
@@ -39,6 +77,9 @@ def _to_user_entity(model: User) -> UserEntity:
         email_verified_at=model.email_verified_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
+        user_type=model.user_type,
+        cpf_enc=model.cpf_enc,
+        oab=_to_oab(model),
     )
 
 
@@ -94,6 +135,10 @@ class SqlAlchemyUserRepository:
         email: str,
         name: str,
         password_hash: str,
+        user_type: UserType,
+        cpf_enc: bytes,
+        cpf_hmac: str,
+        oab: Oab | None,
         now: datetime,
         commit: bool = True,
     ) -> UserEntity:
@@ -103,6 +148,12 @@ class SqlAlchemyUserRepository:
             password_hash=password_hash,
             status=UserStatus.PENDING_VERIFICATION,
             email_verified_at=None,
+            user_type=user_type,
+            cpf_enc=cpf_enc,
+            cpf_hmac=cpf_hmac,
+            oab_number=oab.number if oab else None,
+            oab_uf=oab.uf if oab else None,
+            oab_kind=oab.kind if oab else None,
             created_at=now,
             updated_at=now,
         )
@@ -115,7 +166,11 @@ class SqlAlchemyUserRepository:
                 await self._session.flush()
         except IntegrityError as exc:
             await self._session.rollback()
-            raise EmailAlreadyRegisteredError(email) from exc
+            make_error = _DUPLICATE_ERRORS.get(_violated_unique(exc) or "")
+            if make_error is None:
+                raise
+            # from None: a mensagem do driver repete o valor duplicado
+            raise make_error(email) from None
         return _to_user_entity(user)
 
     async def get_by_id(self, user_id: int) -> UserEntity | None:

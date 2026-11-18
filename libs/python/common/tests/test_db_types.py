@@ -17,6 +17,7 @@ from veriditi_common.db_types import (
     UTCDateTime,
     UtcNow,
     UUIDStr,
+    VarBinary,
     ascii_string,
     str_enum,
     utcnow,
@@ -40,6 +41,7 @@ things = sa.Table(
     sa.Column("ref", UUIDStr(), nullable=True),
     sa.Column("digest", HashHex(), nullable=True),
     sa.Column("key", ascii_string(128), nullable=True),
+    sa.Column("blob", VarBinary(8), nullable=True),
 )
 
 
@@ -114,6 +116,28 @@ async def test_hash_hex_normalizes_to_lowercase_and_rejects_invalid(db: Database
             await conn.execute(things.insert().values(digest="not-a-hash"))
 
 
+async def test_var_binary_round_trips_bytes_and_rejects_oversize(db: Database) -> None:
+    raw = b"\x00\xff'\\\x01"
+    async with db.engine.begin() as conn:
+        await conn.execute(things.insert().values(blob=raw))
+        stored = (await conn.execute(sa.select(things.c.blob))).scalar_one()
+    assert stored == raw
+
+    async with db.engine.begin() as conn:
+        with pytest.raises(StatementError, match="até 8 bytes"):
+            await conn.execute(things.insert().values(blob=b"x" * 9))
+
+
+def test_var_binary_binds_hex_with_unhex_only_on_mysql() -> None:
+    stmt = things.insert().values(blob=b"\x01\x02")
+
+    on_mysql = stmt.compile(dialect=mysql.dialect())
+    on_sqlite = stmt.compile(dialect=sqlite.dialect())
+
+    assert "UNHEX(%s)" in str(on_mysql)
+    assert "UNHEX" not in str(on_sqlite)
+
+
 def test_mysql_ddl_uses_contract_physical_types() -> None:
     ddl = str(CreateTable(things).compile(dialect=mysql.dialect()))
 
@@ -124,6 +148,7 @@ def test_mysql_ddl_uses_contract_physical_types() -> None:
     assert "ref CHAR(36) CHARACTER SET ascii COLLATE ascii_bin" in ddl
     assert "digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin" in ddl
     assert "`key` VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin" in ddl
+    assert "`blob` VARBINARY(8)" in ddl
 
 
 def test_sqlite_ddl_uses_portable_fallbacks() -> None:

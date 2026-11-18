@@ -15,7 +15,8 @@ from auth_service.domain.entities import (
     UserEntity,
     VerificationCodeEntity,
 )
-from auth_service.models import RevokeReason, VerificationPurpose
+from auth_service.domain.oab import Oab
+from auth_service.models import RevokeReason, UserType, VerificationPurpose
 
 
 @runtime_checkable
@@ -93,10 +94,14 @@ class UserRepository(Protocol):
         email: str,
         name: str,
         password_hash: str,
+        user_type: UserType,
+        cpf_enc: bytes,
+        cpf_hmac: str,
+        oab: Oab | None,
         now: datetime,
         commit: bool = True,
     ) -> UserEntity:
-        """Cria usuário `pending_verification`; levanta `EmailAlreadyRegisteredError`"""
+        """Cria usuário `pending_verification`; duplicidade vira `AlreadyRegisteredError`"""
 
     async def get_by_id(self, user_id: int) -> UserEntity | None:
         """Busca usuário pelo ID primário"""
