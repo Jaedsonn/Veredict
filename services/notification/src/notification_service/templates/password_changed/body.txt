@@ -1,0 +1,7 @@
+Olá{% if name %}, {{ name }}{% endif %}!
+
+A senha da sua conta no Veriditi foi redefinida, e todas as sessões abertas foram encerradas.
+
+Se não foi você, peça uma nova redefinição em {{ web_url }}/esqueci-senha imediatamente e avise o suporte.
+
+Equipe Veriditi

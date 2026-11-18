@@ -85,7 +85,12 @@ def test_repr_hides_recipient_and_data() -> None:
 
 
 def test_template_catalog() -> None:
-    assert {t.value for t in NotificationTemplate} == {"email_verification", "welcome"}
+    assert {t.value for t in NotificationTemplate} == {
+        "email_verification",
+        "welcome",
+        "password_reset",
+        "password_changed",
+    }
 
 
 async def test_http_notifier_posts_request() -> None:

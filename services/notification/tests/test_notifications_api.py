@@ -162,7 +162,7 @@ async def test_token_is_checked_before_the_body(
 async def test_unknown_template_lists_valid_names(
     client: AsyncClient, auth_headers: dict[str, str], db: Database
 ) -> None:
-    resp = await client.post(URL, json=_body(template="password_reset"), headers=auth_headers)
+    resp = await client.post(URL, json=_body(template="mfa_code"), headers=auth_headers)
 
     assert resp.status_code == 422
     assert resp.json() == {
@@ -170,7 +170,10 @@ async def test_unknown_template_lists_valid_names(
             {
                 "type": "unknown_template",
                 "loc": ["body", "template"],
-                "msg": "Template desconhecido. Válidos: email_verification, welcome",
+                "msg": (
+                    "Template desconhecido. Válidos: email_verification, password_changed, "
+                    "password_reset, welcome"
+                ),
             }
         ]
     }

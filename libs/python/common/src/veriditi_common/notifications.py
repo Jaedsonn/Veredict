@@ -21,6 +21,8 @@ class NotificationTemplate(StrEnum):
 
     EMAIL_VERIFICATION = "email_verification"
     WELCOME = "welcome"
+    PASSWORD_RESET = "password_reset"
+    PASSWORD_CHANGED = "password_changed"
 
 
 class NotificationRequest(BaseModel):

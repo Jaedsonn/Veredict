@@ -3,12 +3,20 @@ from typing import Any
 import pytest
 from pydantic import JsonValue
 
-from notification_service.catalog import EmailVerificationData, WelcomeData, build_registry
+from notification_service.catalog import (
+    EmailVerificationData,
+    PasswordChangedData,
+    PasswordResetData,
+    WelcomeData,
+    build_registry,
+)
 from notification_service.domain import InvalidTemplateDataError, UnknownTemplateError
 from notification_service.registry import TemplateRegistry, TemplateSpec
 from veriditi_common.notifications import NotificationTemplate
 
 VALID: dict[str, JsonValue] = {"name": "João", "code": "042137", "expires_in_minutes": 15}
+TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE"
+RESET: dict[str, JsonValue] = {"name": "João", "token": TOKEN, "expires_in_minutes": 30}
 
 
 def _errors(template: str, data: dict[str, JsonValue]) -> list[dict[str, Any]]:
@@ -20,16 +28,21 @@ def _errors(template: str, data: dict[str, JsonValue]) -> list[dict[str, Any]]:
 def test_names_are_sorted_and_cover_the_producer_catalog() -> None:
     names = build_registry().names
 
-    assert names == ("email_verification", "welcome")
+    assert names == ("email_verification", "password_changed", "password_reset", "welcome")
     assert set(names) >= {template.value for template in NotificationTemplate}
 
 
 def test_unknown_template_lists_valid_names() -> None:
     with pytest.raises(UnknownTemplateError) as exc:
-        build_registry().parse("password_reset", {})
+        build_registry().parse("mfa_code", {})
 
-    assert exc.value.template == "password_reset"
-    assert exc.value.valid == ("email_verification", "welcome")
+    assert exc.value.template == "mfa_code"
+    assert exc.value.valid == (
+        "email_verification",
+        "password_changed",
+        "password_reset",
+        "welcome",
+    )
 
 
 def test_duplicate_name_is_rejected() -> None:
@@ -148,3 +161,46 @@ def test_errors_never_carry_input_or_context() -> None:
     assert errors
     assert all(set(error) == {"type", "loc", "msg"} for error in errors)
     assert "999999x" not in repr(errors)
+
+
+def test_valid_password_reset_data() -> None:
+    data = build_registry().parse("password_reset", RESET)
+
+    assert data == PasswordResetData(name="João", token=TOKEN, expires_in_minutes=30)
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        TOKEN[:-1],
+        TOKEN + "a",
+        TOKEN[:-1] + "=",
+        TOKEN[:-1] + "/",
+        TOKEN[:-1] + "+",
+        TOKEN[:-1] + "\n",
+    ],
+    ids=["short", "long", "padding", "slash", "plus", "newline"],
+)
+def test_reset_token_needs_43_base64url_chars(token: str) -> None:
+    [error] = _errors("password_reset", {**RESET, "token": token})
+
+    assert (error["type"], error["loc"]) == ("string_pattern_mismatch", ("token",))
+    assert TOKEN[:20] not in repr(error)
+
+
+@pytest.mark.parametrize("field", ["name", "token", "expires_in_minutes"])
+def test_password_reset_requires_each_field(field: str) -> None:
+    data = {key: value for key, value in RESET.items() if key != field}
+
+    assert _errors("password_reset", data) == [
+        {"type": "missing", "loc": (field,), "msg": "Field required"}
+    ]
+
+
+def test_password_changed_takes_only_the_name() -> None:
+    registry = build_registry()
+
+    assert registry.parse("password_changed", {"name": "Ana"}) == PasswordChangedData(name="Ana")
+    assert [e["type"] for e in _errors("password_changed", {"name": "Ana", "token": TOKEN})] == [
+        "extra_forbidden"
+    ]

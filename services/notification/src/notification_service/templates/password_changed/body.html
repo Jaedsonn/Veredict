@@ -1,0 +1,7 @@
+{% extends "_layout.html" %}
+{% block title %}Sua senha do Veriditi foi alterada{% endblock %}
+{% block content %}
+<p style="margin:0 0 16px;font-size:16px;">Olá{% if name %}, {{ name }}{% endif %}!</p>
+<p style="margin:0 0 16px;font-size:16px;">A senha da sua conta no Veriditi foi redefinida, e todas as sessões abertas foram encerradas.</p>
+<p style="margin:0;font-size:14px;"><strong>Se não foi você</strong>, peça uma nova redefinição na página <a href="{{ web_url }}/esqueci-senha" style="color:#2563eb;">Esqueci minha senha</a> imediatamente e avise o suporte.</p>
+{% endblock %}

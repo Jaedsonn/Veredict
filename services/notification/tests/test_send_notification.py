@@ -162,7 +162,7 @@ async def test_unknown_template_raises_before_reserving(
     harness: Harness, make_request: Any
 ) -> None:
     with pytest.raises(UnknownTemplateError):
-        await harness.use_case.execute(make_request(template="password_reset"))
+        await harness.use_case.execute(make_request(template="mfa_code"))
 
     assert harness.notifications.rows == []
 
