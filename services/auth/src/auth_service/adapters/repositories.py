@@ -118,8 +118,13 @@ class SqlAlchemyUserRepository:
             raise EmailAlreadyRegisteredError(email) from exc
         return _to_user_entity(user)
 
-    async def get_by_id(self, user_id: int) -> UserEntity | None:
-        user = await self._session.get(User, user_id)
+    async def get_by_id(self, user_id: int, *, for_update: bool = False) -> UserEntity | None:
+        if not for_update:
+            user = await self._session.get(User, user_id)
+            return _to_user_entity(user) if user is not None else None
+        # Leitura travada é leitura atual: populate_existing troca o que o mapa de identidade tinha
+        stmt = select(User).where(User.id == user_id).with_for_update()
+        user = await self._session.scalar(stmt.execution_options(populate_existing=True))
         return _to_user_entity(user) if user is not None else None
 
     async def get_by_email(
@@ -544,7 +549,14 @@ class SqlAlchemyPasswordResetTokenRepository:
             await self._session.flush()
         return await self.get_by_hash(token_hash)
 
-    async def get_by_hash(self, token_hash: str) -> PasswordResetTokenEntity | None:
+    async def get_by_hash(
+        self,
+        token_hash: str,
+        *,
+        for_update: bool = False,
+    ) -> PasswordResetTokenEntity | None:
         stmt = select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash.lower())
+        if for_update:
+            stmt = stmt.with_for_update()
         record = await self._session.scalar(stmt.execution_options(populate_existing=True))
         return _to_reset_entity(record) if record is not None else None

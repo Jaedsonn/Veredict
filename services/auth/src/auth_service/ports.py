@@ -83,8 +83,8 @@ class UserRepository(Protocol):
     ) -> UserEntity:
         """Cria usuário `pending_verification`; levanta `EmailAlreadyRegisteredError`"""
 
-    async def get_by_id(self, user_id: int) -> UserEntity | None:
-        """Busca usuário pelo ID primário"""
+    async def get_by_id(self, user_id: int, *, for_update: bool = False) -> UserEntity | None:
+        """Busca usuário pelo ID primário (opcionalmente com `SELECT ... FOR UPDATE`)"""
 
     async def get_by_email(
         self,
@@ -256,5 +256,10 @@ class PasswordResetTokenRepository(Protocol):
     ) -> PasswordResetTokenEntity | None:
         """Marca `consumed_at` só se o token está ativo e no prazo; `None` se não consumiu"""
 
-    async def get_by_hash(self, token_hash: str) -> PasswordResetTokenEntity | None:
-        """Busca o token pelo SHA-256, consumido ou não"""
+    async def get_by_hash(
+        self,
+        token_hash: str,
+        *,
+        for_update: bool = False,
+    ) -> PasswordResetTokenEntity | None:
+        """Busca o token pelo SHA-256, consumido ou não (opcionalmente com `FOR UPDATE`)"""

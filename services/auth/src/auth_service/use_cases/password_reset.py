@@ -1,6 +1,7 @@
 """Casos de uso [S2-02]: Recuperação de senha por link enviado por e-mail (RF05, ADR-008)"""
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import NoReturn
 
 from auth_service.domain.entities import PasswordResetTokenEntity, RequestContext
@@ -53,8 +54,11 @@ class RequestPasswordReset:
         normalized_email = cmd.email.strip().lower()
         now = self._clock.now()
 
-        # Serializa pedidos concorrentes: invalidar e criar precisam ver o mesmo estado
-        user = await self._users.get_by_email(normalized_email, for_update=True)
+        # Sem lock por e-mail: FOR UPDATE num e-mail inexistente vira gap lock em uq_users_email
+        user = await self._users.get_by_email(normalized_email)
+        if user is not None and user.status == UserStatus.ACTIVE:
+            # Ordem única com o reset: usuário (PK) e depois tokens; serializa os pedidos da conta
+            user = await self._users.get_by_id(user.id, for_update=True)
         if user is None or user.status != UserStatus.ACTIVE:
             # Anti-enumeração: a resposta é igual; a auditoria guarda o motivo, nunca o e-mail
             await self._audit.record(
@@ -145,15 +149,22 @@ class ResetPassword:
 
         now = self._clock.now()
         token_hash = self._token_service.hash_token(token)
-        record = await self._reset_tokens.consume(token_hash, now=now, commit=False)
-        if record is None:
-            stored = await self._reset_tokens.get_by_hash(token_hash)
+        # Leitura sem lock só para achar o dono; quem decide é o UPDATE condicional abaixo
+        stored = await self._reset_tokens.get_by_hash(token_hash)
+        if stored is None or not _is_usable(stored, now):
             await self._fail(ctx, reason=_failure_reason(stored), stored=stored)
 
-        user = await self._users.get_by_id(record.user_id)
+        # Mesma ordem do forgot: trava o usuário por PK antes de tocar nos tokens dele
+        user = await self._users.get_by_id(stored.user_id, for_update=True)
         if user is None or user.status != UserStatus.ACTIVE:
             # Sem commit: a sessão fecha com rollback e o token continua como estava
-            await self._fail(ctx, reason="account_not_active", stored=record)
+            await self._fail(ctx, reason="account_not_active", stored=stored)
+
+        record = await self._reset_tokens.consume(token_hash, now=now, commit=False)
+        if record is None:
+            # Perdeu a corrida: a leitura travada enxerga o consumo que a outra já gravou
+            current = await self._reset_tokens.get_by_hash(token_hash, for_update=True)
+            await self._fail(ctx, reason=_failure_reason(current), stored=current)
 
         await self._users.update_password_hash(
             user.id,
@@ -215,6 +226,10 @@ class ResetPassword:
             )
         )
         raise InvalidResetTokenError()
+
+
+def _is_usable(stored: PasswordResetTokenEntity, now: datetime) -> bool:
+    return stored.consumed_at is None and stored.expires_at > now
 
 
 def _failure_reason(stored: PasswordResetTokenEntity | None) -> str:
