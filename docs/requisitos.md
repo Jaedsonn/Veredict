@@ -22,10 +22,12 @@ Entregar a **fundação** sobre a qual todo o resto se apoia: identidade (Autent
 
 | Sprint | RFs | Quantidade | % |
 |---|---|---|---|
-| **1** | RF01, RF02, RF03, RF06, RF11 (parcial), RF18, RF21 | **7 de 21** | **33%** |
-| 2 | RF04, RF05, RF07–RF10, RF11 (restante), RF12–RF17, RF19, RF20 | 14 de 21 | 67% |
+| **1** | RF01, RF02, RF03, RF05, RF06, RF11 (parcial), RF18, RF21, RF22 | **9 de 22** | **40,9%** |
+| 2 | RF04, RF07–RF10, RF11 (restante), RF12–RF17, RF19, RF20 | 13 de 22 | 59,1% |
 
 O RF11 é contado na Sprint 1 porque os dois e-mails exigidos pelos RFs da sprint (verificação e boas-vindas) são entregues nela. Os demais templates ficam para a Sprint 2 (#33). A meta da disciplina é de pelo menos 30%.
+
+Em 2026-11-18 a Sprint 1 foi ampliada: o RF05 (recuperação de senha, #19) e o RF22 (tipos de conta, #60, criado nessa data) entraram nela. Os milestones mantêm o nome original.
 
 ### Legenda de status
 
@@ -39,12 +41,12 @@ O RF11 é contado na Sprint 1 porque os dois e-mails exigidos pelos RFs da sprin
 
 | ID | Requisito | Serviço | ADR | Doc. | Sprint | Status | Issues |
 |---|---|---|---|---|---|---|---|
-| RF01 | Cadastro de conta (nome, e-mail, senha) | Autenticação | [002](adr/0002-seguranca.md) | 4.2.1 | 1 | em andamento | #7, #13 |
+| RF01 | Cadastro de conta (nome, e-mail, senha; tipo, CPF e OAB no RF22) | Autenticação | [002](adr/0002-seguranca.md) | 4.2.1 | 1 | em andamento | #7, #13 |
 | RF02 | Verificação de e-mail por código | Autenticação + Notificação | [007](adr/0007-verificacao-do-email-do-usuario.md) | 4.2.1 | 1 | em andamento | #8, #13 |
 | RF03 | Login/logout com sessão JWT | Autenticação | [002](adr/0002-seguranca.md), [017](adr/0017-aplicacao-web-nextjs-com-bff.md) | 4.2.1 | 1 | em andamento | #9, #14 |
 | RF04 | MFA obrigatório (TOTP / e-mail) | Autenticação | [009](adr/0009-verificacao-em-multiplas-etapas.md) | 4.2.1 | 2 | planejado | #18, #20 |
-| RF05 | Recuperação de senha por link via e-mail | Autenticação + Notificação | [008](adr/0008-recuperacao-da-conta-por-link-via-email.md) | 4.2.1 | 2 | em andamento | #19, #20 |
-| RF06 | Perfil do usuário (ver/editar) | Autenticação | — | 4.2.1 | 1 | em andamento | #10, #14 |
+| RF05 | Recuperação de senha por link via e-mail | Autenticação + Notificação | [008](adr/0008-recuperacao-da-conta-por-link-via-email.md) | 4.2.1 | 1 | em andamento | #19, #20 |
+| RF06 | Perfil do usuário (ver/editar; tipo, CPF mascarado e OAB no RF22) | Autenticação | — | 4.2.1 | 1 | em andamento | #10, #14 |
 | RF07 | Catálogo de pacotes de créditos | Pagamento | — | 4.2.2 | 2 | planejado | #21, #25 |
 | RF08 | Compra via PIX (checkout transparente) | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #22, #25 |
 | RF09 | Confirmação de pagamento e faturamento | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #23 |
@@ -60,8 +62,9 @@ O RF11 é contado na Sprint 1 porque os dois e-mails exigidos pelos RFs da sprin
 | RF19 | Limpeza/retenção de logs operacionais | Monitoramento | [012](adr/0012-geracao-de-logs-estruturados.md) | 4.2.6 | 2 | planejado | #35 |
 | RF20 | Consulta da trilha de auditoria | Monitoramento | [001](adr/0001-auditabilidade-registros-de-auditoria.md) | 4.2.6 | 2 | planejado | #34, #36 |
 | RF21 | API Gateway único com autenticação centralizada | Gateway | [005](adr/0005-arquitetura-baseada-em-servicos.md), [018](adr/0018-api-gateway-como-servico-fastapi.md) | 4 (item 7), 4.1 | 1 | em andamento | #11 |
+| RF22 | Tipos de conta: pessoa e advogado, com CPF e inscrição na OAB | Autenticação | [024](adr/0024-cifragem-do-cpf.md) | — | 1 | em andamento | #60 |
 
-A coluna **Doc.** indica a seção do documento "Estruturação do Veridit" que descreve o módulo.
+A coluna **Doc.** indica a seção do documento "Estruturação do Veridit" que descreve o módulo. O RF22 não está no documento: veio do dono do produto, que precisa distinguir advogados das demais pessoas.
 
 ## 3. Detalhamento dos RFs da Sprint 1
 
@@ -75,8 +78,9 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
   - E-mail normalizado (sem espaços, minúsculo) e único.
   - A conta nasce `pending_verification` e não consegue entrar até verificar o e-mail (RF02).
   - O cadastro dispara o e-mail de verificação (RF11) e o evento de auditoria `auth.user.registered` (RF18).
+  - Desde o RF22, o cadastro também exige o tipo de conta e o CPF, e o advogado informa a OAB.
 - **Critério de verificação:**
-  1. `POST /api/auth/register` com dados válidos → `201` com `status: "pending_verification"`.
+  1. `POST /api/auth/register` com dados válidos (incluindo `user_type` e `cpf`, RF22) → `201` com `status: "pending_verification"`.
   2. Repetir com o mesmo e-mail em maiúsculas → `409`.
   3. Senha `abc` → `422` com mensagem em PT-BR.
   4. Na tabela `users`, `password_hash` começa com `$argon2id$`.
@@ -119,20 +123,47 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
   6. Na web, com o cookie `vrd_access` apagado, a navegação continua (renovação pelo `proxy.ts`). Após "Sair", abrir `/perfil` leva a `/entrar?next=/perfil`.
 - **Issues:** #9 (back-end), #14 (web).
 
+### RF05 – Recuperação de senha por link via e-mail
+
+- **Descrição:** quem esqueceu a senha recebe por e-mail um link de uso único para definir outra ([ADR-008](adr/0008-recuperacao-da-conta-por-link-via-email.md)).
+- **Critério de verificação:** `POST /api/auth/password/forgot` sempre `202`; o link do e-mail redefine a senha uma única vez em até 30 min e encerra todas as sessões. Link malformado, expirado, usado ou substituído → `400 invalid_reset_token`; senha fraca → `422` sem gastar o link; 4.º pedido do mesmo e-mail na hora → `429`. Entregue no back-end (#19) e nas telas `/esqueci-senha` e `/redefinir-senha` (parte do #20); o MFA do #20 continua pendente.
+- **Issues:** #19 (back-end), #20 (web, só a recuperação).
+
 ### RF06 – Perfil do usuário
 
 - **Descrição:** a pessoa logada vê os próprios dados, edita o nome e troca a senha.
 - **Regras de negócio:**
-  - Só `name` é editável. `email` ou `status` enviados no corpo são ignorados (sem *mass assignment*).
+  - Só `name` é editável. `email`, `status`, `user_type`, `cpf` ou `oab` enviados no corpo são ignorados (sem *mass assignment*).
+  - Desde o RF22, o perfil mostra o tipo de conta, o CPF mascarado e a OAB informada no cadastro.
   - A troca de senha exige a senha atual, aplica a mesma política do RF01 e encerra as outras sessões.
   - Eventos de auditoria: `auth.profile.updated` (só os nomes dos campos) e `auth.password.changed`.
 - **Critério de verificação:**
-  1. `GET /api/me` → `200` com `id`, `name`, `email`, `status`, `email_verified_at` e `created_at`.
+  1. `GET /api/me` → `200` com `id`, `name`, `email`, `status`, `email_verified_at`, `created_at`, `user_type`, `cpf_masked` e `oab` (RF22).
   2. `PATCH /api/me` com `{"name": "X", "email": "outro@x"}` → o nome muda e o e-mail não.
   3. Senha atual errada → `400`.
   4. Depois de trocar a senha, um refresh token de outra sessão deixa de funcionar.
   5. Na web, `/perfil` mostra os dados, e salvar o nome atualiza a barra lateral.
 - **Issues:** #10 (back-end), #14 (web).
+
+### RF22 – Tipos de conta: pessoa e advogado
+
+- **Descrição:** no cadastro, a pessoa escolhe o tipo de conta, pessoa (`common`) ou advogado (`lawyer`). Toda conta informa o CPF; a de advogado informa também a inscrição na OAB (número, UF da seccional e tipo).
+- **Regras de negócio:**
+  - CPF com ou sem máscara, validado pelos dígitos verificadores; 11 dígitos repetidos são recusados. Um CPF por conta.
+  - O CPF fica cifrado (AES-256-GCM) com um índice HMAC-SHA256 para a unicidade ([ADR-024](adr/0024-cifragem-do-cpf.md)). Nunca aparece em claro no banco, nos logs, na auditoria, nas respostas nem nas mensagens de erro. Só o `/me` decifra, e devolve mascarado (`***.982.247-**`).
+  - OAB: número de 1 a 6 dígitos (zeros à esquerda não contam), uma das 27 UFs e tipo principal, suplementar ou transitória. Uma conta por UF e número. Conta comum não informa OAB.
+  - A OAB é conferida só pelo formato. Sem consulta ao CNA (#64), a interface não diz que a inscrição foi verificada.
+  - Tipo, CPF e OAB não mudam pelo perfil.
+  - O evento `auth.user.registered` leva só o `user_type`.
+- **Critério de verificação:**
+  1. `POST /api/auth/register` com `user_type: "common"` e CPF válido → `201` com `user_type`; advogado com `oab: {number, uf, kind}` → `201`.
+  2. CPF já cadastrado, com ou sem máscara → `409 cpf_already_registered`; mesma UF e número de OAB → `409 oab_already_registered`.
+  3. CPF inválido → `422` "CPF inválido."; conta comum com `oab` → `422` "Só advogados informam OAB."; advogado sem `oab` → `422` "Informe a inscrição na OAB.".
+  4. `GET /api/me` mostra `user_type`, `cpf_masked` e `oab`; `PATCH /api/me` com `cpf` ou `user_type` não muda nada.
+  5. Em `users`, `cpf_enc` é binário sem o CPF em claro e `cpf_hmac` tem 64 caracteres hex; o CPF não aparece nos logs nem em `audit_events`.
+  6. Na web, `/cadastro` pede o tipo, aplica a máscara do CPF e mostra a OAB só para advogado; `/perfil` mostra o CPF mascarado.
+- **Pendências:** o `409` por campo permite descobrir se um CPF está cadastrado (#61); backup e rotação das chaves (#62); consulta ao CNA e várias inscrições (#64).
+- **Issues:** #60.
 
 ### RF11 – Notificações por e-mail (parcial: verificação e boas-vindas)
 
@@ -191,7 +222,6 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 | ID | Critério de verificação objetivo | Issues |
 |---|---|---|
 | RF04 | Primeiro login após verificar o e-mail exige configurar o TOTP; logins seguintes retornam `mfa_required: true` sem tokens até `POST /api/auth/mfa/verify` com código válido | #18, #20 |
-| RF05 | `POST /api/auth/password/forgot` sempre `202`; o link do e-mail redefine a senha uma única vez em até 30 min e encerra todas as sessões. Link malformado, expirado, usado ou substituído → `400 invalid_reset_token`; senha fraca → `422` sem gastar o link; 4.º pedido do mesmo e-mail na hora → `429`. Entregue no back-end (#19) e nas telas `/esqueci-senha` e `/redefinir-senha` (parte do #20); o MFA do #20 continua pendente | #19, #20 |
 | RF07 | `GET /api/packages` (sem login) lista os pacotes ativos ordenados por preço, com valores em centavos | #21, #25 |
 | RF08 | `POST /api/orders` com `Idempotency-Key` devolve QR Code e copia-e-cola PIX; repetir a chamada devolve o mesmo pedido | #22, #25 |
 | RF09 | Webhook com assinatura inválida → `401`; o mesmo evento entregue N vezes credita uma única vez | #23 |
@@ -252,13 +282,13 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 |---|---|---|
 | Documentação | Este documento; ADRs e desvios; modelagem do banco; README de execução e documento SOLID | #1, #2, #41, #16 |
 | Infraestrutura | Monorepo com os 4 serviços da sprint; lib comum com logging, `X-Request-ID` e clientes de Auditoria/Notificação | #3, #4 |
-| Back-end | Monitoramento (RF18), Notificação (RF11 parcial), Autenticação (RF01, RF02, RF03, RF06), Gateway (RF21) | #5–#11 |
-| Web | Fundação BFF; telas de cadastro, verificação, login, painel e perfil | #12, #13, #14 |
+| Back-end | Monitoramento (RF18), Notificação (RF11 parcial), Autenticação (RF01, RF02, RF03, RF05, RF06, RF22), Gateway (RF21) | #5–#11, #19, #60 |
+| Web | Fundação BFF; telas de cadastro (com tipo de conta), verificação, login, painel, perfil e recuperação de senha | #12, #13, #14, #20, #60 |
 | Qualidade e entrega | Testes por serviço com cobertura ≥ 70%; sistema rodando publicamente | #15, #17 |
 
 ### Fora da Sprint 1 (reservado para a Sprint 2)
 
-- MFA obrigatório e recuperação de senha (RF04, RF05).
+- MFA obrigatório (RF04).
 - Todo o serviço de Pagamento: pacotes, PIX, webhook, carteira (RF07–RF10). O painel mostra o card "Créditos" como "em breve".
 - Captura de tela e de vídeo, e a fila de processamento (RF12–RF14). O botão "Iniciar uma gravação" fica desabilitado.
 - Armazenamento das provas no MinIO, hash e verificação pública (RF15–RF17).
@@ -268,7 +298,7 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 
 ### Fora do escopo do projeto nesta versão
 
-Nenhum RF fora da lista RF01–RF21. Uma funcionalidade nova entra primeiro aqui e numa issue, com sprint definida.
+Nenhum RF fora da lista RF01–RF22. Uma funcionalidade nova entra primeiro aqui e numa issue, com sprint definida.
 
 ## 7. Rastreabilidade (Sprint 1)
 
@@ -280,8 +310,9 @@ Nenhum RF fora da lista RF01–RF21. Uma funcionalidade nova entra primeiro aqui
 | RF06 | #10, #14 (PR #46) | `app/(app)/perfil/`, `lib/user.ts` | `services/auth` (implementado em #10) | `users` (5.1) |
 | RF11 | #6 | — | `services/notification` | `notifications_sent` (5.4) |
 | RF18 | #4, #5, #41 (PR #49) | `lib/gateway.ts` (repassa IP e User-Agent) | `services/monitoring` (a criar); `docker/mysql/init/` | `veriditi_logs.audit_events` (5.5) |
-| RF05 (Sprint 2) | #19, #20 (só a recuperação) | `app/(public)/esqueci-senha/`, `app/(public)/redefinir-senha/`, link em `app/(public)/entrar/login-form.tsx`, headers em `next.config.ts` | `services/auth` (`use_cases/password_reset.py`), `services/notification` (`password_reset`, `password_changed`), `services/gateway` (rotas e limites) | `password_reset_tokens` (5.6), `refresh_tokens.revoke_reason` (5.3) |
+| RF05 | #19, #20 (só a recuperação) | `app/(public)/esqueci-senha/`, `app/(public)/redefinir-senha/`, link em `app/(public)/entrar/login-form.tsx`, headers em `next.config.ts` | `services/auth` (`use_cases/password_reset.py`), `services/notification` (`password_reset`, `password_changed`), `services/gateway` (rotas e limites) | `password_reset_tokens` (5.6), `refresh_tokens.revoke_reason` (5.3) |
 | RF21 | #11, #3 | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` (PR #44/#47) | `services/gateway` | — |
+| RF22 | #60 | `app/(public)/cadastro/`, `app/(app)/perfil/`, `lib/validation/cpf.ts`, `lib/validation/oab.ts` | `services/auth` (`domain/cpf.py`, `domain/oab.py`, `adapters/cpf_protector.py`) | `users` (5.1: `user_type`, `cpf_enc`, `cpf_hmac`, `oab_*`) |
 
 As seções de banco referem-se a [`banco-de-dados.md`](banco-de-dados.md). O serviço Python de identidade e autenticação encontra-se em `services/auth`, estruturado com princípios SOLID documentados em [`solid.md`](solid.md) e transparência de IA em [`uso-de-ia.md`](uso-de-ia.md).
 

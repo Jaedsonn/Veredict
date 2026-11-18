@@ -5,8 +5,8 @@ O Veriditi é uma plataforma de captura e preservação de provas digitais, cons
 **Arquitetura Baseada em Serviços** ([ADR-005](docs/adr/0005-arquitetura-baseada-em-servicos.md)):
 uma web Next.js (BFF) fala com um único gateway, que valida o JWT e repassa as chamadas aos serviços de
 autenticação, notificação e monitoramento, com bancos separados por serviço no MySQL. A Sprint 1
-entrega cadastro com verificação de e-mail, login, perfil e trilha de auditoria; o restante do
-escopo está em [`docs/requisitos.md`](docs/requisitos.md).
+entrega cadastro (pessoa ou advogado, com CPF e OAB) com verificação de e-mail, login, perfil e
+trilha de auditoria; o restante do escopo está em [`docs/requisitos.md`](docs/requisitos.md).
 
 ```mermaid
 flowchart LR
@@ -76,7 +76,7 @@ Node 22+, [uv](https://docs.astral.sh/uv/), Docker com Compose.
 ## Setup
 
 ```bash
-make install   # npm install + uv sync + cria .env + par RS256 de dev (make keys)
+make install   # npm install + uv sync + cria .env + par RS256 e chaves do CPF (make keys)
 make up        # sobe mysql + migrations + serviços + web
 ```
 
@@ -90,6 +90,12 @@ O `.env.example` fica só com `JWT_PRIVATE_KEY=` e `JWT_PUBLIC_KEY=` vazios. Um
 par preenchido ali seria copiado para todo `.env` novo, o `make keys`
 responderia "já existem" e todo ambiente passaria a usar uma chave privada
 conhecida, que assina token válido para qualquer usuário.
+
+O auth também precisa de `CPF_ENCRYPTION_KEY` e `CPF_HMAC_KEY`, que cifram o CPF
+e geram o índice que impede CPF repetido ([ADR-024](docs/adr/0024-cifragem-do-cpf.md));
+**o auth não sobe sem elas**. O `make keys` preenche só as que estiverem vazias e
+nunca as troca, nem com `force=1`: com outra chave de cifra, os CPFs já gravados
+não podem mais ser lidos. Elas também ficam vazias no `.env.example`.
 
 | O quê                     | URL                                |
 | ------------------------- | ---------------------------------- |
@@ -124,10 +130,12 @@ Com `make up` rodando (web em http://localhost:3000, Mailpit em http://localhost
 http://127.0.0.1:8080):
 
 1. Abra http://localhost:3000/cadastro e crie uma conta (senha com 10+ caracteres, letra e número).
+   Escolha o tipo de conta e informe um CPF válido, como `529.982.247-25`; como advogado, informe
+   também o número, a UF e o tipo da inscrição na OAB.
 2. Abra o Mailpit em http://localhost:8025 e copie o código de 6 dígitos do e-mail de verificação.
 3. Informe o código em http://localhost:3000/verificar-email.
 4. Entre em http://localhost:3000/entrar com o e-mail e a senha.
-5. Em http://localhost:3000/perfil, edite o nome e salve.
+5. Em http://localhost:3000/perfil, confira o tipo de conta e o CPF mascarado, edite o nome e salve.
 6. Num terminal, rode `make audit-tail`: aparecem `auth.user.registered`, `notification.email.sent`
    e os demais eventos do fluxo (Ctrl-C para sair; `n=30` mostra mais histórico).
 
@@ -155,6 +163,8 @@ comentários completos e as regras de formato. Esta tabela é o índice:
 | `JWT_AUDIENCE` | Claim `aud`, igual no auth e no gateway | [API Gateway](#api-gateway) |
 | `TRUSTED_PROXIES` | Proxies cujo `X-Forwarded-For` o gateway aceita | [API Gateway](#api-gateway) |
 | `VERIFICATION_PEPPER` | Pepper do HMAC dos códigos de verificação (mínimo de 16 caracteres) | [`docs/solid.md`](docs/solid.md) |
+| `CPF_ENCRYPTION_KEY` | Chave AES-256-GCM do CPF (base64 de 32 bytes), gerada por `make keys` e nunca trocada | [Setup](#setup) |
+| `CPF_HMAC_KEY` | Chave do índice HMAC do CPF (base64 de 32 bytes, diferente da anterior), gerada por `make keys` | [Setup](#setup) |
 | `SMTP_HOST` | Servidor SMTP do notification fora do Docker | [Notificações](#notificações-por-e-mail) |
 | `SMTP_PORT` | Porta SMTP fora do Docker | [Notificações](#notificações-por-e-mail) |
 | `SMTP_USER` | Usuário SMTP, vazio no Mailpit | [Notificações](#notificações-por-e-mail) |
@@ -188,6 +198,10 @@ vazio**. Ao atualizar para esta versão, ou ao mudar o init:
    make reset     # docker compose down -v --remove-orphans
    make up
    ```
+
+Ao atualizar para a versão com CPF (#60), rode `make keys`, `make reset` e `make up`:
+a migration `0006` do auth recusa rodar com usuários sem CPF em `users`, e não há
+ambiente implantado com dados a preservar (#17).
 
 `make down`, `make reset` e `make logs` funcionam mesmo com o `.env` antigo
 (o `.env.example` preenche só as senhas que faltam), para dar para derrubar o
