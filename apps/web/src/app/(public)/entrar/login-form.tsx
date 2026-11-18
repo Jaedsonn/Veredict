@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useActionState } from "react";
 
@@ -38,9 +39,14 @@ export function LoginForm() {
         <Input name="email" type="email" autoComplete="username" defaultValue={email} required />
       </FormField>
 
-      <FormField id="password" label="Senha:" error={errors.password}>
-        <PasswordInput name="password" autoComplete="current-password" required />
-      </FormField>
+      <div className="flex flex-col gap-2">
+        <FormField id="password" label="Senha:" error={errors.password}>
+          <PasswordInput name="password" autoComplete="current-password" required />
+        </FormField>
+        <Link href="/esqueci-senha" className="self-end text-sm font-bold text-brand underline">
+          Esqueci minha senha
+        </Link>
+      </div>
 
       <Button type="submit" pending={pending} fullWidth>
         Entrar

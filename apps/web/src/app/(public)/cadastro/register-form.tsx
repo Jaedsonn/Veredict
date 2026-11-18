@@ -29,8 +29,9 @@ export function RegisterForm() {
             Entrar
           </Link>{" "}
           ou{" "}
-          {/* Recuperação de senha chega na Sprint 2 (#19/#20). */}
-          <span title="Disponível em breve">Recuperar senha (em breve)</span>
+          <Link href="/esqueci-senha" className="font-bold underline">
+            Recuperar senha
+          </Link>
         </Alert>
       ) : (
         state.message && <Alert tone="error">{state.message}</Alert>

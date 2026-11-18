@@ -1,7 +1,7 @@
 // Gateway MOCK para desenvolver a web sem o backend (#12: "pode começar com o gateway mockado").
-// Implementa em memória os contratos da Sprint 1 (#7, #8, #9, #10, #11).
+// Implementa em memória os contratos da Sprint 1 (#7, #8, #9, #10, #11) e a recuperação de senha (#19).
 // NÃO usar em produção. Uso: npm run mock:gateway -w @veriditi/web  (porta 8080)
-// Os códigos de verificação aparecem no console (no lugar do Mailpit).
+// Os códigos de verificação e os links de redefinição aparecem no console (no lugar do Mailpit).
 
 import { createServer } from "node:http";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
@@ -14,6 +14,9 @@ const codes = new Map(); // email -> { code, expiresAt, attempts }
 const access = new Map(); // token -> { userId, exp }
 const refresh = new Map(); // token -> { userId, family, revoked, exp }
 const loginHits = new Map(); // ip|email -> timestamps
+const resetTokens = new Map(); // token -> { email, expiresAt, used }
+const forgotHits = new Map(); // email -> timestamps
+const WEB_URL = process.env.MOCK_WEB_URL ?? "http://localhost:3000";
 let nextId = 1;
 
 const send = (res, status, body, headers = {}) => {
@@ -144,6 +147,42 @@ const routes = {
     if (user.status === "pending_verification")
       return send(res, 403, { code: "email_not_verified", detail: "E-mail não verificado." });
     send(res, 200, issueTokens(user.id));
+  },
+
+  "POST /api/auth/password/forgot": async (_req, res, b) => {
+    const email = String(b.email ?? "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return invalid(res, "email", "Informe um e-mail válido.");
+    // 3 por hora por e-mail, como o gateway real (#19).
+    const hits = (forgotHits.get(email) ?? []).filter((t) => Date.now() - t < 3_600_000);
+    if (hits.length >= 3) {
+      const wait = Math.ceil((3_600_000 - (Date.now() - hits[0])) / 1000);
+      return send(res, 429, { detail: "Muitas tentativas." }, { "Retry-After": String(wait) });
+    }
+    forgotHits.set(email, [...hits, Date.now()]);
+    // 202 sempre: só conta ativa recebe link, e um pedido novo invalida os anteriores.
+    if (users.get(email)?.status === "active") {
+      for (const entry of resetTokens.values()) if (entry.email === email) entry.used = true;
+      const token = randomBytes(32).toString("base64url");
+      resetTokens.set(token, { email, expiresAt: Date.now() + 30 * 60_000, used: false });
+      console.log(`\n[mock] link de redefinição para ${email}: ${WEB_URL}/redefinir-senha?token=${token}\n`);
+    }
+    send(res, 202, { status: "accepted" });
+  },
+
+  "POST /api/auth/password/reset": async (_req, res, b) => {
+    const entry = resetTokens.get(String(b.token ?? ""));
+    const pw = passwordProblem(b.new_password);
+    if (pw) return invalid(res, "new_password", pw);
+    if (!entry || entry.used || entry.expiresAt < Date.now() || users.get(entry.email)?.status !== "active")
+      return fail(res, 400, "invalid_reset_token", "Link inválido ou expirado. Solicite um novo.");
+    const user = users.get(entry.email);
+    entry.used = true;
+    user.password = b.new_password;
+    // Todas as sessões do usuário caem, como no auth.
+    for (const r of refresh.values()) if (r.userId === user.id) r.revoked = true;
+    for (const [at, a] of access) if (a.userId === user.id) access.delete(at);
+    console.log(`[mock] senha de ${user.email} redefinida; sessões revogadas`);
+    send(res, 204);
   },
 
   "POST /api/auth/refresh": async (_req, res, b) => {
