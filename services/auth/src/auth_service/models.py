@@ -1,4 +1,4 @@
-"""Modelos ORM do serviço `auth` (`users`, `email_verification_codes`, `refresh_tokens`)"""
+"""Modelos ORM do serviço `auth` (`users`, códigos, refresh e tokens de redefinição de senha)"""
 
 import enum
 import uuid
@@ -48,6 +48,8 @@ class RevokeReason(enum.StrEnum):
     ROTATED = "rotated"
     LOGOUT = "logout"
     REUSE_DETECTED = "reuse_detected"
+    # Só no fim: acrescentar ao ENUM do MySQL é ALTER instantâneo
+    PASSWORD_RESET = "password_reset"
 
 
 class User(Base):
@@ -147,6 +149,31 @@ class RefreshToken(Base):
     )
     created_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        default=utcnow,
+        server_default=UtcNow(),
+        nullable=False,
+    )
+
+
+class PasswordResetToken(Base):
+    """Link de redefinição de senha: só o SHA-256 do token, de uso único (§5.6)"""
+
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (Index(None, "user_id", "consumed_at"),)
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger(),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(HashHex(), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    # Uso bem-sucedido ou substituição por um pedido novo
+    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    requested_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         default=utcnow,

@@ -1,4 +1,4 @@
-"""Migrations 0001..0004 do auth contra MySQL real: DDL físico, GRANT sem DELETE e REVOKE"""
+"""Migrations do auth contra MySQL real: DDL físico, GRANTs, ENUMs e REVOKE no downgrade"""
 
 import os
 from collections.abc import Iterator
@@ -87,4 +87,66 @@ def test_downgrade_revokes_table_grant(migrated: Config) -> None:
     command.downgrade(migrated, "base")
 
     assert "`users`" not in _auth_grants()
+    command.upgrade(migrated, "head")
+
+
+def test_password_reset_tokens_has_contract_ddl(migrated: Config) -> None:
+    with _connect("auth_svc", AUTH_PASSWORD) as conn, conn.cursor() as cur:
+        cur.execute("SHOW CREATE TABLE password_reset_tokens")
+        ddl = cur.fetchone()[1]  # type: ignore[index]
+
+    assert "`token_hash` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL" in ddl
+    assert "`expires_at` datetime(6) NOT NULL" in ddl
+    assert "`consumed_at` datetime(6) DEFAULT NULL" in ddl
+    assert "`requested_ip` varchar(45) DEFAULT NULL" in ddl
+    assert "UNIQUE KEY `uq_password_reset_tokens_token_hash` (`token_hash`)" in ddl
+    assert "KEY `ix_password_reset_tokens_user_id_consumed_at` (`user_id`,`consumed_at`)" in ddl
+    assert "CONSTRAINT `fk_password_reset_tokens_user_id_users` FOREIGN KEY (`user_id`)" in ddl
+
+
+def test_runtime_user_can_purge_reset_tokens(migrated: Config) -> None:
+    with _connect("auth_svc", AUTH_PASSWORD) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO users (email, name, password_hash) "
+            "VALUES ('rt@example.com', 'Rt', '$argon2id$stub')"
+        )
+        user_id = cur.lastrowid
+        cur.execute(
+            "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) "
+            "VALUES (%s, %s, UTC_TIMESTAMP(6))",
+            (user_id, "a" * 64),
+        )
+        cur.execute("UPDATE password_reset_tokens SET consumed_at = UTC_TIMESTAMP(6)")
+        cur.execute("DELETE FROM password_reset_tokens")
+        cur.execute("SELECT COUNT(*) FROM password_reset_tokens")
+        assert cur.fetchone() == (0,)
+
+
+def test_revoke_reason_accepts_password_reset(migrated: Config) -> None:
+    with _connect("auth_svc", AUTH_PASSWORD) as conn, conn.cursor() as cur:
+        cur.execute("SHOW COLUMNS FROM refresh_tokens LIKE 'revoke_reason'")
+        column_type = cur.fetchone()[1]  # type: ignore[index]
+
+    assert column_type == "enum('rotated','logout','reuse_detected','password_reset')"
+
+
+def test_downgrade_of_0005_keeps_revoked_sessions(migrated: Config) -> None:
+    with _connect("auth_svc", AUTH_PASSWORD) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO users (email, name, password_hash) "
+            "VALUES ('dg@example.com', 'Dg', '$argon2id$stub')"
+        )
+        cur.execute(
+            "INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at, "
+            "revoked_at, revoke_reason) VALUES (%s, %s, %s, UTC_TIMESTAMP(6), "
+            "UTC_TIMESTAMP(6), 'password_reset')",
+            (cur.lastrowid, "b" * 64, "0" * 8 + "-0000-0000-0000-" + "0" * 12),
+        )
+
+    command.downgrade(migrated, "0004")
+
+    with _connect("auth_svc", AUTH_PASSWORD) as conn, conn.cursor() as cur:
+        cur.execute("SELECT revoke_reason FROM refresh_tokens")
+        assert cur.fetchone() == ("logout",)
+    assert "`password_reset_tokens`" not in _auth_grants()
     command.upgrade(migrated, "head")
