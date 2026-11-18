@@ -27,6 +27,7 @@ from auth_service.domain.reset_token import ResetTokenService
 from auth_service.domain.verification_code import VerificationCodeService
 from auth_service.ports import (
     Clock,
+    CpfProtector,
     PasswordHasher,
     PasswordResetTokenRepository,
     RefreshTokenRepository,
@@ -100,6 +101,11 @@ def get_token_issuer(request: Request) -> TokenIssuer:
     return issuer
 
 
+def get_cpf_protector(request: Request) -> CpfProtector:
+    protector: CpfProtector = request.app.state.cpf_protector
+    return protector
+
+
 def get_request_context(request: Request) -> RequestContext:
     raw_ua = request.headers.get("user-agent")
     user_agent = raw_ua.strip()[:255] if raw_ua and raw_ua.strip() else None
@@ -118,6 +124,7 @@ PasswordPolicyDep = Annotated[PasswordPolicy, Depends(get_password_policy)]
 CodeServiceDep = Annotated[VerificationCodeService, Depends(get_verification_code_service)]
 ResetTokenServiceDep = Annotated[ResetTokenService, Depends(get_reset_token_service)]
 TokenIssuerDep = Annotated[TokenIssuer, Depends(get_token_issuer)]
+CpfProtectorDep = Annotated[CpfProtector, Depends(get_cpf_protector)]
 RequestContextDep = Annotated[RequestContext, Depends(get_request_context)]
 
 
@@ -332,6 +339,7 @@ __all__ = [
     "ClockDep",
     "CodeRepoDep",
     "CodeServiceDep",
+    "CpfProtectorDep",
     "CurrentUserDep",
     "NotifierDep",
     "PasswordHasherDep",
@@ -349,6 +357,7 @@ __all__ = [
     "get_authenticate_user_use_case",
     "get_change_password_use_case",
     "get_clock",
+    "get_cpf_protector",
     "get_current_user",
     "get_logout_user_use_case",
     "get_notifier",

@@ -1,5 +1,7 @@
 """Fixtures de teste para o `auth-service` (SQLite em memória + adaptadores determinísticos)."""
 
+import base64
+import os
 from collections.abc import AsyncIterator
 
 import pytest
@@ -21,6 +23,8 @@ from veriditi_common.notifications import InMemoryNotifier
 TOKEN = "test-internal-token-0123456789"
 TEST_INTERNAL_TOKEN = TOKEN
 TEST_PEPPER = "test-verification-pepper-0123456789"
+TEST_CPF_ENCRYPTION_KEY = base64.b64encode(os.urandom(32)).decode()
+TEST_CPF_HMAC_KEY = base64.b64encode(os.urandom(32)).decode()
 
 
 @pytest.fixture(scope="session")
@@ -60,6 +64,8 @@ def settings(rsa_keypair: tuple[str, str]) -> Settings:
         jwt_public_key=pub_pem,
         access_token_ttl_seconds=900,
         refresh_token_ttl_days=7,
+        cpf_encryption_key=SecretStr(TEST_CPF_ENCRYPTION_KEY),
+        cpf_hmac_key=SecretStr(TEST_CPF_HMAC_KEY),
     )
 
 

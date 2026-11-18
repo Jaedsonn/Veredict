@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from auth_service.adapters.clock import SystemClock
+from auth_service.adapters.cpf_protector import AesGcmCpfProtector
 from auth_service.adapters.password_hasher import Argon2PasswordHasher
 from auth_service.adapters.token_issuer import PyJwtTokenIssuer
 from auth_service.api.auth import router as auth_router
@@ -31,7 +32,7 @@ from auth_service.domain.errors import (
     WeakPasswordError,
 )
 from auth_service.domain.password_policy import PasswordPolicy
-from auth_service.ports import Clock, PasswordHasher, TokenIssuer
+from auth_service.ports import Clock, CpfProtector, PasswordHasher, TokenIssuer
 from veriditi_common.audit import AuditLogger, HttpAuditLogger
 from veriditi_common.db import Database
 from veriditi_common.errors import install_error_handlers
@@ -125,6 +126,11 @@ def _register_exception_handlers(app: FastAPI) -> None:
         )
 
 
+def _build_cpf_protector(settings: Settings) -> CpfProtector:
+    encryption_key, hmac_key = settings.resolved_cpf_keys()
+    return AesGcmCpfProtector(encryption_key=encryption_key, hmac_key=hmac_key)
+
+
 def create_app(
     settings: Settings | None = None,
     db: Database | None = None,
@@ -134,6 +140,7 @@ def create_app(
     clock: Clock | None = None,
     password_hasher: PasswordHasher | None = None,
     token_issuer: TokenIssuer | None = None,
+    cpf_protector: CpfProtector | None = None,
 ) -> FastAPI:
     """App factory do serviço de Autenticação (`auth-service`)"""
     resolved_settings = settings or get_settings()
@@ -150,6 +157,7 @@ def create_app(
         access_ttl_seconds=resolved_settings.access_token_ttl_seconds,
         refresh_ttl_days=resolved_settings.refresh_token_ttl_days,
     )
+    resolved_cpf_protector = cpf_protector or _build_cpf_protector(resolved_settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -159,6 +167,7 @@ def create_app(
         app.state.password_policy = PasswordPolicy()
         app.state.password_hasher = password_hasher or Argon2PasswordHasher()
         app.state.token_issuer = resolved_token_issuer
+        app.state.cpf_protector = resolved_cpf_protector
 
         app.state.http = httpx.AsyncClient()
         app.state.audit_logger = audit_logger or HttpAuditLogger(

@@ -1,5 +1,7 @@
 """Configurações do serviço de Autenticação (IAM)"""
 
+import base64
+import binascii
 from functools import lru_cache
 
 from cryptography.hazmat.primitives import serialization
@@ -8,6 +10,19 @@ from pydantic import Field, SecretStr, field_validator
 from veriditi_common.settings import ServiceSettings
 
 _MIN_SECRET_LENGTH = 16
+_CPF_KEY_BYTES = 32
+
+
+def _decode_cpf_key(name: str, secret: SecretStr | None) -> bytes:
+    if secret is None or not secret.get_secret_value().strip():
+        raise RuntimeError(f"{name} não definido (gere com `make keys`)")
+    try:
+        raw = base64.b64decode(secret.get_secret_value().strip(), validate=True)
+    except (binascii.Error, ValueError):
+        raw = b""
+    if len(raw) != _CPF_KEY_BYTES:
+        raise RuntimeError(f"{name} precisa ser base64 de {_CPF_KEY_BYTES} bytes (`make keys`)")
+    return raw
 
 
 class Settings(ServiceSettings):
@@ -38,7 +53,18 @@ class Settings(ServiceSettings):
     access_token_ttl_seconds: int = 900  # 15 min (#9)
     refresh_token_ttl_days: int = 7  # 7 dias (#9)
 
-    @field_validator("jwt_private_key", "jwt_public_key", "verification_pepper", mode="before")
+    # Opcionais pelo mesmo motivo das chaves JWT; `create_app` as exige (ADR-024)
+    cpf_encryption_key: SecretStr | None = None
+    cpf_hmac_key: SecretStr | None = None
+
+    @field_validator(
+        "jwt_private_key",
+        "jwt_public_key",
+        "verification_pepper",
+        "cpf_encryption_key",
+        "cpf_hmac_key",
+        mode="before",
+    )
     @classmethod
     def _empty_str_is_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
@@ -56,6 +82,14 @@ class Settings(ServiceSettings):
                 f"VERIFICATION_PEPPER precisa de ao menos {_MIN_SECRET_LENGTH} caracteres"
             )
         return raw
+
+    def resolved_cpf_keys(self) -> tuple[bytes, bytes]:
+        """Chaves de cifra e de HMAC do CPF; falha na subida se ausentes, inválidas ou iguais"""
+        encryption = _decode_cpf_key("CPF_ENCRYPTION_KEY", self.cpf_encryption_key)
+        hmac_key = _decode_cpf_key("CPF_HMAC_KEY", self.cpf_hmac_key)
+        if encryption == hmac_key:
+            raise RuntimeError("CPF_ENCRYPTION_KEY e CPF_HMAC_KEY precisam ser diferentes")
+        return encryption, hmac_key
 
     def resolved_jwt_private_key(self) -> str:
         """Retorna a chave privada RSA em formato PEM; falha na subida se ausente (#9)"""

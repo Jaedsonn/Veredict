@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from auth_service.domain.cpf import Cpf
 from auth_service.domain.entities import (
     PasswordResetTokenEntity,
     RefreshTokenEntity,
@@ -66,6 +67,20 @@ class TokenIssuer(Protocol):
 
     def hash_refresh_token(self, raw_token: str) -> str:
         """Calcula o SHA-256 hex de um refresh token opaco"""
+
+
+@runtime_checkable
+class CpfProtector(Protocol):
+    """Porta da cifra do CPF e do índice que garante a unicidade sem guardar o CPF em claro"""
+
+    def encrypt(self, cpf: Cpf) -> bytes:
+        """Cifra com nonce aleatório: o mesmo CPF gera bytes diferentes a cada chamada"""
+
+    def decrypt(self, blob: bytes) -> Cpf:
+        """Decifra o que `encrypt` gerou; levanta erro se a cifra foi adulterada"""
+
+    def blind_index(self, cpf: Cpf) -> str:
+        """HMAC-SHA256 hex, determinístico, para o UNIQUE de `users.cpf_hmac`"""
 
 
 @runtime_checkable

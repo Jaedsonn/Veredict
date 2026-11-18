@@ -7,6 +7,8 @@ dependencies = [
     "aiomysql>=0.3.2",
     "alembic>=1.20.1",
     "argon2-cffi>=25.1.0",
+    # AES-GCM do CPF (ADR-024); antes vinha só como dependência do pyjwt[crypto]
+    "cryptography>=50.0.2",
     "fastapi>=0.162.0",
     "pydantic-settings>=2.16.2",
     "pydantic[email]>=2.14.2",
