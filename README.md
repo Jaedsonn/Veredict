@@ -409,7 +409,7 @@ JWT nas rotas protegidas e repassa ao upstream em streaming. `/docs` e
 | `/api/me/password` | POST | protegida | — |
 
 Uma rota nova é uma linha nova em `ROUTES` (`Route(path, upstream,
-upstream_path, public=..., methods=..., rate_limit=...)`); a tabela é validada
+upstream_path, public=..., methods=..., rate_limits=(...))`); a tabela é validada
 na subida (duplicata, upstream desconhecido, caminho inseguro, método
 inválido). O casamento é exato; `prefix=True` casa também `path/...` e fica
 para os ids da Sprint 2. Um upstream novo entra em `Settings.upstreams` e

@@ -9,16 +9,18 @@ REGISTER_LIMIT: Final = RateLimit("register", 10, 60.0)
 RESEND_LIMIT: Final = RateLimit("resend", 10, 60.0)
 
 ROUTES: Final[tuple[Route, ...]] = (
-    Route("/api/auth/register", "auth", "/auth/register", public=True, rate_limit=REGISTER_LIMIT),
+    Route(
+        "/api/auth/register", "auth", "/auth/register", public=True, rate_limits=(REGISTER_LIMIT,)
+    ),
     Route("/api/auth/verify-email", "auth", "/auth/verify-email", public=True),
     Route(
         "/api/auth/verify-email/resend",
         "auth",
         "/auth/verify-email/resend",
         public=True,
-        rate_limit=RESEND_LIMIT,
+        rate_limits=(RESEND_LIMIT,),
     ),
-    Route("/api/auth/login", "auth", "/auth/login", public=True, rate_limit=LOGIN_LIMIT),
+    Route("/api/auth/login", "auth", "/auth/login", public=True, rate_limits=(LOGIN_LIMIT,)),
     Route("/api/auth/refresh", "auth", "/auth/refresh", public=True),
     Route("/api/auth/logout", "auth", "/auth/logout", public=False),
     Route("/api/me", "auth", "/me", public=False, methods=frozenset({"GET", "PATCH"})),

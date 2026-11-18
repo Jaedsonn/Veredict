@@ -64,9 +64,12 @@ class RouteTable:
             raise ValueError(f"Upstream desconhecido: {route.upstream!r} em {route.path}")
         if not route.methods or not route.methods <= ALLOWED_METHODS:
             raise ValueError(f"Método inválido em {route.path}: {sorted(route.methods)}")
-        limit = route.rate_limit
-        if limit is not None and (limit.capacity < 1 or limit.period_seconds <= 0):
-            raise ValueError(f"Rate limit inválido em {route.path}")
+        for limit in route.rate_limits:
+            if limit.capacity < 1 or limit.period_seconds <= 0:
+                raise ValueError(f"Rate limit inválido em {route.path}")
+        names = [limit.name for limit in route.rate_limits]
+        if len(names) != len(set(names)):
+            raise ValueError(f"Rate limit repetido em {route.path}")
 
     def match(self, method: str, path: str) -> RouteMatch:
         """404 quando nenhum path casa; 405 com Allow quando só o método não casa"""

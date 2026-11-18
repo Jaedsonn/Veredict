@@ -5,14 +5,14 @@ from starlette.requests import ClientDisconnect
 
 from gateway_service.client_ip import resolve_client_ip
 from gateway_service.dependencies import GatewayDep
-from gateway_service.domain import RateKey
 from gateway_service.routing import is_safe_path
+from gateway_service.use_cases.admit_request import needs_body
 from veriditi_common.logging import get_logger
 from veriditi_common.middleware import set_log_fields
 
 # Todos para o 405 sair da tabela com o Allow certo
 _ALL_METHODS: Final = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
-# O login real tem menos de 1 KiB
+# Login e esqueci-senha reais têm menos de 1 KiB
 BUFFERED_BODY_MAX: Final = 16 * 1024
 
 log = get_logger(__name__)
@@ -20,7 +20,7 @@ router = APIRouter()
 
 
 async def read_bounded(request: Request, limit: int) -> bytes:
-    """Só o login bufferiza, para tirar o e-mail da chave do rate limit"""
+    """Só rota com limite por e-mail bufferiza, para tirar o e-mail da chave do rate limit"""
     chunks: list[bytes] = []
     size = 0
     async for chunk in request.stream():
@@ -46,7 +46,7 @@ async def proxy(request: Request, gateway: GatewayDep) -> Response:
         gateway.trusted,
     )
     body: bytes | None = None
-    if route.rate_limit is not None and route.rate_limit.key is RateKey.IP_AND_EMAIL:
+    if needs_body(route):
         try:
             body = await read_bounded(request, BUFFERED_BODY_MAX)
         except ClientDisconnect:
