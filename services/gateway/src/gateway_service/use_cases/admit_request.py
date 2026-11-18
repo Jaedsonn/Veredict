@@ -63,11 +63,7 @@ def rate_key(limit: RateLimit, client_ip: str | None, body: bytes | None) -> str
 
 
 class AdmitRequest:
-    """Rate limit antes do JWT: uma rajada não gasta CPU de RS256
-
-    Os limites rodam em ordem e param no primeiro que nega: o de IP vem antes e consome a
-    ficha mesmo quando o de e-mail nega, e um IP já bloqueado não gasta a ficha do e-mail.
-    """
+    """Rate limit antes do JWT: uma rajada não gasta CPU de RS256"""
 
     def __init__(self, limiter: RateLimiter, verifier: JwtVerifier) -> None:
         self._limiter = limiter
@@ -81,6 +77,8 @@ class AdmitRequest:
         authorization: str | None,
         body: bytes | None,
     ) -> Principal | None:
+        # Em ordem, parando no primeiro que nega: o de IP gasta a ficha mesmo se o de e-mail
+        # negar, e um IP já bloqueado não gasta a do e-mail
         for limit in route.rate_limits:
             decision = await self._limiter.hit(rate_key(limit, client_ip, body), limit)
             if not decision.allowed:
