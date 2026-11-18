@@ -39,6 +39,51 @@ class UserStatus(enum.StrEnum):
     BLOCKED = "blocked"
 
 
+class UserType(enum.StrEnum):
+    """Escolhido no cadastro e imutável (RF22)"""
+
+    COMMON = "common"
+    LAWYER = "lawyer"
+
+
+class OabUf(enum.StrEnum):
+    """As 27 seccionais da OAB"""
+
+    AC = "AC"
+    AL = "AL"
+    AP = "AP"
+    AM = "AM"
+    BA = "BA"
+    CE = "CE"
+    DF = "DF"
+    ES = "ES"
+    GO = "GO"
+    MA = "MA"
+    MT = "MT"
+    MS = "MS"
+    MG = "MG"
+    PA = "PA"
+    PB = "PB"
+    PR = "PR"
+    PE = "PE"
+    PI = "PI"
+    RJ = "RJ"
+    RN = "RN"
+    RS = "RS"
+    RO = "RO"
+    RR = "RR"
+    SC = "SC"
+    SP = "SP"
+    SE = "SE"
+    TO = "TO"
+
+
+class OabKind(enum.StrEnum):
+    PRINCIPAL = "principal"
+    SUPLEMENTAR = "suplementar"
+    TRANSITORIA = "transitoria"
+
+
 class VerificationPurpose(enum.StrEnum):
     EMAIL_VERIFICATION = "email_verification"
     MFA = "mfa"

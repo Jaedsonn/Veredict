@@ -23,6 +23,27 @@ class EmailAlreadyRegisteredError(DomainError):
         self.email = email
 
 
+class InvalidFieldError(DomainError):
+    """Campo recusado por regra de domínio (`422`, no formato de validação)"""
+
+    def __init__(self, code: str, message: str, *, field: str) -> None:
+        super().__init__(code=code, message=message, field=field)
+
+
+class InvalidCpfError(InvalidFieldError):
+    """CPF com formato ou dígitos verificadores inválidos; nunca carrega o valor"""
+
+    def __init__(self) -> None:
+        super().__init__(code="invalid_cpf", message="CPF inválido.", field="cpf")
+
+
+class InvalidOabError(InvalidFieldError):
+    """Inscrição na OAB inválida ou incoerente com o tipo de conta"""
+
+    def __init__(self, message: str, *, field: str = "oab") -> None:
+        super().__init__(code="invalid_oab", message=message, field=field)
+
+
 class WeakPasswordError(DomainError):
     """Senha viola a política de segurança (`422 Unprocessable Entity`)"""
 
