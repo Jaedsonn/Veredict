@@ -111,6 +111,19 @@ def test_sensitive_keys_are_redacted(json_logs: JsonLogs) -> None:
     assert line["status_code"] == 401
 
 
+def test_cpf_is_redacted_in_logs_and_audit_metadata(json_logs: JsonLogs) -> None:
+    get_logger("t").info("cadastro", cpf="52998224725", body={"cpf": "529.982.247-25", "a": 1})
+
+    [line] = json_logs()
+    assert "52998224725" not in json.dumps(line)
+    assert line["cpf"] == REDACTED
+    assert line["body"] == {"cpf": REDACTED, "a": 1}
+    assert redact({"user_type": "lawyer", "cpf": "529.982.247-25"}) == {
+        "user_type": "lawyer",
+        "cpf": REDACTED,
+    }
+
+
 def test_redact_sensitive_compares_case_and_separator_insensitively() -> None:
     event = {"event": "x", "SET_COOKIE": "a", "x_internal_token": "b", "Code": "c", "n": 1}
 
@@ -219,6 +232,16 @@ def test_redact_sensitive_compares_case_and_separator_insensitively() -> None:
         "magic_code",
         "auth:code",
         "auth/code",
+        # CPF é dado pessoal (#60, ADR-024): em claro, mascarado ou como índice
+        "cpf",
+        "CPF",
+        "cpfs",
+        "user_cpf",
+        "cpfNumber",
+        "cpf_masked",
+        "cpf_hmac",
+        "titular-cpf",
+        "cpf.raw",
     ],
 )
 def test_sensitive_key_variants(key: str | bytes) -> None:
@@ -292,6 +315,9 @@ def test_sensitive_key_variants(key: str | bytes) -> None:
         "two_factor_error_code",
         "2fa_enabled",
         "api/status_code",
+        "cpf_count",
+        "has_cpf",
+        "user_type",
     ],
 )
 def test_non_sensitive_keys(key: object) -> None:
