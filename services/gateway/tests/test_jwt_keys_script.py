@@ -1,3 +1,4 @@
+import base64
 import importlib.util
 import os
 import stat
@@ -29,7 +30,7 @@ def _env(tmp_path: Path, content: str = "A=1\nJWT_PRIVATE_KEY=\nJWT_PUBLIC_KEY=\
 
 def _keys(path: Path) -> dict[str, str]:
     values = dotenv_values(path)
-    return {k: v for k, v in values.items() if k.startswith("JWT_") and v is not None}
+    return {k: v for k, v in values.items() if k.startswith(("JWT_", "CPF_")) and v is not None}
 
 
 def test_generates_pair_in_env_without_keys(script: ModuleType, tmp_path: Path) -> None:
@@ -41,7 +42,9 @@ def test_generates_pair_in_env_without_keys(script: ModuleType, tmp_path: Path) 
     assert lines[:2] == ["A=1", "B='x y'"]
     assert lines[2].startswith("JWT_PRIVATE_KEY='-----BEGIN PRIVATE KEY-----\\n")
     assert lines[3].startswith("JWT_PUBLIC_KEY='-----BEGIN PUBLIC KEY-----\\n")
-    assert len(lines) == 4
+    assert lines[4].startswith("CPF_ENCRYPTION_KEY=")
+    assert lines[5].startswith("CPF_HMAC_KEY=")
+    assert len(lines) == 6
 
 
 def test_pair_is_coherent_and_dotenv_keeps_literal_newlines(
@@ -121,7 +124,9 @@ def test_other_lines_preserved_byte_for_byte(script: ModuleType, tmp_path: Path)
     script.main(["--env-file", str(env)])
 
     data = env.read_bytes()
-    kept = b"".join(line for line in data.splitlines(keepends=True) if not line.startswith(b"JWT_"))
+    kept = b"".join(
+        line for line in data.splitlines(keepends=True) if not line.startswith((b"JWT_", b"CPF_"))
+    )
     assert kept == others + b"\n"
 
 
@@ -133,7 +138,10 @@ def test_never_prints_the_key(
     script.main(["--env-file", str(env)])
 
     out = capsys.readouterr()
+    keys = _keys(env)
     assert "BEGIN" not in out.out + out.err
+    assert keys["CPF_ENCRYPTION_KEY"] not in out.out + out.err
+    assert keys["CPF_HMAC_KEY"] not in out.out + out.err
     assert "Par RS256 gravado" in out.out
 
 
@@ -149,3 +157,72 @@ def test_keeps_file_mode(script: ModuleType, tmp_path: Path) -> None:
 
 def test_missing_env_file_fails(script: ModuleType, tmp_path: Path) -> None:
     assert script.main(["--env-file", str(tmp_path / "nao-existe")]) == 1
+
+
+def test_cpf_keys_are_distinct_base64_of_32_bytes(script: ModuleType, tmp_path: Path) -> None:
+    env = _env(tmp_path)
+
+    script.main(["--env-file", str(env)])
+
+    keys = _keys(env)
+    encryption = base64.b64decode(keys["CPF_ENCRYPTION_KEY"], validate=True)
+    hmac_key = base64.b64decode(keys["CPF_HMAC_KEY"], validate=True)
+    assert len(encryption) == len(hmac_key) == 32
+    assert encryption != hmac_key
+
+
+def test_fills_only_empty_cpf_key_and_keeps_jwt_pair(script: ModuleType, tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    script.main(["--env-file", str(env)])
+    before = _keys(env)
+    text = env.read_text().replace(f"CPF_HMAC_KEY={before['CPF_HMAC_KEY']}", "CPF_HMAC_KEY=")
+    env.write_text(text)
+
+    assert script.main(["--env-file", str(env)]) == 0
+
+    after = _keys(env)
+    assert after["CPF_HMAC_KEY"] and after["CPF_HMAC_KEY"] != before["CPF_HMAC_KEY"]
+    assert {k: after[k] for k in before if k != "CPF_HMAC_KEY"} == {
+        k: v for k, v in before.items() if k != "CPF_HMAC_KEY"
+    }
+
+
+def test_force_never_replaces_cpf_keys(script: ModuleType, tmp_path: Path) -> None:
+    # Trocar a chave perderia os CPFs já cifrados (ADR-024)
+    env = _env(tmp_path)
+    script.main(["--env-file", str(env)])
+    before = _keys(env)
+
+    assert script.main(["--env-file", str(env), "--force"]) == 0
+
+    after = _keys(env)
+    assert after["JWT_PRIVATE_KEY"] != before["JWT_PRIVATE_KEY"]
+    assert after["CPF_ENCRYPTION_KEY"] == before["CPF_ENCRYPTION_KEY"]
+    assert after["CPF_HMAC_KEY"] == before["CPF_HMAC_KEY"]
+
+
+def test_existing_jwt_pair_still_gets_cpf_keys(
+    script: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    env = _env(tmp_path)
+    script.main(["--env-file", str(env)])
+    jwt = {k: v for k, v in _keys(env).items() if k.startswith("JWT_")}
+    lines = [line for line in env.read_text().splitlines() if not line.startswith("CPF_")]
+    env.write_text("\n".join(lines) + "\n")
+    capsys.readouterr()
+
+    assert script.main(["--env-file", str(env)]) == 0
+
+    keys = _keys(env)
+    assert {k: v for k, v in keys.items() if k.startswith("JWT_")} == jwt
+    assert {"CPF_ENCRYPTION_KEY", "CPF_HMAC_KEY"} <= keys.keys()
+    assert "Chaves do CPF gravadas" in capsys.readouterr().out
+
+
+def test_incomplete_pair_does_not_touch_cpf_keys(script: ModuleType, tmp_path: Path) -> None:
+    env = _env(tmp_path, "JWT_PRIVATE_KEY='abc'\nJWT_PUBLIC_KEY=\nCPF_ENCRYPTION_KEY=\n")
+    before = env.read_bytes()
+
+    assert script.main(["--env-file", str(env)]) == 1
+
+    assert env.read_bytes() == before

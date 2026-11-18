@@ -47,13 +47,13 @@ help:
 	@grep -E '^[a-zA-Z-][a-zA-Z_-]*:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install: ## Instala dependências e cria o .env a partir do .env.example, com o par RS256
+install: ## Instala dependências e cria o .env a partir do .env.example, com o par RS256 e as chaves do CPF
 	@test -f .env || cp .env.example .env
 	npm install
 	uv sync
 	uv run python scripts/jwt_keys.py
 
-keys: ## Gera o par RS256 de dev no .env (force=1 troca o par)
+keys: ## Gera o par RS256 e as chaves do CPF no .env (force=1 troca só o par)
 	@test -f .env || cp .env.example .env
 	uv run python scripts/jwt_keys.py $(if $(force),--force)
 

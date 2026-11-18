@@ -148,6 +148,9 @@ services:
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       VERIFICATION_PEPPER: ${VERIFICATION_PEPPER:-change-me-verification-pepper}
+      # Sem padrão: o auth recusa subir sem elas (make keys, ADR-024)
+      CPF_ENCRYPTION_KEY: ${CPF_ENCRYPTION_KEY:-}
+      CPF_HMAC_KEY: ${CPF_HMAC_KEY:-}
       # Os mesmos do gateway: um iss/aud diferente daria 401 em todo token
       JWT_ISSUER: ${JWT_ISSUER:-veriditi-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-veriditi}
