@@ -261,16 +261,17 @@ def get_logout_user_use_case(
     )
 
 
-def get_profile_use_case(users: UserRepoDep) -> GetProfile:
-    return GetProfile(users=users)
+def get_profile_use_case(users: UserRepoDep, cpf_protector: CpfProtectorDep) -> GetProfile:
+    return GetProfile(users=users, cpf_protector=cpf_protector)
 
 
 def get_update_profile_use_case(
     users: UserRepoDep,
     audit: AuditLoggerDep,
     clock: ClockDep,
+    cpf_protector: CpfProtectorDep,
 ) -> UpdateProfile:
-    return UpdateProfile(users=users, audit=audit, clock=clock)
+    return UpdateProfile(users=users, audit=audit, clock=clock, cpf_protector=cpf_protector)
 
 
 def get_change_password_use_case(

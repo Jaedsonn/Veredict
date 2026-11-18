@@ -267,8 +267,18 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(repr=False)
 
 
+class OabRead(BaseModel):
+    """Inscrição como foi informada no cadastro; sem consulta ao CNA ainda (#64)"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    number: str
+    uf: OabUf
+    kind: OabKind
+
+
 class ProfileRead(BaseModel):
-    """Contrato de saída de `GET /me` e `PATCH /me` ([S1-10], RF06)"""
+    """Contrato de saída de `GET /me` e `PATCH /me` ([S1-10], RF06; tipo, CPF e OAB na #60)"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -278,13 +288,16 @@ class ProfileRead(BaseModel):
     status: UserStatus
     email_verified_at: datetime | None
     created_at: datetime
+    user_type: UserType
+    cpf_masked: str
+    oab: OabRead | None
 
 
 class ProfileUpdate(BaseModel):
     """Contrato de entrada de `PATCH /me` ([S1-10], RF06)
 
-    `extra="ignore"` descarta silenciosamente campos não editáveis como `email` ou `status`,
-    prevenindo vulnerabilidades de *mass assignment*.
+    `extra="ignore"` descarta silenciosamente campos não editáveis como `email`, `status`,
+    `user_type`, `cpf` e `oab`, prevenindo vulnerabilidades de *mass assignment*.
     """
 
     model_config = ConfigDict(extra="ignore")

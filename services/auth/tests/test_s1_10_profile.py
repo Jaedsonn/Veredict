@@ -1,10 +1,15 @@
 """Testes da Issue [S1-10] (#10): Perfil e senha (`GET /me`, `PATCH /me`, `POST /me/password`)."""
 
-from auth_test_data import common_identity
+from typing import Any
+
+from auth_test_data import common_identity, cpf_for_email, make_cpf
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from auth_service.adapters.token_issuer import PyJwtTokenIssuer
+from auth_service.models import User
 from veriditi_common.audit import InMemoryAuditLogger
+from veriditi_common.db import Database
 from veriditi_common.notifications import InMemoryNotifier
 
 TEST_INTERNAL_TOKEN = "test-internal-token-0123456789"
@@ -32,6 +37,7 @@ async def _setup_active_user(
     *,
     email: str = "perfil@example.com",
     password: str = "SenhaForte123",
+    identity: dict[str, Any] | None = None,
 ) -> int:
     reg = await client.post(
         "/auth/register",
@@ -39,7 +45,7 @@ async def _setup_active_user(
             "name": "Nome Inicial",
             "email": email,
             "password": password,
-            **common_identity(email),
+            **(identity or common_identity(email)),
         },
     )
     assert reg.status_code == 201
@@ -74,6 +80,32 @@ async def test_me_requires_gateway_headers_and_returns_profile(
     assert body["status"] == "active"
     assert body["email_verified_at"] is not None
     assert body["created_at"] is not None
+    cpf = cpf_for_email("perfil@example.com")
+    assert body["user_type"] == "common"
+    assert body["cpf_masked"] == f"***.{cpf[4:7]}.{cpf[8:11]}-**"
+    assert body["oab"] is None
+    assert "cpf" not in body
+    assert cpf not in res.text and cpf.replace(".", "").replace("-", "") not in res.text
+
+
+async def test_me_shows_lawyer_oab_as_informed(
+    client: AsyncClient,
+    notifier: InMemoryNotifier,
+) -> None:
+    identity = {
+        "user_type": "lawyer",
+        "cpf": "529.982.247-25",
+        "oab": {"number": "0042", "uf": "ba", "kind": "suplementar"},
+    }
+    user_id = await _setup_active_user(client, notifier, email="adv@example.com", identity=identity)
+
+    res = await client.get("/me", headers=gateway_headers(user_id, "adv@example.com"))
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["user_type"] == "lawyer"
+    assert body["cpf_masked"] == "***.982.247-**"
+    assert body["oab"] == {"number": "42", "uf": "BA", "kind": "suplementar"}
 
 
 async def test_patch_me_updates_name_ignores_mass_assignment_and_audits_fields(
@@ -103,6 +135,43 @@ async def test_patch_me_updates_name_ignores_mass_assignment_and_audits_fields(
     assert len(events) == 1
     assert events[0].actor_id == user_id
     assert events[0].metadata == {"fields": ["name"]}
+
+
+async def test_patch_me_never_changes_type_cpf_or_oab(
+    client: AsyncClient,
+    notifier: InMemoryNotifier,
+    audit_logger: InMemoryAuditLogger,
+    db: Database,
+) -> None:
+    email = "fixo@example.com"
+    user_id = await _setup_active_user(client, notifier, email=email)
+    async with db.session_factory() as session:
+        before = await session.scalar(select(User.cpf_hmac).where(User.id == user_id))
+
+    other_cpf = make_cpf(4242)
+    res = await client.patch(
+        "/me",
+        headers=gateway_headers(user_id, email),
+        json={
+            "user_type": "lawyer",
+            "cpf": other_cpf,
+            "oab": {"number": "1", "uf": "BA", "kind": "principal"},
+        },
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    cpf = cpf_for_email(email)
+    assert body["user_type"] == "common"
+    assert body["cpf_masked"] == f"***.{cpf[4:7]}.{cpf[8:11]}-**"
+    assert body["oab"] is None
+    async with db.session_factory() as session:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        assert user is not None
+        assert user.cpf_hmac == before
+        assert (user.user_type.value, user.oab_number) == ("common", None)
+    [event] = [e for e in audit_logger.events if e.action == "auth.profile.updated"]
+    assert event.metadata == {"fields": []}
 
 
 async def test_change_password_preserves_current_session_via_x_session_id_and_revokes_others(
