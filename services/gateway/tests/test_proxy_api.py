@@ -55,6 +55,8 @@ def _login(email: str = "ana@exemplo.com") -> dict[str, Any]:
         ("POST", "/api/auth/verify-email/resend", "/auth/verify-email/resend", 202),
         ("POST", "/api/auth/login", "/auth/login", 200),
         ("POST", "/api/auth/refresh", "/auth/refresh", 200),
+        ("POST", "/api/auth/password/forgot", "/auth/password/forgot", 202),
+        ("POST", "/api/auth/password/reset", "/auth/password/reset", 204),
         ("POST", "/api/auth/logout", "/auth/logout", 204),
         ("GET", "/api/me", "/me", 200),
         ("PATCH", "/api/me", "/me", 200),
@@ -81,7 +83,7 @@ async def test_each_route_reaches_auth_without_api_prefix(
 
 
 def test_routing_test_covers_the_whole_table() -> None:
-    assert sum(len(r.methods) for r in ROUTES) == 9
+    assert sum(len(r.methods) for r in ROUTES) == 11
 
 
 @pytest.mark.parametrize("status", [400, 409, 422])
@@ -384,6 +386,108 @@ async def test_register_429_has_retry_after_six(
 
     assert resp.headers["Retry-After"] == "6"
     assert resp.json()["detail"]["retry_after"] == 6
+
+
+def _forgot(email: str = "ana@exemplo.com") -> dict[str, Any]:
+    return {"json": {"email": email}}
+
+
+async def test_forgot_limits_three_per_email_even_across_ips(
+    client: AsyncClient,
+    client_from: ClientFactory,
+    auth_mock: respx.MockRouter,
+    fake_clock: FakeClock,
+) -> None:
+    route = auth_mock.post("/auth/password/forgot").respond(202, json={"status": "accepted"})
+    variants = ["ana@exemplo.com", " ANA@exemplo.com ", "Ana@Exemplo.Com"]
+
+    statuses = [
+        (await client.post("/api/auth/password/forgot", **_forgot(e))).status_code for e in variants
+    ]
+    fourth = await client.post("/api/auth/password/forgot", **_forgot())
+
+    assert statuses == [202] * 3
+    assert fourth.status_code == 429
+    assert fourth.headers["Retry-After"] == "1200"
+    assert fourth.json() == {
+        "detail": {
+            "code": "rate_limited",
+            "message": "Muitas tentativas. Tente novamente em 1200 segundos.",
+            "retry_after": 1200,
+        }
+    }
+    assert route.call_count == 3
+    # A chave é só o e-mail: trocar de IP não renova o limite do alvo
+    async with client_from("198.51.100.20") as other:
+        assert (await other.post("/api/auth/password/forgot", **_forgot())).status_code == 429
+    assert (
+        await client.post("/api/auth/password/forgot", **_forgot("bia@exemplo.com"))
+    ).status_code == 202
+
+    fake_clock.advance(1200)
+    assert (await client.post("/api/auth/password/forgot", **_forgot())).status_code == 202
+
+
+async def test_forgot_ip_limit_counts_requests_the_email_limit_denied(
+    client: AsyncClient,
+    client_from: ClientFactory,
+    auth_mock: respx.MockRouter,
+) -> None:
+    route = auth_mock.post("/auth/password/forgot").respond(202, json={"status": "accepted"})
+    for _ in range(4):
+        await client.post("/api/auth/password/forgot", **_forgot())
+
+    others = [
+        (await client.post("/api/auth/password/forgot", **_forgot(f"u{i}@exemplo.com"))).status_code
+        for i in range(7)
+    ]
+
+    # 4 pedidos do mesmo e-mail gastaram 4 fichas do IP; sobram 6
+    assert others == [202] * 6 + [429]
+    assert route.call_count == 3 + 6
+    async with client_from("198.51.100.20") as other:
+        resp = await other.post("/api/auth/password/forgot", **_forgot("u6@exemplo.com"))
+    assert resp.status_code == 202
+
+
+async def test_forgot_ip_limit_has_retry_after_of_six_minutes(
+    client: AsyncClient, auth_mock: respx.MockRouter
+) -> None:
+    auth_mock.post("/auth/password/forgot").respond(202, json={"status": "accepted"})
+    for i in range(10):
+        await client.post("/api/auth/password/forgot", **_forgot(f"u{i}@exemplo.com"))
+
+    resp = await client.post("/api/auth/password/forgot", **_forgot("ultimo@exemplo.com"))
+
+    assert resp.status_code == 429
+    assert resp.headers["Retry-After"] == "360"
+
+
+async def test_forgot_body_is_forwarded_intact(
+    client: AsyncClient, auth_mock: respx.MockRouter
+) -> None:
+    route = auth_mock.post("/auth/password/forgot").respond(202, json={"status": "accepted"})
+    body = b'{"email": " Ana@Exemplo.com "}'
+
+    resp = await client.post(
+        "/api/auth/password/forgot", content=body, headers={"Content-Type": "application/json"}
+    )
+
+    assert resp.status_code == 202
+    assert route.calls.last.request.content == body
+
+
+async def test_reset_is_limited_by_ip(client: AsyncClient, auth_mock: respx.MockRouter) -> None:
+    auth_mock.post("/auth/password/reset").respond(204)
+    body = {"json": {"token": "x" * 43, "new_password": "Senha-Forte-1"}}
+
+    statuses = [
+        (await client.post("/api/auth/password/reset", **body)).status_code for _ in range(11)
+    ]
+    last = await client.post("/api/auth/password/reset", **body)
+
+    assert statuses == [204] * 10 + [429]
+    assert last.headers["Retry-After"] == "360"
 
 
 async def test_resend_has_its_own_bucket(client: AsyncClient, auth_mock: respx.MockRouter) -> None:

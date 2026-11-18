@@ -404,6 +404,8 @@ JWT nas rotas protegidas e repassa ao upstream em streaming. `/docs` e
 | `/api/auth/verify-email/resend` | POST | pública | 10 por IP, bucket separado do cadastro |
 | `/api/auth/login` | POST | pública | 5 de rajada por IP + e-mail, 1 a cada 12 s |
 | `/api/auth/refresh` | POST | pública | — |
+| `/api/auth/password/forgot` | POST | pública | 10 por IP e 3 por e-mail (qualquer IP), por hora; o de IP vem antes e conta também o pedido que o de e-mail nega |
+| `/api/auth/password/reset` | POST | pública | 10 por IP por hora |
 | `/api/auth/logout` | POST | protegida | — |
 | `/api/me` | GET, PATCH | protegida | — |
 | `/api/me/password` | POST | protegida | — |

@@ -2,7 +2,15 @@ import pytest
 from starlette.exceptions import HTTPException
 
 from gateway_service.domain import RateLimit, Route, Upstream
-from gateway_service.routes import LOGIN_LIMIT, REGISTER_LIMIT, RESEND_LIMIT, ROUTES
+from gateway_service.routes import (
+    FORGOT_EMAIL_LIMIT,
+    FORGOT_IP_LIMIT,
+    LOGIN_LIMIT,
+    REGISTER_LIMIT,
+    RESEND_LIMIT,
+    RESET_LIMIT,
+    ROUTES,
+)
 from gateway_service.routing import ALLOWED_METHODS, RouteTable, is_safe_path
 
 UPSTREAMS = {"auth": Upstream("auth", "http://auth.test", "autenticação")}
@@ -73,6 +81,8 @@ def test_rate_limits_by_route(table: RouteTable) -> None:
     assert limit("/api/auth/verify-email/resend") == (RESEND_LIMIT,)
     assert limit("/api/auth/verify-email") == ()
     assert limit("/api/auth/refresh") == ()
+    assert limit("/api/auth/password/forgot") == (FORGOT_IP_LIMIT, FORGOT_EMAIL_LIMIT)
+    assert limit("/api/auth/password/reset") == (RESET_LIMIT,)
 
 
 def test_public_and_protected_routes() -> None:
