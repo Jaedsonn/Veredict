@@ -4,8 +4,12 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 
 import { gatewayFetch } from "./gateway";
+import type { OabKind, OabUf } from "./validation/oab";
 
-/** Contrato de `GET /api/me` (#10). */
+/** Inscrição como o advogado informou no cadastro; ainda sem consulta ao CNA (#64). */
+export type ProfileOab = { number: string; uf: OabUf; kind: OabKind };
+
+/** Contrato de `GET /api/me` (#10; tipo, CPF mascarado e OAB na #60). */
 export type Profile = {
   id: number;
   name: string;
@@ -13,6 +17,10 @@ export type Profile = {
   status: "pending_verification" | "active" | "blocked";
   email_verified_at: string | null;
   created_at: string;
+  user_type: "common" | "lawyer";
+  /** Só o meio do CPF (`***.982.247-**`): o número inteiro não sai do auth. */
+  cpf_masked: string;
+  oab: ProfileOab | null;
 };
 
 /**
