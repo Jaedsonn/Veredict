@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useState, type FormEvent } from "react";
 
 import { PasswordStrength } from "@/components/auth/password-strength";
 import { useClientValidation } from "@/components/forms/use-client-validation";
@@ -31,9 +31,21 @@ export function RegisterForm() {
   // Controlados: o CPF não volta do servidor (publicValues) e o tipo decide o bloco da OAB
   const [userType, setUserType] = useState<UserType>(v.userType === "lawyer" ? "lawyer" : "common");
   const [cpf, setCpf] = useState("");
+  const [oabUf, setOabUf] = useState(v.oabUf ?? "");
+  const [oabKind, setOabKind] = useState(v.oabKind ?? "principal");
+
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    onSubmit(e);
+    if (e.defaultPrevented) return;
+    // Sem o reset automático do <form action>: ele desmarcaria o rádio e os selects controlados
+    // depois de um erro do servidor, com o bloco da OAB ainda na tela
+    e.preventDefault();
+    const data = new FormData(e.currentTarget);
+    startTransition(() => formAction(data));
+  }
 
   return (
-    <form action={formAction} onSubmit={onSubmit} noValidate className="flex flex-col gap-5">
+    <form action={formAction} onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
       {state.message === "conflict" ? (
         <Alert tone="error" title="Este e-mail já está cadastrado.">
           <Link href="/entrar" className="font-bold underline">
@@ -118,7 +130,7 @@ export function RegisterForm() {
               />
             </FormField>
             <FormField id="oabUf" label="UF:" error={errors.oabUf}>
-              <Select name="oabUf" defaultValue={v.oabUf ?? ""} required>
+              <Select name="oabUf" value={oabUf} onChange={(e) => setOabUf(e.target.value)} required>
                 <option value="" disabled>
                   UF
                 </option>
@@ -131,7 +143,12 @@ export function RegisterForm() {
             </FormField>
           </div>
           <FormField id="oabKind" label="Tipo de inscrição:" error={errors.oabKind}>
-            <Select name="oabKind" defaultValue={v.oabKind ?? "principal"} required>
+            <Select
+              name="oabKind"
+              value={oabKind}
+              onChange={(e) => setOabKind(e.target.value)}
+              required
+            >
               {OAB_KINDS.map((kind) => (
                 <option key={kind.value} value={kind.value}>
                   {kind.label}
