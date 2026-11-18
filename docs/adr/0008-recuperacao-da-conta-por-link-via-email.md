@@ -33,4 +33,6 @@ Utilizar o e-mail verificado do usuário para a recuperação da conta, baseado 
   - O access token JWT já emitido continua válido até expirar (no máximo 15 min), porque o gateway o valida sem consultar o auth; só os refresh tokens caem na hora.
   - O token fica na URL: pode ir para o histórico do navegador. Mitigam a `Referrer-Policy`, os 30 min e o uso único.
   - O rate limit é por processo do gateway (memória): réplicas multiplicam o limite e um restart o zera.
+  - Tempo residual no forgot: o e-mail já sai em background, mas a conta ativa ainda paga o lock do usuário, o UPDATE dos tokens antigos, o INSERT e o commit, enquanto a inexistente responde depois de um SELECT. A diferença é de milissegundos, fica no ruído da rede, e os 3 pedidos por hora por e-mail tornam impraticável medi-la repetidas vezes.
+  - Custo do reset: a senha nova passa pela política e pelo Argon2 antes de o banco ser consultado (senha fraca não pode queimar o link), então um token bem-formado e inexistente custa um hash inteiro. Os 10 pedidos por hora por IP limitam esse uso como amplificador de CPU.
   - MFA (#18) ainda não existe. Quando entrar, o reset não pode desligá-lo: o próximo login continua exigindo o 2º fator.
