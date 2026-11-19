@@ -75,7 +75,9 @@ export const registerSchema = z
     confirmPassword: z.string().min(1, "Confirme sua senha."),
     userType: z.enum(USER_TYPES, "Escolha o tipo de conta."),
     cpf: z
-      .string("CPF inválido.")
+      .string("Informe seu CPF.")
+      .trim()
+      .min(1, "Informe seu CPF.")
       .refine((v) => cpfDigits(v) !== null, "CPF inválido.")
       .transform((v) => cpfDigits(v) ?? ""),
     oabNumber: z.string().optional(),

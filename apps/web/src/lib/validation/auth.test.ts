@@ -36,7 +36,7 @@ describe("registerSchema", () => {
   it("exige os três campos da OAB do advogado, junto com os outros erros", () => {
     expect(errorsOf({ ...base, confirmPassword: "outra", userType: "lawyer", cpf: "" })).toEqual({
       confirmPassword: "As senhas não coincidem.",
-      cpf: "CPF inválido.",
+      cpf: "Informe seu CPF.",
       oabNumber: "Informe o número da OAB com até 6 dígitos.",
       oabUf: "Escolha a UF da seccional.",
       oabKind: "Escolha o tipo de inscrição.",
