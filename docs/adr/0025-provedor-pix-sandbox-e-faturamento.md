@@ -1,6 +1,6 @@
 # ADR-025 – Provedor PIX sandbox e dados de faturamento sem CPF em claro
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-19
 - Afeta: ADR-013 (pagamento por serviço externo), ADR-024 (cifragem do CPF)
 
@@ -36,4 +36,7 @@ O REQ05 do Documento de Requisitos (comprar créditos) foi antecipado para a Spr
 
 | Integrante | Evidência |
 |---|---|
-| | |
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |
