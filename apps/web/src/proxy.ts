@@ -5,7 +5,7 @@ import { ACCESS_COOKIE, REFRESH_COOKIE, refreshTokens, sessionCookies } from "@/
 const GATEWAY_URL = process.env.GATEWAY_URL ?? "http://localhost:8080";
 
 /** Rotas do grupo (app): exigem sessão. */
-const PROTECTED = ["/painel", "/perfil"];
+const PROTECTED = ["/painel", "/perfil", "/creditos"];
 /** Telas de entrada: quem já está logado vai direto ao painel. */
 const GUEST_ONLY = ["/entrar", "/cadastro"];
 
@@ -62,5 +62,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/painel/:path*", "/perfil/:path*", "/entrar", "/cadastro"],
+  matcher: ["/painel/:path*", "/perfil/:path*", "/creditos/:path*", "/entrar", "/cadastro"],
 };

@@ -32,6 +32,11 @@ const CODE_MESSAGES: Record<string, string> = {
   invalid_current_password: "A senha atual está incorreta.",
   invalid_reset_token: "Link inválido ou expirado. Solicite um novo.",
   gateway_unavailable: "Serviço indisponível no momento. Tente novamente em instantes.",
+  package_not_found: "Este pacote de créditos não está disponível.",
+  order_not_found: "Pedido não encontrado.",
+  order_not_payable: "Este pedido não aceita mais pagamento. Gere um novo PIX.",
+  idempotency_key_reused: "Não foi possível criar o pedido. Recarregue a página e tente de novo.",
+  payment_provider_unavailable: "Serviço de pagamento indisponível. Tente novamente em instantes.",
 };
 
 const STATUS_MESSAGES: Record<number, string> = {

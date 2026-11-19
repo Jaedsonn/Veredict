@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { Logo } from "@/components/brand/logo";
 import { Spinner } from "@/components/ui/spinner";
 
-import { NavLinks } from "./nav-links";
+import { NavLinks, NavList } from "./nav-links";
 import { UserMenu } from "./user-menu";
 
 /** Área autenticada: sidebar azul-marinho (no celular vira barra no topo). */
@@ -24,7 +24,9 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
             </div>
           </div>
           <nav aria-label="Navegação principal" className="-mx-1 overflow-x-auto px-1 md:mx-0 md:overflow-visible md:px-0">
-            <NavLinks />
+            <Suspense fallback={<NavList />}>
+              <NavLinks />
+            </Suspense>
           </nav>
         </div>
         <div className="hidden md:block">
