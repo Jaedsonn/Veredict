@@ -43,18 +43,18 @@ Pela numeração do Documento de Requisitos, a Sprint 1 entrega **REQ01, REQ02, 
 
 Os critérios que não dependem da tela foram conferidos contra o stack rodando: 27 checagens pela API do gateway (cadastro, `409`/`422`, verificação, reenvio, login, `401` uniforme, `429` com `Retry-After`, reuso de refresh, `/me`, *mass assignment*, `401` de token adulterado, `X-User-Id` forjado, rotas internas `404`, `/health/ready`, `forgot` `202` e renovação da sessão pelo `proxy.ts`), mais os eventos em `audit_events` com `actor_id`, `actor_ip` e `occurred_at`, o `UPDATE` negado ao `veriditi_logs_writer`, o `$argon2id$`, o CPF cifrado (`cpf_hmac` de 64 caracteres, sem o CPF em claro no banco, nos logs ou na auditoria), as portas publicadas só em `127.0.0.1` e os cookies `vrd_*` com `HttpOnly`. Os demais itens dos critérios são cobertos pelos testes automatizados (`make cov`, `make db-test`), que passam na `main`.
 
-Os itens que só se conferem no navegador estão na #69. Até ela fechar, os RFs que têm critério de web ficam `em andamento`, com o back-end e o gateway já conferidos.
+Os itens que só se conferem no navegador foram conferidos na #69: cadastro com tipo de conta, máscara do CPF e bloco da OAB; colar o código e reenvio após 60 s; redirecionamento da conta não verificada; "Sair"; telas de recuperação de senha; barra lateral do perfil; mensagem de indisponibilidade com o auth parado; telas a 360 px; e navegação só com teclado.
 
 ## 2. Requisitos funcionais
 
 | ID | Requisito | Serviço | ADR | Doc. | Sprint | Status | Issues |
 |---|---|---|---|---|---|---|---|
-| RF01 | Cadastro de conta (nome, e-mail, senha; tipo, CPF e OAB no RF22) | Autenticação | [002](adr/0002-seguranca.md) | 4.2.1 | 1 | em andamento (falta a web, #69) | #7, #13 |
-| RF02 | Verificação de e-mail por código | Autenticação + Notificação | [007](adr/0007-verificacao-do-email-do-usuario.md) | 4.2.1 | 1 | em andamento (falta a web, #69) | #8, #13 |
-| RF03 | Login/logout com sessão JWT | Autenticação | [002](adr/0002-seguranca.md), [017](adr/0017-aplicacao-web-nextjs-com-bff.md) | 4.2.1 | 1 | em andamento (falta a web, #69) | #9, #14 |
+| RF01 | Cadastro de conta (nome, e-mail, senha; tipo, CPF e OAB no RF22) | Autenticação | [002](adr/0002-seguranca.md) | 4.2.1 | 1 | implementado | #7, #13 |
+| RF02 | Verificação de e-mail por código | Autenticação + Notificação | [007](adr/0007-verificacao-do-email-do-usuario.md) | 4.2.1 | 1 | implementado | #8, #13 |
+| RF03 | Login/logout com sessão JWT | Autenticação | [002](adr/0002-seguranca.md), [017](adr/0017-aplicacao-web-nextjs-com-bff.md) | 4.2.1 | 1 | implementado | #9, #14 |
 | RF04 | MFA obrigatório (TOTP / e-mail) | Autenticação | [009](adr/0009-verificacao-em-multiplas-etapas.md) | 4.2.1 | 2 | planejado | #18, #20 |
-| RF05 | Recuperação de senha por link via e-mail | Autenticação + Notificação | [008](adr/0008-recuperacao-da-conta-por-link-via-email.md) | 4.2.1 | 1 | em andamento (falta a web, #69) | #19, #20 |
-| RF06 | Perfil do usuário (ver/editar; tipo, CPF mascarado e OAB no RF22) | Autenticação | — | 4.2.1 | 1 | em andamento (falta a web, #69) | #10, #14 |
+| RF05 | Recuperação de senha por link via e-mail | Autenticação + Notificação | [008](adr/0008-recuperacao-da-conta-por-link-via-email.md) | 4.2.1 | 1 | implementado | #19, #20 |
+| RF06 | Perfil do usuário (ver/editar; tipo, CPF mascarado e OAB no RF22) | Autenticação | — | 4.2.1 | 1 | implementado | #10, #14 |
 | RF07 | Catálogo de pacotes de créditos | Pagamento | — | 4.2.2 | 2 | planejado | #21, #25 |
 | RF08 | Compra via PIX (checkout transparente) | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #22, #25 |
 | RF09 | Confirmação de pagamento e faturamento | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #23 |
@@ -70,7 +70,7 @@ Os itens que só se conferem no navegador estão na #69. Até ela fechar, os RFs
 | RF19 | Limpeza/retenção de logs operacionais | Monitoramento | [012](adr/0012-geracao-de-logs-estruturados.md) | 4.2.6 | 2 | planejado | #35 |
 | RF20 | Consulta da trilha de auditoria | Monitoramento | [001](adr/0001-auditabilidade-registros-de-auditoria.md) | 4.2.6 | 2 | planejado | #34, #36 |
 | RF21 | API Gateway único com autenticação centralizada | Gateway | [005](adr/0005-arquitetura-baseada-em-servicos.md), [018](adr/0018-api-gateway-como-servico-fastapi.md) | 4 (item 7), 4.1 | 1 | implementado | #11 |
-| RF22 | Tipos de conta: pessoa e advogado, com CPF e inscrição na OAB | Autenticação | [024](adr/0024-cifragem-do-cpf.md) | — | 1 | em andamento (falta a web, #69) | #60 |
+| RF22 | Tipos de conta: pessoa e advogado, com CPF e inscrição na OAB | Autenticação | [024](adr/0024-cifragem-do-cpf.md) | — | 1 | implementado | #60 |
 
 A coluna **Doc.** indica a seção do documento "Estruturação do Veridit" que descreve o módulo. O RF22 não está no documento: veio do dono do produto, que precisa distinguir advogados das demais pessoas.
 
@@ -249,12 +249,12 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 | ID | Requisito | Característica | ADR | Sprint | Status | Issues |
 |---|---|---|---|---|---|---|
 | RNF01 | Senhas com Argon2id, JWT assinado, rate limit no login, serviços internos não expostos | Segurança | [002](adr/0002-seguranca.md), [017](adr/0017-aplicacao-web-nextjs-com-bff.md), [018](adr/0018-api-gateway-como-servico-fastapi.md), [020](adr/0020-banco-central-compartilhado-com-posse-por-servico.md) | 1 | implementado | #3, #7, #9, #11, #41 |
-| RNF02 | Falha de um serviço não derruba os demais (timeouts, isolamento) | Confiabilidade / Tolerância a falhas | [003](adr/0003-confiabilidade.md), [016](adr/0016-comunicacao-interna-http-fire-and-forget.md) | 1 e 2 | em andamento (parte da Sprint 1 implementada; falta a web, #69) | #11, #12, #37 |
+| RNF02 | Falha de um serviço não derruba os demais (timeouts, isolamento) | Confiabilidade / Tolerância a falhas | [003](adr/0003-confiabilidade.md), [016](adr/0016-comunicacao-interna-http-fire-and-forget.md) | 1 e 2 | em andamento (parte da Sprint 1 implementada) | #11, #12, #37 |
 | RNF03 | Toda ação relevante gera evento de auditoria com ator, IP e data/hora | Auditabilidade | [001](adr/0001-auditabilidade-registros-de-auditoria.md), [015](adr/0015-log-storage-em-database-mysql-separada.md), [021](adr/0021-datas-utc-datetime6.md) | 1 | implementado | #4, #5 |
 | RNF04 | Provas em object storage separado do banco relacional; backups | Recuperabilidade | [004](adr/0004-recuperabilidade.md), [010](adr/0010-divisao-dos-bancos-de-dados.md), [019](adr/0019-minio-como-object-storage.md) | 2 | planejado | #26, #37 |
 | RNF05 | Cobertura de testes ≥ 70% por serviço; CI obrigatório | Testabilidade | [023](adr/0023-migrations-por-servico-e-testes-com-mysql.md) | 1 e 2 | em andamento (parte da Sprint 1 implementada) | #15, #38 |
-| RNF06 | Web responsiva (≥ 360 px); sistema sobe com um comando (Docker) | Portabilidade | [006](adr/0006-aplicacao-web.md) | 1 | em andamento (falta a web, #69) | #3, #12 |
-| RNF07 | Fluxos com mensagens claras em PT-BR, acessibilidade básica | Usabilidade | [017](adr/0017-aplicacao-web-nextjs-com-bff.md) | 1 | em andamento (falta a web, #69) | #12, #13, #14 |
+| RNF06 | Web responsiva (≥ 360 px); sistema sobe com um comando (Docker) | Portabilidade | [006](adr/0006-aplicacao-web.md) | 1 | implementado | #3, #12 |
+| RNF07 | Fluxos com mensagens claras em PT-BR, acessibilidade básica | Usabilidade | [017](adr/0017-aplicacao-web-nextjs-com-bff.md) | 1 | implementado | #12, #13, #14 |
 | RNF08 | p95 < 300 ms nas rotas síncronas (exceto captura) | Desempenho | — | 2 | planejado | #38 |
 
 ### Critério de verificação dos RNFs
@@ -262,12 +262,12 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 | ID | Como verificar | Situação na `main` |
 |---|---|---|
 | RNF01 | `password_hash` começa com `$argon2id$`; token adulterado → `401`; 6.º login no minuto → `429`; `docker compose ps` mostra porta publicada só no gateway, na web, no Mailpit e no MySQL (dev); no DevTools, os cookies `vrd_*` são `HttpOnly`; `make db-test-contract` prova o privilégio mínimo | Conferido em 2026-11-19: `$argon2id$` no banco; token adulterado → `401`; 6.º login → `429` com `Retry-After`; portas publicadas só em `127.0.0.1` (gateway, web, Mailpit e MySQL de dev); cookies `vrd_*` com `HttpOnly`, `Secure` e `SameSite=lax`; `make db-test-contract` no CI. CPF cifrado desde o RF22 (ADR-024) |
-| RNF02 | Com o serviço de autenticação parado, a web mostra "Serviço indisponível" e continua navegável, e o gateway responde `503` | Gateway responde `503`/`504` e continua de pé com o auth parado (testes do #11); `/health/live` e `/health/ready` em todos os serviços; timeout de 8 s e mensagem de indisponibilidade na web, a conferir no navegador (#69). Outbox e retentativas na Sprint 2 (#37) |
+| RNF02 | Com o serviço de autenticação parado, a web mostra "Serviço indisponível" e continua navegável, e o gateway responde `503` | Gateway responde `503`/`504` e continua de pé com o auth parado (testes do #11); `/health/live` e `/health/ready` em todos os serviços; timeout de 8 s e mensagem de indisponibilidade na web, conferidos no navegador (#69). Outbox e retentativas na Sprint 2 (#37) |
 | RNF03 | Toda ação dos RFs da Sprint 1 aparece em `audit_events` com `actor_id`, `actor_ip` e `occurred_at` em UTC | Conferido em 2026-11-19: cadastro, verificação, login (sucesso e falha), reuso de refresh e edição de perfil geram linhas em `audit_events` com `actor_id`, `actor_ip` e `occurred_at`; o `veriditi_logs_writer` não consegue `UPDATE` (erro 1142) |
 | RNF04 | Objeto em bucket com Object Lock; restaurar o backup do dia em outra máquina | Sprint 2 |
 | RNF05 | CI verde em todo PR; `pytest --cov` ≥ 70% em cada serviço | CI com `lint`, `tests` em matriz (auth, gateway, notification, monitoring e lib comum; `make cov` falha abaixo de 70%), `database` (MySQL real), `web` (com vitest) e `images`; contrato gateway × auth em `test_gateway_contract.py`. Cobertura em 2026-11-19: gateway 99,9%, auth 77,0%, notification 99,4%, monitoring 98,9%, lib comum 97,4%. E2E e carga na Sprint 2 (#38) |
-| RNF06 | Telas utilizáveis a 360 px; `make up` em máquina limpa deixa todos os containers `healthy` e o fluxo do RF01 funcionando | `make reset` + `make up` em 2026-11-19 deixou todos os containers `healthy`, com o gateway no compose, e o fluxo do RF01 funcionando. Quem já tinha `.env` precisa de `make keys` para as chaves do CPF (o `make install` já faz isso). Telas a 360 px a conferir (#69) |
-| RNF07 | Todas as mensagens de erro em PT-BR; todos os fluxos percorríveis só com teclado; erros ligados ao campo por `aria-describedby` | Mensagens em PT-BR conferidas pela API (`409`, `422`, `400`, `403`); `FormField` liga o erro ao campo por `aria-describedby`. Teclado e leitor de tela a conferir depois do RF22 (#69) |
+| RNF06 | Telas utilizáveis a 360 px; `make up` em máquina limpa deixa todos os containers `healthy` e o fluxo do RF01 funcionando | `make reset` + `make up` em 2026-11-19 deixou todos os containers `healthy`, com o gateway no compose, e o fluxo do RF01 funcionando. Quem já tinha `.env` precisa de `make keys` para as chaves do CPF (o `make install` já faz isso). Telas utilizáveis a 360 px, conferidas na #69 |
+| RNF07 | Todas as mensagens de erro em PT-BR; todos os fluxos percorríveis só com teclado; erros ligados ao campo por `aria-describedby` | Mensagens em PT-BR conferidas pela API (`409`, `422`, `400`, `403`); `FormField` liga o erro ao campo por `aria-describedby`. Fluxos percorridos só com teclado depois do RF22, conferidos na #69 |
 | RNF08 | Teste de carga: p95 < 300 ms em `/api/auth/login` e `/api/me` | Sprint 2 (#38) |
 
 ### Restrições técnicas e padrões
@@ -339,10 +339,10 @@ O Documento de Requisitos (v01.00, REQ01–REQ15) não divide o trabalho em spri
 
 | REQ | Requisito (prioridade) | RF | Sprint | Situação | Observação |
 |---|---|---|---|---|---|
-| REQ01 | Cadastrar usuário (alta), com os campos do Apêndice A e a decisão D1 | RF01, RF22 | 1 | Back-end conferido; web na #69 | D1: advogado e usuário comum na primeira versão, com nome, e-mail, senha e CPF, mais a OAB para advogado. Empresas ficam fora desta versão, como a D1 prevê |
-| REQ02 | Recuperar senha (média) | RF05 | 1 | Back-end conferido; web na #69 | Antecipado da Sprint 2 em 2026-11-18 |
-| REQ03 | Logar no sistema (alta) | RF03 (+ RF02, RF21) | 1 | Back-end conferido; web na #69 | O login exige o e-mail verificado (RF02, ADR-007), regra que vem da "Estruturação do Veridit" |
-| REQ04 | Sair do sistema (alta) | RF03 | 1 | Back-end conferido; web na #69 | `POST /api/auth/logout` e "Sair" no menu |
+| REQ01 | Cadastrar usuário (alta), com os campos do Apêndice A e a decisão D1 | RF01, RF22 | 1 | implementado | D1: advogado e usuário comum na primeira versão, com nome, e-mail, senha e CPF, mais a OAB para advogado. Empresas ficam fora desta versão, como a D1 prevê |
+| REQ02 | Recuperar senha (média) | RF05 | 1 | implementado | Antecipado da Sprint 2 em 2026-11-18 |
+| REQ03 | Logar no sistema (alta) | RF03 (+ RF02, RF21) | 1 | implementado | O login exige o e-mail verificado (RF02, ADR-007), regra que vem da "Estruturação do Veridit" |
+| REQ04 | Sair do sistema (alta) | RF03 | 1 | implementado | `POST /api/auth/logout` e "Sair" no menu |
 | REQ05 | Comprar créditos (alta), com a decisão D2 | RF07, RF08 | 2 | planejado | Pacotes da D2 (básico, médio e premium) e dados de faturamento do Apêndice A ainda não estão nas issues (#70) |
 | REQ06 | Efetuar pagamento de créditos (alta) | RF08, RF09 | 2 | planejado | Mercado Pago ou "pela plataforma do Veridit" com QR Code ou código PIX (ADR-013); definir na #70 |
 | REQ07 | Confirmar pagamento por e-mail (alta) | RF09, RF11 | 2 | planejado | Template na #33 |
