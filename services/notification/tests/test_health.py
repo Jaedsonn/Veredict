@@ -102,11 +102,11 @@ def test_registered_template_without_files_fails_at_startup(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def registry_with_missing_folder() -> TemplateRegistry:
-        return TemplateRegistry([TemplateSpec("password_reset", WelcomeData)])
+        return TemplateRegistry([TemplateSpec("mfa_code", WelcomeData)])
 
     monkeypatch.setattr(main, "build_registry", registry_with_missing_folder)
 
-    with pytest.raises(TemplateNotFound, match="password_reset"):
+    with pytest.raises(TemplateNotFound, match="mfa_code"):
         create_app(settings)
 
 

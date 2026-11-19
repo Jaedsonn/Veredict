@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth_service.adapters.clock import SystemClock
 from auth_service.adapters.password_hasher import Argon2PasswordHasher
 from auth_service.adapters.repositories import (
+    SqlAlchemyPasswordResetTokenRepository,
     SqlAlchemyRefreshTokenRepository,
     SqlAlchemyUserRepository,
     SqlAlchemyVerificationCodeRepository,
@@ -22,10 +23,12 @@ from auth_service.adapters.token_issuer import PyJwtTokenIssuer
 from auth_service.config import Settings
 from auth_service.domain.entities import RequestContext
 from auth_service.domain.password_policy import PasswordPolicy
+from auth_service.domain.reset_token import ResetTokenService
 from auth_service.domain.verification_code import VerificationCodeService
 from auth_service.ports import (
     Clock,
     PasswordHasher,
+    PasswordResetTokenRepository,
     RefreshTokenRepository,
     TokenIssuer,
     UserRepository,
@@ -38,7 +41,9 @@ from auth_service.use_cases import (
     LogoutUser,
     RefreshSession,
     RegisterUser,
+    RequestPasswordReset,
     ResendVerificationCode,
+    ResetPassword,
     UpdateProfile,
     VerifyEmail,
 )
@@ -84,6 +89,12 @@ def get_verification_code_service(
     )
 
 
+def get_reset_token_service(
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> ResetTokenService:
+    return ResetTokenService(ttl_minutes=settings.password_reset_ttl_minutes)
+
+
 def get_token_issuer(request: Request) -> TokenIssuer:
     issuer: TokenIssuer = request.app.state.token_issuer
     return issuer
@@ -105,6 +116,7 @@ ClockDep = Annotated[Clock, Depends(get_clock)]
 PasswordHasherDep = Annotated[PasswordHasher, Depends(get_password_hasher)]
 PasswordPolicyDep = Annotated[PasswordPolicy, Depends(get_password_policy)]
 CodeServiceDep = Annotated[VerificationCodeService, Depends(get_verification_code_service)]
+ResetTokenServiceDep = Annotated[ResetTokenService, Depends(get_reset_token_service)]
 TokenIssuerDep = Annotated[TokenIssuer, Depends(get_token_issuer)]
 RequestContextDep = Annotated[RequestContext, Depends(get_request_context)]
 
@@ -121,9 +133,14 @@ def get_refresh_token_repository(session: SessionDep) -> RefreshTokenRepository:
     return SqlAlchemyRefreshTokenRepository(session)
 
 
+def get_password_reset_token_repository(session: SessionDep) -> PasswordResetTokenRepository:
+    return SqlAlchemyPasswordResetTokenRepository(session)
+
+
 UserRepoDep = Annotated[UserRepository, Depends(get_user_repository)]
 CodeRepoDep = Annotated[VerificationCodeRepository, Depends(get_verification_code_repository)]
 RefreshRepoDep = Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)]
+ResetRepoDep = Annotated[PasswordResetTokenRepository, Depends(get_password_reset_token_repository)]
 
 
 def get_register_user_use_case(
@@ -267,6 +284,48 @@ def get_change_password_use_case(
     )
 
 
+def get_request_password_reset_use_case(
+    users: UserRepoDep,
+    reset_tokens: ResetRepoDep,
+    token_service: ResetTokenServiceDep,
+    notifier: NotifierDep,
+    audit: AuditLoggerDep,
+    clock: ClockDep,
+) -> RequestPasswordReset:
+    return RequestPasswordReset(
+        users=users,
+        reset_tokens=reset_tokens,
+        token_service=token_service,
+        notifier=notifier,
+        audit=audit,
+        clock=clock,
+    )
+
+
+def get_reset_password_use_case(
+    users: UserRepoDep,
+    reset_tokens: ResetRepoDep,
+    refresh_tokens: RefreshRepoDep,
+    token_service: ResetTokenServiceDep,
+    hasher: PasswordHasherDep,
+    password_policy: PasswordPolicyDep,
+    notifier: NotifierDep,
+    audit: AuditLoggerDep,
+    clock: ClockDep,
+) -> ResetPassword:
+    return ResetPassword(
+        users=users,
+        reset_tokens=reset_tokens,
+        refresh_tokens=refresh_tokens,
+        token_service=token_service,
+        hasher=hasher,
+        password_policy=password_policy,
+        notifier=notifier,
+        audit=audit,
+        clock=clock,
+    )
+
+
 __all__ = [
     "Argon2PasswordHasher",
     "AuditLoggerDep",
@@ -280,6 +339,8 @@ __all__ = [
     "PyJwtTokenIssuer",
     "RefreshRepoDep",
     "RequestContextDep",
+    "ResetRepoDep",
+    "ResetTokenServiceDep",
     "SessionDep",
     "SettingsDep",
     "TokenIssuerDep",
@@ -295,7 +356,9 @@ __all__ = [
     "get_refresh_session_use_case",
     "get_register_user_use_case",
     "get_request_context",
+    "get_request_password_reset_use_case",
     "get_resend_code_use_case",
+    "get_reset_password_use_case",
     "get_session",
     "get_update_profile_use_case",
     "get_verify_email_use_case",

@@ -28,6 +28,7 @@ const CODE_MESSAGES: Record<string, string> = {
   code_consumed: "Código expirado, solicite outro.",
   too_many_attempts: "Muitas tentativas com este código. Solicite um novo código.",
   invalid_current_password: "A senha atual está incorreta.",
+  invalid_reset_token: "Link inválido ou expirado. Solicite um novo.",
   gateway_unavailable: "Serviço indisponível no momento. Tente novamente em instantes.",
 };
 

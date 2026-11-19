@@ -80,6 +80,19 @@ class RefreshTokenEntity:
     created_at: datetime
 
 
+@dataclass(slots=True)
+class PasswordResetTokenEntity:
+    """Representação de domínio de um link de redefinição de senha persistido por hash (§5.6)"""
+
+    id: int
+    user_id: int
+    token_hash: str
+    expires_at: datetime
+    consumed_at: datetime | None
+    requested_ip: str | None
+    created_at: datetime
+
+
 @dataclass(frozen=True, slots=True)
 class TokenPairResult:
     """Par de tokens (Access JWT RS256 + Refresh opaco) emitido em sessões autenticadas"""

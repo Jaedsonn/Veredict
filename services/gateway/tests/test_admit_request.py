@@ -6,6 +6,9 @@ from structlog.testing import capture_logs
 from gateway_service.domain import (
     InvalidTokenError,
     Principal,
+    RateDecision,
+    RateKey,
+    RateLimit,
     RateLimitExceededError,
     Route,
 )
@@ -13,7 +16,8 @@ from gateway_service.routes import LOGIN_LIMIT, REGISTER_LIMIT, ROUTES
 from gateway_service.use_cases.admit_request import (
     AdmitRequest,
     bearer_token,
-    login_email,
+    body_email,
+    needs_body,
     rate_key,
 )
 
@@ -115,7 +119,7 @@ async def test_login_key_normalizes_email(admit: AdmitRequest, limiter: Recordin
     "body", [b"{nao json", b'{"email": 7}', b"", None, b"[1]", b"\xff\xfe", b"[" * 5000]
 )
 def test_unusable_body_counts_as_empty_email(body: bytes | None) -> None:
-    assert login_email(body) == ""
+    assert body_email(body) == ""
     empty = hashlib.sha256(b"").hexdigest()[:32]
     assert rate_key(LOGIN_LIMIT, IP, body) == f"{IP}|{empty}"
 
@@ -139,7 +143,7 @@ def test_rate_key_has_no_plain_email() -> None:
 
 
 async def test_limit_is_checked_before_jwt(verifier: FakeVerifier) -> None:
-    limited_me = Route("/api/me", "auth", "/me", public=False, rate_limit=REGISTER_LIMIT)
+    limited_me = Route("/api/me", "auth", "/me", public=False, rate_limits=(REGISTER_LIMIT,))
     admit = AdmitRequest(RecordingLimiter(allowed=False, retry_after=6), verifier)
 
     with capture_logs() as logs, pytest.raises(RateLimitExceededError) as exc:
@@ -164,3 +168,75 @@ def test_lone_surrogate_in_email_still_builds_a_key() -> None:
 
     assert key.startswith(f"{IP}|")
     assert key != rate_key(LOGIN_LIMIT, IP, b'{"email": "a@x.com"}')
+
+
+IP_LIMIT = RateLimit("by_ip", 10, 3600.0)
+EMAIL_LIMIT = RateLimit("by_email", 3, 3600.0, RateKey.EMAIL)
+TWO_LIMITS = Route("/api/x", "auth", "/x", public=True, rate_limits=(IP_LIMIT, EMAIL_LIMIT))
+BODY = b'{"email": " Ana@Exemplo.com "}'
+
+
+class DenyingLimiter:
+    """Nega só as políticas listadas, com um Retry-After por política"""
+
+    def __init__(self, deny: dict[str, int]) -> None:
+        self.deny = deny
+        self.hits: list[tuple[str, str]] = []
+
+    async def hit(self, key: str, limit: RateLimit) -> RateDecision:
+        self.hits.append((key, limit.name))
+        if limit.name in self.deny:
+            return RateDecision(allowed=False, retry_after=self.deny[limit.name])
+        return RateDecision(allowed=True)
+
+
+def test_email_key_ignores_ip_and_normalizes() -> None:
+    key = rate_key(EMAIL_LIMIT, IP, BODY)
+
+    assert key == rate_key(EMAIL_LIMIT, "198.51.100.1", b'{"email": "ana@exemplo.com"}')
+    assert key == hashlib.sha256(b"ana@exemplo.com").hexdigest()[:32]
+    assert IP not in key
+
+
+def test_needs_body_only_for_email_keys() -> None:
+    assert needs_body(LOGIN)
+    assert needs_body(TWO_LIMITS)
+    assert not needs_body(REGISTER)
+    assert not needs_body(REFRESH)
+
+
+async def test_limits_run_in_order_ip_then_email(verifier: FakeVerifier) -> None:
+    limiter = DenyingLimiter({})
+
+    await AdmitRequest(limiter, verifier).execute(
+        TWO_LIMITS, client_ip=IP, authorization=None, body=BODY
+    )
+
+    assert limiter.hits == [(IP, "by_ip"), (rate_key(EMAIL_LIMIT, IP, BODY), "by_email")]
+
+
+async def test_email_denial_still_spends_the_ip_token(verifier: FakeVerifier) -> None:
+    limiter = DenyingLimiter({"by_email": 1200})
+
+    with capture_logs() as logs, pytest.raises(RateLimitExceededError) as exc:
+        await AdmitRequest(limiter, verifier).execute(
+            TWO_LIMITS, client_ip=IP, authorization=None, body=BODY
+        )
+
+    assert (exc.value.policy, exc.value.retry_after) == ("by_email", 1200)
+    assert [name for _, name in limiter.hits] == ["by_ip", "by_email"]
+    assert logs == [
+        {"event": "rate_limited", "policy": "by_email", "retry_after": 1200, "log_level": "warning"}
+    ]
+
+
+async def test_ip_denial_does_not_touch_the_email_bucket(verifier: FakeVerifier) -> None:
+    limiter = DenyingLimiter({"by_ip": 360})
+
+    with pytest.raises(RateLimitExceededError) as exc:
+        await AdmitRequest(limiter, verifier).execute(
+            TWO_LIMITS, client_ip=IP, authorization=None, body=BODY
+        )
+
+    assert (exc.value.policy, exc.value.retry_after) == ("by_ip", 360)
+    assert [name for _, name in limiter.hits] == ["by_ip"]

@@ -14,6 +14,8 @@ SNAPSHOTS = Path(__file__).parent / "snapshots"
 WEB_URL = "http://localhost:3000"
 VERIFICATION: dict[str, JsonValue] = {"name": "João", "code": "042137", "expires_in_minutes": 15}
 XSS_NAME = '<script>alert(1)</script> & "x"'
+RESET_TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE"
+RESET: dict[str, JsonValue] = {"name": "João", "token": RESET_TOKEN, "expires_in_minutes": 30}
 
 
 def _render(template: str, data: dict[str, JsonValue], web_url: str = WEB_URL) -> RenderedEmail:
@@ -28,6 +30,8 @@ def _render(template: str, data: dict[str, JsonValue], web_url: str = WEB_URL) -
         ("welcome", "welcome", {"name": "João"}),
         ("email_verification.no_name", "email_verification", {**VERIFICATION, "name": " \r\n "}),
         ("welcome.no_name", "welcome", {"name": ""}),
+        ("password_reset", "password_reset", RESET),
+        ("password_changed", "password_changed", {"name": "João"}),
     ],
 )
 @pytest.mark.parametrize("part", ["txt", "html"])
@@ -45,20 +49,38 @@ def test_subjects_are_exact() -> None:
         "Seu código de verificação Veriditi"
     )
     assert _render("welcome", {"name": "Ana"}).subject == "Bem-vindo(a) ao Veriditi"
+    assert _render("password_reset", RESET).subject == "Redefinição de senha do Veriditi"
+    assert _render("password_changed", {"name": "Ana"}).subject == (
+        "Sua senha do Veriditi foi alterada"
+    )
 
 
-def test_one_minute_is_singular() -> None:
-    rendered = _render("email_verification", {**VERIFICATION, "expires_in_minutes": 1})
+@pytest.mark.parametrize(("template", "base"), [("email_verification", VERIFICATION)])
+def test_one_minute_is_singular(template: str, base: dict[str, JsonValue]) -> None:
+    rendered = _render(template, {**base, "expires_in_minutes": 1})
 
     assert "expira em 1 minuto." in rendered.text
     assert "expira em 1 minuto." in rendered.html
 
 
-@pytest.mark.parametrize("template", ["email_verification", "welcome"])
+def test_reset_link_expiry_is_singular_for_one_minute() -> None:
+    rendered = _render("password_reset", {**RESET, "expires_in_minutes": 1})
+
+    assert "expira em 1 minuto e" in rendered.text
+    assert "expira em 1 minuto e" in rendered.html
+
+
+BASES: dict[str, dict[str, JsonValue]] = {
+    "email_verification": VERIFICATION,
+    "welcome": {},
+    "password_reset": RESET,
+    "password_changed": {},
+}
+
+
+@pytest.mark.parametrize("template", sorted(BASES))
 def test_html_escapes_name_and_text_keeps_it_raw(template: str) -> None:
-    data: dict[str, JsonValue] = {"name": XSS_NAME}
-    if template == "email_verification":
-        data = {**VERIFICATION, **data}
+    data: dict[str, JsonValue] = {**BASES[template], "name": XSS_NAME}
 
     rendered = _render(template, data)
 
@@ -77,8 +99,26 @@ def test_links_use_web_url() -> None:
     assert "https://veriditi.app/entrar" in welcome.text
 
 
+def test_reset_links_carry_the_token_and_changed_links_to_forgot() -> None:
+    reset = _render("password_reset", RESET, web_url="https://veriditi.app")
+    changed = _render("password_changed", {"name": "Ana"}, web_url="https://veriditi.app")
+    link = f"https://veriditi.app/redefinir-senha?token={RESET_TOKEN}"
+
+    assert f'href="{link}"' in reset.html
+    assert link in reset.text
+    assert 'href="https://veriditi.app/esqueci-senha"' in changed.html
+    assert "https://veriditi.app/esqueci-senha" in changed.text
+
+
 def test_body_repr_hides_the_code() -> None:
     assert "042137" not in repr(_render("email_verification", VERIFICATION))
+
+
+def test_reset_token_stays_out_of_reprs() -> None:
+    parsed = build_registry().parse("password_reset", RESET)
+
+    assert RESET_TOKEN not in repr(parsed)
+    assert RESET_TOKEN not in repr(_render("password_reset", RESET))
 
 
 def _write(root: Path, name: str, subject: str, text: str = "x", html: str = "<p>x</p>") -> None:

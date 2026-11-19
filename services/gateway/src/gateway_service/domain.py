@@ -5,6 +5,8 @@ from enum import StrEnum
 class RateKey(StrEnum):
     IP = "ip"
     IP_AND_EMAIL = "ip_email"
+    # Só o e-mail do corpo: limita o mesmo alvo vindo de IPs diferentes
+    EMAIL = "email"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +36,8 @@ class Route:
     upstream_path: str
     public: bool = field(kw_only=True)
     methods: frozenset[str] = field(default=frozenset({"POST"}), kw_only=True)
-    rate_limit: RateLimit | None = field(default=None, kw_only=True)
+    # Avaliados em ordem; o primeiro que negar responde o 429
+    rate_limits: tuple[RateLimit, ...] = field(default=(), kw_only=True)
     # Casa path e path/...; sem uso na Sprint 1
     prefix: bool = field(default=False, kw_only=True)
     # Headers do cliente além da allowlist do proxy (ex.: assinatura de webhook)

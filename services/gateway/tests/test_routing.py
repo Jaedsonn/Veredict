@@ -2,7 +2,15 @@ import pytest
 from starlette.exceptions import HTTPException
 
 from gateway_service.domain import RateLimit, Route, Upstream
-from gateway_service.routes import LOGIN_LIMIT, REGISTER_LIMIT, RESEND_LIMIT, ROUTES
+from gateway_service.routes import (
+    FORGOT_EMAIL_LIMIT,
+    FORGOT_IP_LIMIT,
+    LOGIN_LIMIT,
+    REGISTER_LIMIT,
+    RESEND_LIMIT,
+    RESET_LIMIT,
+    ROUTES,
+)
 from gateway_service.routing import ALLOWED_METHODS, RouteTable, is_safe_path
 
 UPSTREAMS = {"auth": Upstream("auth", "http://auth.test", "autenticação")}
@@ -66,13 +74,15 @@ def test_unknown_paths_are_404(table: RouteTable, path: str) -> None:
 
 def test_rate_limits_by_route(table: RouteTable) -> None:
     def limit(path: str) -> object:
-        return table.match("POST", path).route.rate_limit
+        return table.match("POST", path).route.rate_limits
 
-    assert limit("/api/auth/login") is LOGIN_LIMIT
-    assert limit("/api/auth/register") is REGISTER_LIMIT
-    assert limit("/api/auth/verify-email/resend") is RESEND_LIMIT
-    assert limit("/api/auth/verify-email") is None
-    assert limit("/api/auth/refresh") is None
+    assert limit("/api/auth/login") == (LOGIN_LIMIT,)
+    assert limit("/api/auth/register") == (REGISTER_LIMIT,)
+    assert limit("/api/auth/verify-email/resend") == (RESEND_LIMIT,)
+    assert limit("/api/auth/verify-email") == ()
+    assert limit("/api/auth/refresh") == ()
+    assert limit("/api/auth/password/forgot") == (FORGOT_IP_LIMIT, FORGOT_EMAIL_LIMIT)
+    assert limit("/api/auth/password/reset") == (RESET_LIMIT,)
 
 
 def test_public_and_protected_routes() -> None:
@@ -155,8 +165,17 @@ def test_rejects_invalid_routes(route: Route, message: str) -> None:
         RouteTable((route,), UPSTREAMS)
 
 
-def test_rejects_invalid_rate_limit() -> None:
-    route = Route("/api/x", "auth", "/x", public=True, rate_limit=RateLimit("x", 0, 60.0))
+@pytest.mark.parametrize(
+    "limits",
+    [
+        (RateLimit("x", 0, 60.0),),
+        (RateLimit("ok", 1, 60.0), RateLimit("x", 1, 0.0)),
+        (RateLimit("x", 1, 60.0), RateLimit("x", 2, 60.0)),
+    ],
+    ids=["zero-capacity", "second-limit-zero-period", "repeated-name"],
+)
+def test_rejects_invalid_rate_limits(limits: tuple[RateLimit, ...]) -> None:
+    route = Route("/api/x", "auth", "/x", public=True, rate_limits=limits)
     with pytest.raises(ValueError, match="Rate limit"):
         RouteTable((route,), UPSTREAMS)
 

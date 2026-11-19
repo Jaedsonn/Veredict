@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from auth_service.domain.entities import (
+    PasswordResetTokenEntity,
     RefreshTokenEntity,
     UserEntity,
     VerificationCodeEntity,
@@ -82,8 +83,8 @@ class UserRepository(Protocol):
     ) -> UserEntity:
         """Cria usuário `pending_verification`; levanta `EmailAlreadyRegisteredError`"""
 
-    async def get_by_id(self, user_id: int) -> UserEntity | None:
-        """Busca usuário pelo ID primário"""
+    async def get_by_id(self, user_id: int, *, for_update: bool = False) -> UserEntity | None:
+        """Busca usuário pelo ID primário (opcionalmente com `SELECT ... FOR UPDATE`)"""
 
     async def get_by_email(
         self,
@@ -229,3 +230,36 @@ class RefreshTokenRepository(Protocol):
         exclude_family_id: uuid.UUID | None = None,
     ) -> int:
         """Revoga os refresh tokens ativos do usuário (preservando opcionalmente a sessão atual)"""
+
+
+@runtime_checkable
+class PasswordResetTokenRepository(Protocol):
+    """Porta de persistência dos tokens de redefinição de senha"""
+
+    async def create_and_invalidate_previous(
+        self,
+        *,
+        user_id: int,
+        token_hash: str,
+        expires_at: datetime,
+        requested_ip: str | None,
+        now: datetime,
+    ) -> PasswordResetTokenEntity:
+        """Consome os tokens ativos do usuário e cria o novo na mesma transação"""
+
+    async def consume(
+        self,
+        token_hash: str,
+        *,
+        now: datetime,
+        commit: bool = True,
+    ) -> PasswordResetTokenEntity | None:
+        """Marca `consumed_at` só se o token está ativo e no prazo; `None` se não consumiu"""
+
+    async def get_by_hash(
+        self,
+        token_hash: str,
+        *,
+        for_update: bool = False,
+    ) -> PasswordResetTokenEntity | None:
+        """Busca o token pelo SHA-256, consumido ou não (opcionalmente com `FOR UPDATE`)"""

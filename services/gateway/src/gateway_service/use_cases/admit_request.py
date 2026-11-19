@@ -14,6 +14,7 @@ from gateway_service.ports import JwtVerifier, RateLimiter
 from veriditi_common.logging import get_logger
 
 _EMAIL_HASH_CHARS: Final = 32
+_EMAIL_KEYS: Final = frozenset({RateKey.IP_AND_EMAIL, RateKey.EMAIL})
 
 log = get_logger(__name__)
 
@@ -28,7 +29,7 @@ def bearer_token(authorization: str | None) -> str:
     return token
 
 
-def login_email(body: bytes | None) -> str:
+def body_email(body: bytes | None) -> str:
     """Mesma normalização do auth; lixo vira "" e ainda conta no limite"""
     if not body:
         return ""
@@ -40,14 +41,24 @@ def login_email(body: bytes | None) -> str:
     return email.strip().lower() if isinstance(email, str) else ""
 
 
-def rate_key(limit: RateLimit, client_ip: str | None, body: bytes | None) -> str:
+def needs_body(route: Route) -> bool:
+    """Só rota com limite por e-mail precisa do corpo antes do upstream"""
+    return any(limit.key in _EMAIL_KEYS for limit in route.rate_limits)
+
+
+def _email_digest(body: bytes | None) -> str:
     """O hash limita o tamanho da chave e não guarda e-mail em claro na memória"""
+    # surrogatepass: um \ud800 solto no JSON não pode virar 500 numa rota pública
+    email = body_email(body).encode("utf-8", "surrogatepass")
+    return hashlib.sha256(email).hexdigest()[:_EMAIL_HASH_CHARS]
+
+
+def rate_key(limit: RateLimit, client_ip: str | None, body: bytes | None) -> str:
     base = client_ip or "unknown"
     if limit.key is RateKey.IP_AND_EMAIL:
-        # surrogatepass: um \ud800 solto no JSON não pode virar 500 numa rota pública
-        email = login_email(body).encode("utf-8", "surrogatepass")
-        digest = hashlib.sha256(email).hexdigest()[:_EMAIL_HASH_CHARS]
-        return f"{base}|{digest}"
+        return f"{base}|{_email_digest(body)}"
+    if limit.key is RateKey.EMAIL:
+        return _email_digest(body)
     return base
 
 
@@ -66,8 +77,9 @@ class AdmitRequest:
         authorization: str | None,
         body: bytes | None,
     ) -> Principal | None:
-        if route.rate_limit is not None:
-            limit = route.rate_limit
+        # Em ordem, parando no primeiro que nega: o de IP gasta a ficha mesmo se o de e-mail
+        # negar, e um IP já bloqueado não gasta a do e-mail
+        for limit in route.rate_limits:
             decision = await self._limiter.hit(rate_key(limit, client_ip, body), limit)
             if not decision.allowed:
                 log.warning("rate_limited", policy=limit.name, retry_after=decision.retry_after)

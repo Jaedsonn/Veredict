@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * Schemas compartilhados entre o formulário (cliente) e a Server Action (servidor).
- * As regras espelham a API do serviço de autenticação (#7, #8, #9, #10).
+ * As regras espelham a API do serviço de autenticação (#7, #8, #9, #10, #19).
  */
 
 export const PASSWORD_MIN = 10;
@@ -72,6 +72,23 @@ export const loginSchema = z.object({
 });
 
 export const profileSchema = z.object({ name: nameSchema });
+
+export const forgotPasswordSchema = z.object({ email: emailSchema });
+
+/** Formato do `secrets.token_urlsafe(32)` do auth: 43 caracteres base64url. */
+export const RESET_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().regex(RESET_TOKEN_RE, "Link inválido ou expirado. Solicite um novo."),
+    newPassword: passwordSchema,
+    confirmPassword: z.string().min(1, "Confirme a nova senha."),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "As senhas não coincidem.",
+    when: bothStrings("newPassword", "confirmPassword"),
+  });
 
 export const passwordChangeSchema = z
   .object({

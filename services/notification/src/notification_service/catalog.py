@@ -55,10 +55,23 @@ class WelcomeData(TemplateData):
     name: DisplayName
 
 
+class PasswordResetData(TemplateData):
+    name: DisplayName
+    # secrets.token_urlsafe(32): 43 caracteres base64url, que entram no link sem escape
+    token: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{43}$")] = Field(repr=False)
+    expires_in_minutes: Annotated[StrictInt, Field(ge=1, le=1440)]
+
+
+class PasswordChangedData(TemplateData):
+    name: DisplayName
+
+
 def build_registry() -> TemplateRegistry:
     return TemplateRegistry(
         [
             TemplateSpec(NotificationTemplate.EMAIL_VERIFICATION.value, EmailVerificationData),
             TemplateSpec(NotificationTemplate.WELCOME.value, WelcomeData),
+            TemplateSpec(NotificationTemplate.PASSWORD_RESET.value, PasswordResetData),
+            TemplateSpec(NotificationTemplate.PASSWORD_CHANGED.value, PasswordChangedData),
         ]
     )

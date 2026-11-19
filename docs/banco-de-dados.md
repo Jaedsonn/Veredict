@@ -72,9 +72,18 @@ erDiagram
     char family_id "UUID"
     datetime expires_at
     datetime revoked_at
-    enum revoke_reason "rotated | logout | reuse_detected"
+    enum revoke_reason "rotated | logout | reuse_detected | password_reset"
     varchar created_ip
     varchar user_agent
+    datetime created_at
+  }
+  PASSWORD_RESET_TOKENS {
+    bigint id PK
+    bigint user_id FK
+    char token_hash UK "SHA-256 hex"
+    datetime expires_at
+    datetime consumed_at
+    varchar requested_ip
     datetime created_at
   }
   NOTIFICATIONS_SENT {
@@ -183,7 +192,7 @@ erDiagram
 
 ## 5. Modelo físico da Sprint 1 (DDL final)
 
-Este é o DDL que as migrations de #3, #5, #6, #7, #8 e #9 produzem. Os nomes de constraint e de índice vêm da `naming_convention` (seção 9). No código, os models usam os tipos de `veriditi_common.db_types`, e as migrations descrevem o tipo físico explícito.
+Este é o DDL que as migrations de #3, #5, #6, #7, #8 e #9 produzem, mais as tabelas da Sprint 2 que já têm migration (§5.6, #19). Os nomes de constraint e de índice vêm da `naming_convention` (seção 9). No código, os models usam os tipos de `veriditi_common.db_types`, e as migrations descrevem o tipo físico explícito.
 
 ### 5.1 `veriditi.users` (dono: auth)
 
@@ -256,7 +265,7 @@ CREATE TABLE refresh_tokens (
   family_id     CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   expires_at    DATETIME(6) NOT NULL,
   revoked_at    DATETIME(6) NULL,
-  revoke_reason ENUM('rotated','logout','reuse_detected') NULL,
+  revoke_reason ENUM('rotated','logout','reuse_detected','password_reset') NULL,
   created_ip    VARCHAR(45) NULL,
   user_agent    VARCHAR(255) NULL,
   created_at    DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -273,7 +282,7 @@ CREATE TABLE refresh_tokens (
 | `token_hash` | CHAR(64) ascii | não | — | SHA-256 do token opaco de 32 bytes (#9). O token em si nunca é gravado | não |
 | `family_id` | CHAR(36) ascii | não | — | UUID da cadeia de rotação, criado no login | não |
 | `expires_at` | DATETIME(6) | não | — | Criação + 7 dias | não |
-| `revoked_at` / `revoke_reason` | DATETIME(6) / ENUM | sim | — | Preenchidos juntos (CHECK). `reuse_detected` alimenta a auditoria `auth.session.refresh_reuse_detected` | não |
+| `revoked_at` / `revoke_reason` | DATETIME(6) / ENUM | sim | — | Preenchidos juntos (CHECK). `reuse_detected` alimenta a auditoria `auth.session.refresh_reuse_detected`. `password_reset` (migration `0005`, #19) marca as sessões encerradas pela redefinição de senha; o refresh revogado assim dá 401 sem disparar a detecção de reuso | não |
 | `created_ip` | VARCHAR(45) | sim | — | IPv4 ou IPv6 textual | **sim** |
 | `user_agent` | VARCHAR(255) | sim | — | Navegador da sessão | **sim** |
 
@@ -384,6 +393,36 @@ CREATE TABLE audit_events (
 - Um INSERT duplicado consome um `id` (o InnoDB não devolve o `AUTO_INCREMENT`), então os ids não são contíguos.
 - A ordem do `id` é a da reserva do `AUTO_INCREMENT`, não a dos COMMITs: uma transação lenta pode confirmar o `id` 6 depois que o 7 já está visível. O cursor `after_id` é estável para paginar dados já confirmados, mas **não serve para acompanhar a cauda** com escritas concorrentes: quem leu até o 7 nunca verá o 6. Nota para o #34: o encadeamento e qualquer leitura incremental precisam de uma marca d'água atrasada (`received_at < now() - Δ`, com Δ maior que a transação mais longa) ou de uma sequência gerada sob lock na mesma transação do INSERT. `occurred_at` também não serve, porque depende do relógio do produtor.
 
+### 5.6 `veriditi.password_reset_tokens` (dono: auth, Sprint 2)
+
+Criada pela migration `0005` do auth (#19), que também acrescenta `password_reset` ao fim do ENUM `refresh_tokens.revoke_reason`. Acrescentar no fim é um `ALTER` instantâneo no InnoDB; o `downgrade` converte `password_reset` em `logout` antes de tirar o valor.
+
+```sql
+CREATE TABLE password_reset_tokens (
+  id           BIGINT      NOT NULL AUTO_INCREMENT,
+  user_id      BIGINT      NOT NULL,
+  token_hash   CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  expires_at   DATETIME(6) NOT NULL,
+  consumed_at  DATETIME(6) NULL,
+  requested_ip VARCHAR(45) NULL,
+  created_at   DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT pk_password_reset_tokens PRIMARY KEY (id),
+  CONSTRAINT uq_password_reset_tokens_token_hash UNIQUE (token_hash),
+  CONSTRAINT fk_password_reset_tokens_user_id_users FOREIGN KEY (user_id) REFERENCES users (id),
+  INDEX ix_password_reset_tokens_user_id_consumed_at (user_id, consumed_at)
+);
+```
+
+| Coluna | Tipo | Nulo | Padrão | Descrição | PII |
+|---|---|---|---|---|---|
+| `user_id` | BIGINT | não | — | FK para `users`, com `RESTRICT` | não |
+| `token_hash` | CHAR(64) ascii | não | — | SHA-256 puro do token `secrets.token_urlsafe(32)` (#19). O token tem 256 bits, então dispensa o pepper que o código de 6 dígitos precisa (§5.2). O token em si só existe no e-mail | não |
+| `expires_at` | DATETIME(6) | não | — | Criação + 30 min (`PASSWORD_RESET_TTL_MINUTES`) | não |
+| `consumed_at` | DATETIME(6) | sim | — | Uso bem-sucedido **ou** substituição por um pedido novo, como em `email_verification_codes` | não |
+| `requested_ip` | VARCHAR(45) | sim | — | IP de quem pediu o link, para investigar abuso | **sim** |
+
+Só conta `active` recebe token: pedido para conta inexistente, `pending_verification` ou `blocked` não grava nada (#19, anti-enumeração). Token malformado, inexistente, expirado, usado ou substituído dá sempre o mesmo `400 invalid_reset_token`.
+
 ## 6. Índices e as consultas que eles atendem
 
 Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não aparecem na tabela. O InnoDB exige índice na coluna de FK, e os índices compostos abaixo já começam por ela.
@@ -393,7 +432,9 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 | `uq_users_email` | Login: `SELECT id, password_hash, status FROM users WHERE email = :email`. No cadastro, a violação do UNIQUE vira 409 sem SELECT prévio | #7, #9 |
 | `ix_email_verification_codes_user_id_consumed_at` | Código ativo: `SELECT … WHERE user_id = :uid AND consumed_at IS NULL AND purpose = :p ORDER BY id DESC LIMIT 1 FOR UPDATE`. Invalidar os anteriores: `UPDATE … SET consumed_at = :now WHERE user_id = :uid AND consumed_at IS NULL`. Cooldown e limite de reenvio: `SELECT COUNT(*) … WHERE user_id = :uid AND created_at >= :since` (o prefixo `user_id` reduz a busca a poucas linhas por usuário) | #8 |
 | `uq_refresh_tokens_token_hash` | Refresh e logout: `SELECT … FROM refresh_tokens WHERE token_hash = :h FOR UPDATE` | #9 |
-| `ix_refresh_tokens_user_id_revoked_at` | Reuso detectado revoga **todos** os tokens do usuário: `UPDATE refresh_tokens SET revoked_at = :now, revoke_reason = 'reuse_detected' WHERE user_id = :uid AND revoked_at IS NULL` | #9 |
+| `ix_refresh_tokens_user_id_revoked_at` | Reuso detectado revoga **todos** os tokens do usuário: `UPDATE refresh_tokens SET revoked_at = :now, revoke_reason = 'reuse_detected' WHERE user_id = :uid AND revoked_at IS NULL`. A redefinição de senha faz o mesmo com `'password_reset'` | #9, #19 |
+| `uq_password_reset_tokens_token_hash` | Reset: `UPDATE password_reset_tokens SET consumed_at = :now WHERE token_hash = :h AND consumed_at IS NULL AND expires_at > :now` (consumo condicional, sem SELECT antes); só se nenhuma linha mudou, `SELECT … WHERE token_hash = :h` para a auditoria saber o motivo | #19 |
+| `ix_password_reset_tokens_user_id_consumed_at` | Novo pedido invalida os anteriores: `UPDATE password_reset_tokens SET consumed_at = :now WHERE user_id = :uid AND consumed_at IS NULL` | #19 |
 | `uq_notifications_sent_idempotency_key` | Reserva idempotente: `INSERT …`. A violação significa "já enviado, em andamento ou falhou", e então `SELECT status … WHERE idempotency_key = :k` só para o log. Deadlock (1213) repete o INSERT uma vez; 1205 sobe. O fim do envio atualiza pela PK: `UPDATE … WHERE id = :id AND status = 'pending'` | #6 |
 | `uq_audit_events_event_id` | Ingestão idempotente: `INSERT …`. `IntegrityError` → 202 sem duplicar. Deadlock (1213) repete o INSERT uma vez; lock wait timeout (1205) não, porque já esperou 50 s | #5 |
 | `ix_audit_events_actor_id_occurred_at` | `GET /internal/events?actor_id=&from=&to=` e as atividades do usuário (RF20): `WHERE actor_id = :uid AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n`. O `ORDER BY id` faz filesort só das linhas filtradas | #5, #34 |
@@ -414,7 +455,8 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 |---|---|---|---|---|---|
 | `users` | veriditi | auth | `auth_svc` | SELECT, INSERT, UPDATE (**sem DELETE**: usuário vira `blocked`) | 1 |
 | `email_verification_codes`, `refresh_tokens` | veriditi | auth | `auth_svc` | SELECT, INSERT, UPDATE, DELETE (expurgo de expirados) | 1 |
-| `user_mfa`, `mfa_recovery_codes`, `password_reset_tokens` | veriditi | auth | `auth_svc` | a definir na issue (#18, #19) | 2 |
+| `password_reset_tokens` | veriditi | auth | `auth_svc` | SELECT, INSERT, UPDATE, DELETE (expurgo de expirados) | 2 |
+| `user_mfa`, `mfa_recovery_codes` | veriditi | auth | `auth_svc` | a definir na issue (#18) | 2 |
 | `notifications_sent` | veriditi | notification | `notification_svc` | SELECT, INSERT, UPDATE | 1 |
 | `credit_packages`, `capture_prices`, `orders`, `credit_wallets` | veriditi | payment | `payment_svc` | a definir (#21–#24) | 2 |
 | `credit_ledger` | veriditi | payment | `payment_svc` | SELECT, INSERT (**append-only**) | 2 |
@@ -530,6 +572,12 @@ Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAM
 
 Se o #9 mergear antes do #8, os números das duas revisões trocam. As duas dependem só de `users`.
 
+Já na Sprint 2:
+
+| Serviço / `version_table` | Revisão | `down_revision` | Issue | Conteúdo |
+|---|---|---|---|---|
+| auth | `0005` | `0004` | #19 | `password_reset_tokens` + GRANT, e `password_reset` no fim do ENUM `refresh_tokens.revoke_reason` |
+
 ## 13. Sprint 2: notas do modelo lógico
 
 O DER da seção 3 é a referência. O DDL físico nasce em cada issue, que atualiza este documento no mesmo PR.
@@ -572,6 +620,10 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 | #8, #9 | `REFERENCES users(id)` sem regra | FK nomeada com `RESTRICT` | Usuário nunca é apagado |
 | #9 | Sem motivo da revogação | `revoke_reason` + CHECK de consistência | Distingue rotação, logout e roubo na auditoria |
 | #9 | `family_id` sem índice; o harness sugeria um | Sem índice na Sprint 1 | O reuso revoga por usuário; nenhuma consulta usa `family_id` |
+| #19 | `token_hash CHAR(64)`, `DATETIME`, `used_at`, FK sem regra, `requested_ip` sem tipo de charset | `CHAR(64)` ascii_bin (`HashHex`), `DATETIME(6)` UTC, `consumed_at`, FK `RESTRICT` nomeada, índice `(user_id, consumed_at)` | Convenções do #41. `consumed_at` cobre o token usado **e** o substituído, como em `email_verification_codes`; o índice atende a invalidação dos anteriores |
+| #19 | Revogar todas as sessões, sem motivo | `revoke_reason = 'password_reset'` (fim do ENUM) | Distingue o reset de logout e de roubo na trilha de sessões |
+| #19 | "O MFA continua exigido no próximo login" | Não se aplica ainda | O MFA (#18, `user_mfa`) não existe. O reset não toca em tabela de MFA; quando o #18 entrar, um teste precisa provar que o login depois do reset continua pedindo o 2º fator |
+| #19 | Auditoria só com os nomes das ações | `reset_requested` também com `outcome=failure` (conta inexistente ou não ativa) e `reset_failed` com `metadata.reason` (`malformed`, `not_found`, `expired`, `consumed`, `account_not_active`) | A resposta é a mesma para todos os casos; a trilha guarda o motivo, nunca o e-mail nem o token |
 | #3, #5 | `LOGS_DB_MIGRATOR_*` separado | Um único `migrator` para os dois bancos | Uma credencial de DDL a menos para gerenciar; o runtime continua separado |
 | #3 | `LogsDbSettings` / `env_prefix="LOGS_DB_"` para o monitoring | O monitoring usa o `ServiceSettings` com `db_name = "veriditi_logs"` como padrão; o compose mapeia `LOGS_DB_PASSWORD` para `DB_PASSWORD` | Um único `migrator` (acima); nome do banco e do usuário são fixos pelo init, então só a senha vai para o `.env` |
 | #3 | Compose sobe 9 serviços, sem `notification-migrate` | Entra o `notification-migrate` | O notification é dono de `notifications_sent` (seções 7 e 12) e a seção 10 exige `<serviço>-migrate` antes do serviço; até o #6, com `versions/` vazia, ele só criava a `alembic_version_notification` |
@@ -599,6 +651,6 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 ## Como verificar
 
 - `uv run pytest`: tipos, convenções e helpers em SQLite.
-- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos, a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade) a 0001 do monitoring (DDL de `audit_events`, 1142 em UPDATE, DELETE, TRUNCATE e ALTER para o `veriditi_logs_writer`, REVOKE no downgrade e reenvios concorrentes gravando uma linha só) e a 0001 do notification (DDL de `notifications_sent`, GRANT de SELECT, INSERT e UPDATE sem DELETE, 1142 em DELETE, TRUNCATE e ALTER, CHECKs com 3819, REVOKE no downgrade, reserva concorrente gravando uma linha só e UPDATE condicional que não regride).
+- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos, a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade), a 0005 do auth (DDL de `password_reset_tokens`, GRANT com DELETE, `password_reset` no ENUM de `revoke_reason` e downgrade que o converte em `logout`), a 0001 do monitoring (DDL de `audit_events`, 1142 em UPDATE, DELETE, TRUNCATE e ALTER para o `veriditi_logs_writer`, REVOKE no downgrade e reenvios concorrentes gravando uma linha só) e a 0001 do notification (DDL de `notifications_sent`, GRANT de SELECT, INSERT e UPDATE sem DELETE, 1142 em DELETE, TRUNCATE e ALTER, CHECKs com 3819, REVOKE no downgrade, reserva concorrente gravando uma linha só e UPDATE condicional que não regride).
 - `make db-test-migrations`: num MySQL descartável igual, roda os 5 passos da seção 11 para cada serviço com banco.
 - `make db-test`: os dois acima; é o que o job `database` do CI executa.
