@@ -1,6 +1,6 @@
 # ADR-021 – Datas em UTC com DATETIME(6), garantidas na aplicação, na sessão e no servidor
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-12
 - Afeta: ADR-001 (data e hora precisas da captura)
 
@@ -35,6 +35,9 @@ O `server_default` dos models usa `UtcNow()`, que vira `CURRENT_TIMESTAMP(6)` no
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| | | |
+| Integrante | Evidência |
+|---|---|
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |

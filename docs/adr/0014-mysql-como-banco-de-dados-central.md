@@ -1,6 +1,6 @@
 # ADR-014 – MySQL 8.4 como Banco de Dados Central
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-12
 - Afeta: ADR-010 (divisão dos bancos de dados)
 
@@ -42,9 +42,9 @@ As convenções físicas (tipos, nomes, datas) estão nas ADRs [021](0021-datas-
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| Beatriz Marques dos Santos | | |
-| Danielle Santos de Souza | | |
-| Giovanna Ferrúcio Farani | | |
-| Luiz Antony Duarte Ribeiro | | |
+| Integrante | Evidência |
+|---|---|
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |

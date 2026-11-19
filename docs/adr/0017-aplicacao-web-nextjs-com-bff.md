@@ -1,6 +1,6 @@
 # ADR-017 – Aplicação Web em Next.js com padrão BFF
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-12
 - Afeta: ADR-006 (aplicação Web)
 
@@ -45,9 +45,9 @@ Numa SPA que chama a API direto do navegador, o JWT fica acessível ao JavaScrip
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| Beatriz Marques dos Santos | | |
-| Danielle Santos de Souza | | |
-| Giovanna Ferrúcio Farani | | |
-| Luiz Antony Duarte Ribeiro | | |
+| Integrante | Evidência |
+|---|---|
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |

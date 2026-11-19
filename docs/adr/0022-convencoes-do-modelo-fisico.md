@@ -1,6 +1,6 @@
 # ADR-022 – Convenções do modelo físico
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-12
 - Afeta: ADR-014 (MySQL 8.4 como Banco Central)
 
@@ -32,6 +32,9 @@ Cada issue da Sprint 1 trazia o próprio DDL. Os nomes de índice eram livres (`
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| | | |
+| Integrante | Evidência |
+|---|---|
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |
