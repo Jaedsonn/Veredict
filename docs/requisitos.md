@@ -22,14 +22,14 @@ Entregar a **fundação** sobre a qual todo o resto se apoia: identidade (Autent
 
 | Sprint | RFs | Quantidade | % |
 |---|---|---|---|
-| **1** | RF01, RF02, RF03, RF05, RF06, RF11 (parcial), RF18, RF21, RF22 | **9 de 22** | **40,9%** |
-| 2 | RF04, RF07–RF10, RF11 (restante), RF12–RF17, RF19, RF20 | 13 de 22 | 59,1% |
+| **1** | RF01, RF02, RF03, RF05, RF06, RF07, RF08 (sandbox), RF10 (parcial), RF11 (parcial), RF18, RF21, RF22 | **12 de 22** | **54,5%** |
+| 2 | RF04, RF08 (provedor real), RF09, RF10 (restante), RF11 (restante), RF12–RF17, RF19, RF20 | 10 de 22 | 45,5% |
 
 O RF11 é contado na Sprint 1 porque os dois e-mails exigidos pelos RFs da sprint (verificação e boas-vindas) são entregues nela. Os demais templates ficam para a Sprint 2 (#33). A meta da disciplina é de pelo menos 30%.
 
-Em 2026-11-18 a Sprint 1 foi ampliada: o RF05 (recuperação de senha, #19) e o RF22 (tipos de conta, #60, criado nessa data) entraram nela. Os milestones mantêm o nome original.
+Em 2026-11-18 a Sprint 1 foi ampliada: o RF05 (recuperação de senha, #19) e o RF22 (tipos de conta, #60, criado nessa data) entraram nela. Em 2026-11-19 entrou o **REQ05 (comprar créditos)**: RF07 inteiro, RF08 com o provedor PIX sandbox ([ADR-025](adr/0025-provedor-pix-sandbox-e-faturamento.md)) e a parte do RF10 que a compra precisa (saldo, extrato e crédito na confirmação). O provedor real (#23) e o débito da captura (#24) seguem na Sprint 2. Os milestones mantêm o nome original.
 
-Pela numeração do Documento de Requisitos, a Sprint 1 entrega **REQ01, REQ02, REQ03 e REQ04: 4 de 15 (26,7%)**. A diferença para os 40,9% vem da granularidade: o Documento de Requisitos agrupa pagamento e captura em REQs grandes, enquanto a "Estruturação do Veridit" separa identidade, gateway, notificação e auditoria em RFs próprios. O mapeamento completo está na [seção 9](#9-rastreabilidade-com-o-documento-de-requisitos).
+Pela numeração do Documento de Requisitos, a Sprint 1 entrega **REQ01 a REQ05: 5 de 15 (33,3%)**. A diferença para os 54,5% vem da granularidade: o Documento de Requisitos agrupa pagamento e captura em REQs grandes, enquanto a "Estruturação do Veridit" separa identidade, gateway, notificação e auditoria em RFs próprios. O mapeamento completo está na [seção 9](#9-rastreabilidade-com-o-documento-de-requisitos).
 
 ### Legenda de status
 
@@ -55,10 +55,10 @@ Os itens que só se conferem no navegador foram conferidos na #69: cadastro com 
 | RF04 | MFA obrigatório (TOTP / e-mail) | Autenticação | [009](adr/0009-verificacao-em-multiplas-etapas.md) | 4.2.1 | 2 | planejado | #18, #20 |
 | RF05 | Recuperação de senha por link via e-mail | Autenticação + Notificação | [008](adr/0008-recuperacao-da-conta-por-link-via-email.md) | 4.2.1 | 1 | implementado | #19, #20 |
 | RF06 | Perfil do usuário (ver/editar; tipo, CPF mascarado e OAB no RF22) | Autenticação | — | 4.2.1 | 1 | implementado | #10, #14 |
-| RF07 | Catálogo de pacotes de créditos | Pagamento | — | 4.2.2 | 2 | planejado | #21, #25 |
-| RF08 | Compra via PIX (checkout transparente) | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #22, #25 |
+| RF07 | Catálogo de pacotes de créditos (D2) | Pagamento | — | 4.2.2 | 1 | implementado | #21, #25 |
+| RF08 | Compra via PIX (checkout transparente), com os dados de faturamento do Apêndice A | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md), [025](adr/0025-provedor-pix-sandbox-e-faturamento.md) | 4.2.2 | 1 (sandbox) / 2 (provedor real) | em andamento (sandbox implementado) | #22, #23, #25 |
 | RF09 | Confirmação de pagamento e faturamento | Pagamento | [013](adr/0013-pagamento-por-servico-externo.md) | 4.2.2 | 2 | planejado | #23 |
-| RF10 | Saldo e extrato de créditos | Pagamento | — | 4.2.2 | 2 | planejado | #24, #25 |
+| RF10 | Saldo e extrato de créditos | Pagamento | — | 4.2.2 | 1 (saldo, extrato, crédito da compra) / 2 (débito e estorno) | em andamento (parte da Sprint 1 implementada) | #73, #24, #25 |
 | RF11 | Notificações transacionais por e-mail | Notificação | [016](adr/0016-comunicacao-interna-http-fire-and-forget.md) | 4.2.3 | 1 (verificação, boas-vindas) / 2 (demais) | em andamento (parte da Sprint 1 implementada) | #6, #33 |
 | RF12 | Registro de captura (prova) com débito de crédito | Captura | [005](adr/0005-arquitetura-baseada-em-servicos.md) | 4.2.4 | 2 | planejado | #29, #32 |
 | RF13 | Captura de tela de URL | Captura | [005](adr/0005-arquitetura-baseada-em-servicos.md) | 4.2.4 | 2 | planejado | #30, #32 |
@@ -173,6 +173,27 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 - **Pendências (Sprint 2):** o `409` por campo permite descobrir se um CPF está cadastrado (#61); rotação das chaves (#62), com o backup delas no deploy (#17); consulta ao CNA e várias inscrições (#64).
 - **Issues:** #60.
 
+### RF07, RF08 e RF10 (parcial) – Compra de créditos (REQ05)
+
+- **Descrição:** a pessoa escolhe um pacote de créditos, informa os dados de faturamento e paga com PIX; os créditos entram na carteira (REQ05 do Documento de Requisitos, decisão D2 e Apêndice A).
+- **Regras de negócio:**
+  - Pacotes da D2: Básico (5 créditos a R$ 5,00), Médio (20 a R$ 4,00, em destaque) e Premium (60 a R$ 3,50), com nome, créditos, valor por crédito e benefícios. Valores em centavos inteiros, vindos do banco e nunca do cliente.
+  - Dados de faturamento do Apêndice A: nome completo, e-mail, telefone, CPF, CEP, endereço, número, complemento, bairro, cidade e estado. Validados na web e no serviço com as mesmas regras e mensagens. O CPF fica só mascarado no pedido; o completo vai apenas ao provedor ([ADR-025](adr/0025-provedor-pix-sandbox-e-faturamento.md)).
+  - `Idempotency-Key` obrigatória no `POST /api/orders`; a web a gera com o formulário, então um clique duplo devolve o mesmo pedido. Limite de 10 pedidos por minuto no gateway.
+  - O PIX vale 30 minutos; o pedido vencido passa a `expired` na leitura. Provedor fora do ar → `503`, pedido `failed`, sem cobrança pendente.
+  - Na Sprint 1 o provedor é o sandbox: copia-e-cola no formato BR Code e QR Code em SVG, confirmados por "Simular pagamento". A confirmação marca o pedido `paid` e credita a carteira na mesma transação, uma vez só.
+  - Eventos de auditoria: `payment.order.created`, `payment.order.failed`, `payment.order.expired`, `payment.order.paid` e `payment.credits.credited`.
+- **Critério de verificação:**
+  1. `GET /api/packages` (sem login) → os três pacotes da D2 ordenados por preço, com `unit_price_cents` e `benefits`.
+  2. `POST /api/orders` sem JWT → `401`; com JWT e faturamento válido → `201` `pending` com `pix_copy_paste` e `pix_qr_svg`; repetir a mesma `Idempotency-Key` → `200` com o mesmo `id`.
+  3. CPF, CEP, telefone ou UF inválidos → `422` com a mensagem em PT-BR no campo.
+  4. `GET /api/orders/{id}` de outra pessoa → `404`.
+  5. `POST /api/orders/{id}/simulate-payment` → `paid` e saldo somado; repetir não soma de novo (também com 5 confirmações concorrentes, no MySQL).
+  6. `GET /api/credits/balance` e `/api/credits/statement` mostram o saldo e a compra; `orders.billing_cpf_masked` sem o CPF em claro; os eventos em `audit_events`.
+  7. Na web: `/creditos` → `/creditos/comprar/[pacote]` → `/creditos/pedidos/[id]` com QR Code, "Copiar código PIX" e "Simular pagamento"; o card "Créditos" do painel e o `/creditos/extrato` mostram o novo saldo.
+- **Pendências (Sprint 2):** provedor real e webhook assinado (#23); débito e estorno da captura (#24); e-mail de confirmação da compra (REQ07, #33).
+- **Issues:** #21 (catálogo), #22 (pedido e PIX), #73 (carteira), #25 (web).
+
 ### RF11 – Notificações por e-mail (parcial: verificação e boas-vindas)
 
 - **Descrição:** serviço interno que envia e-mails a partir de *triggers* dos outros serviços (seção 4.2.3 do documento).
@@ -230,10 +251,9 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 | ID | Critério de verificação objetivo | Issues |
 |---|---|---|
 | RF04 | Primeiro login após verificar o e-mail exige configurar o TOTP; logins seguintes retornam `mfa_required: true` sem tokens até `POST /api/auth/mfa/verify` com código válido | #18, #20 |
-| RF07 | `GET /api/packages` (sem login) lista os pacotes ativos ordenados por preço, com valores em centavos | #21, #25 |
-| RF08 | `POST /api/orders` com `Idempotency-Key` devolve QR Code e copia-e-cola PIX; repetir a chamada devolve o mesmo pedido | #22, #25 |
+| RF08 (rest.) | Com `PAYMENT_PROVIDER` do provedor real, o pedido gera uma cobrança no sandbox do provedor e o webhook assinado confirma pela mesma `ConfirmPayment` | #23 |
 | RF09 | Webhook com assinatura inválida → `401`; o mesmo evento entregue N vezes credita uma única vez | #23 |
-| RF10 | `GET /api/credits/balance` reflete compras e capturas; o extrato lista cada movimento; débito sem saldo → `402` | #24, #25 |
+| RF10 (rest.) | A captura debita a carteira; débito sem saldo → `402`; falha da captura estorna; duas capturas simultâneas não deixam o saldo negativo | #24 |
 | RF11 (rest.) | Cada template novo renderiza em teste de snapshot e chega ao Mailpit | #33 |
 | RF12 | `POST /api/captures` debita créditos e retorna `202`; o status evolui até `completed`; falha definitiva estorna os créditos | #29, #32 |
 | RF13 | Captura `screenshot` gera PNG de página inteira com manifesto (URL final, data UTC, certificado TLS) | #30 |
@@ -265,7 +285,7 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 | RNF02 | Com o serviço de autenticação parado, a web mostra "Serviço indisponível" e continua navegável, e o gateway responde `503` | Gateway responde `503`/`504` e continua de pé com o auth parado (testes do #11); `/health/live` e `/health/ready` em todos os serviços; timeout de 8 s e mensagem de indisponibilidade na web, conferidos no navegador (#69). Outbox e retentativas na Sprint 2 (#37) |
 | RNF03 | Toda ação dos RFs da Sprint 1 aparece em `audit_events` com `actor_id`, `actor_ip` e `occurred_at` em UTC | Conferido em 2026-11-19: cadastro, verificação, login (sucesso e falha), reuso de refresh e edição de perfil geram linhas em `audit_events` com `actor_id`, `actor_ip` e `occurred_at`; o `veriditi_logs_writer` não consegue `UPDATE` (erro 1142) |
 | RNF04 | Objeto em bucket com Object Lock; restaurar o backup do dia em outra máquina | Sprint 2 |
-| RNF05 | CI verde em todo PR; `pytest --cov` ≥ 70% em cada serviço | CI com `lint`, `tests` em matriz (auth, gateway, notification, monitoring e lib comum; `make cov` falha abaixo de 70%), `database` (MySQL real), `web` (com vitest) e `images`; contrato gateway × auth em `test_gateway_contract.py`. Cobertura em 2026-11-19: gateway 99,9%, auth 77,0%, notification 99,4%, monitoring 98,9%, lib comum 97,4%. E2E e carga na Sprint 2 (#38) |
+| RNF05 | CI verde em todo PR; `pytest --cov` ≥ 70% em cada serviço | CI com `lint`, `tests` em matriz (auth, gateway, notification, monitoring e lib comum; `make cov` falha abaixo de 70%), `database` (MySQL real), `web` (com vitest) e `images`; contrato gateway × auth em `test_gateway_contract.py`. Cobertura em 2026-11-19, medida com `concurrency = greenlet` (o código depois de um `await` no banco antes aparecia como não executado): gateway 99,9%, auth 93,3%, notification 99,4%, monitoring 99,4%, payment 94,8%, lib comum 97,5%. E2E e carga na Sprint 2 (#38) |
 | RNF06 | Telas utilizáveis a 360 px; `make up` em máquina limpa deixa todos os containers `healthy` e o fluxo do RF01 funcionando | `make reset` + `make up` em 2026-11-19 deixou todos os containers `healthy`, com o gateway no compose, e o fluxo do RF01 funcionando. Quem já tinha `.env` precisa de `make keys` para as chaves do CPF (o `make install` já faz isso). Telas utilizáveis a 360 px, conferidas na #69 |
 | RNF07 | Todas as mensagens de erro em PT-BR; todos os fluxos percorríveis só com teclado; erros ligados ao campo por `aria-describedby` | Mensagens em PT-BR conferidas pela API (`409`, `422`, `400`, `403`); `FormField` liga o erro ao campo por `aria-describedby`. Fluxos percorridos só com teclado depois do RF22, conferidos na #69 |
 | RNF08 | Teste de carga: p95 < 300 ms em `/api/auth/login` e `/api/me` | Sprint 2 (#38) |
@@ -290,8 +310,8 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 |---|---|---|
 | Documentação | Este documento e o fechamento da sprint; ADRs e desvios; modelagem do banco; README de execução e documento SOLID | #1, #67, #2, #41, #16 |
 | Infraestrutura | Monorepo com os 4 serviços da sprint; lib comum com logging, `X-Request-ID` e clientes de Auditoria/Notificação | #3, #4 |
-| Back-end | Monitoramento (RF18), Notificação (RF11 parcial), Autenticação (RF01, RF02, RF03, RF05, RF06, RF22), Gateway (RF21) | #5–#11, #19, #60 |
-| Web | Fundação BFF; telas de cadastro (com tipo de conta), verificação, login, painel, perfil e recuperação de senha | #12, #13, #14, #20, #60 |
+| Back-end | Monitoramento (RF18), Notificação (RF11 parcial), Autenticação (RF01, RF02, RF03, RF05, RF06, RF22), Gateway (RF21), Pagamento (RF07, RF08 com sandbox, RF10 parcial) | #5–#11, #19, #60, #21, #22, #73 |
+| Web | Fundação BFF; telas de cadastro (com tipo de conta), verificação, login, painel, perfil, recuperação de senha e compra de créditos | #12, #13, #14, #20, #60, #25 |
 | Qualidade e entrega | Testes por serviço com cobertura ≥ 70%; conferência na web; sistema rodando publicamente | #15, #69, #17 |
 
 ### Fora da Sprint 1 (reservado para a Sprint 2)
@@ -299,7 +319,7 @@ Os caminhos de API são os do gateway (`/api/...`), que é o que a web e o avali
 - MFA obrigatório (RF04).
 - Melhorias do RF22 e do gateway abertas durante a Sprint 1: anti-enumeração no cadastro (#61), rotação das chaves do CPF (#62), rate limit em Redis (#63) e verificação da OAB no CNA (#64).
 - Alinhamento das issues da Sprint 2 ao Documento de Requisitos: campos do Apêndice A, pacotes da D2, REQ06 e relatório do REQ14 (#70).
-- Todo o serviço de Pagamento: pacotes, PIX, webhook, carteira (RF07–RF10). O painel mostra o card "Créditos" como "em breve".
+- Do Pagamento: provedor PIX real e webhook assinado (RF08 restante, RF09, #23); débito e estorno da carteira pela captura (RF10 restante, #24).
 - Captura de tela e de vídeo, e a fila de processamento (RF12–RF14). O botão "Iniciar uma gravação" fica desabilitado.
 - Armazenamento das provas no MinIO, hash e verificação pública (RF15–RF17).
 - Templates de e-mail além de verificação e boas-vindas (RF11 restante).
@@ -323,6 +343,7 @@ Nenhum RF fora da lista RF01–RF22. Uma funcionalidade nova entra primeiro aqui
 | RF05 | #19, #20 (só a recuperação; PR #65 e commit `918a4e8`) | `app/(public)/esqueci-senha/`, `app/(public)/redefinir-senha/`, link em `app/(public)/entrar/login-form.tsx`, headers em `next.config.ts` | `services/auth` (`use_cases/password_reset.py`), `services/notification` (`password_reset`, `password_changed`), `services/gateway` (rotas e limites) | `password_reset_tokens` (5.6), `refresh_tokens.revoke_reason` (5.3) |
 | RF21 | #11, #3 (PRs #44, #47, #52, #57) | `lib/config.ts`, `lib/gateway.ts`, `app/api/health/route.ts`; mock em `apps/web/mock/gateway.mjs` | `services/gateway` | — |
 | RF22 | #60 (PRs #66, #68) | `app/(public)/cadastro/`, `app/(app)/perfil/`, `lib/validation/cpf.ts`, `lib/validation/oab.ts` | `services/auth` (`domain/cpf.py`, `domain/oab.py`, `adapters/cpf_protector.py`) | `users` (5.1: `user_type`, `cpf_enc`, `cpf_hmac`, `oab_*`) |
+| RF07, RF08, RF10 | #21, #22, #73, #25 | `app/(app)/creditos/` (pacotes, `comprar/[pacote]`, `pedidos/[id]`, `extrato`), `lib/credits.ts`, `lib/validation/billing.ts`, `lib/money.ts`, card do `app/(app)/painel/` | `services/payment` (`use_cases/orders.py`, `adapters/sandbox_provider.py`), `services/gateway` (rotas e limite de pedidos) | `credit_packages`, `orders`, `credit_wallets`, `credit_ledger` (5.7–5.9) |
 
 As seções de banco referem-se a [`banco-de-dados.md`](banco-de-dados.md). O serviço Python de identidade e autenticação encontra-se em `services/auth`, estruturado com princípios SOLID documentados em [`solid.md`](solid.md) e transparência de IA em [`uso-de-ia.md`](uso-de-ia.md).
 
@@ -343,8 +364,8 @@ O Documento de Requisitos (v01.00, REQ01–REQ15) não divide o trabalho em spri
 | REQ02 | Recuperar senha (média) | RF05 | 1 | implementado | Antecipado da Sprint 2 em 2026-11-18 |
 | REQ03 | Logar no sistema (alta) | RF03 (+ RF02, RF21) | 1 | implementado | O login exige o e-mail verificado (RF02, ADR-007), regra que vem da "Estruturação do Veridit" |
 | REQ04 | Sair do sistema (alta) | RF03 | 1 | implementado | `POST /api/auth/logout` e "Sair" no menu |
-| REQ05 | Comprar créditos (alta), com a decisão D2 | RF07, RF08 | 2 | planejado | Pacotes da D2 (básico, médio e premium) e dados de faturamento do Apêndice A ainda não estão nas issues (#70) |
-| REQ06 | Efetuar pagamento de créditos (alta) | RF08, RF09 | 2 | planejado | Mercado Pago ou "pela plataforma do Veridit" com QR Code ou código PIX (ADR-013); definir na #70 |
+| REQ05 | Comprar créditos (alta), com a decisão D2 | RF07, RF08, RF10 | 1 | implementado (provedor sandbox) | Pacotes da D2 e dados de faturamento do Apêndice A; o pagamento usa o provedor sandbox ([ADR-025](adr/0025-provedor-pix-sandbox-e-faturamento.md)) até a #23 |
+| REQ06 | Efetuar pagamento de créditos (alta) | RF08, RF09 | 1 (sandbox) / 2 (provedor real) | em andamento | QR Code e PIX copia-e-cola gerados na plataforma pelo provedor sandbox; o Mercado Pago e o webhook ficam na #23 |
 | REQ07 | Confirmar pagamento por e-mail (alta) | RF09, RF11 | 2 | planejado | Template na #33 |
 | REQ08 | Iniciar registro de conteúdo (alta) | RF12, RF13, RF14 | 2 | planejado | Apêndice A: endereço do site e **título do registro** (#70) |
 | REQ09 | Concluir gravação de conteúdo (alta) | RF14 | 2 | planejado | |
@@ -355,6 +376,6 @@ O Documento de Requisitos (v01.00, REQ01–REQ15) não divide o trabalho em spri
 | REQ13 | Visualizar detalhes do registro (alta) | RF16 | 2 | planejado | Apêndice A: id, título, início, fim, tipos de dados, número de imagens e vídeos, usuário responsável |
 | REQ14 | Gerar relatório do registro (alta) | RF16 (a confirmar) | 2 | planejado | **Sem issue que o cubra.** O relatório pede, entre outros, CPF do usuário, duração e nome e tamanho do arquivo; decidir na #70 se amplia o RF16 ou vira RF novo |
 | REQ15 | Gerar arquivo zip do registro (alta) | RF16 | 2 | planejado | `GET /api/evidences/{id}/package` (#28) |
-| Segurança | Acesso só por usuários cadastrados | RNF01, RF21 | 1 | implementado | O gateway exige JWT nas rotas protegidas e o `proxy.ts` protege `/painel` e `/perfil` |
+| Segurança | Acesso só por usuários cadastrados | RNF01, RF21 | 1 | implementado | O gateway exige JWT nas rotas protegidas e o `proxy.ts` protege `/painel`, `/perfil` e `/creditos` |
 
 RFs sem REQ correspondente, vindos da "Estruturação do Veridit": RF02 (verificação de e-mail), RF04 (MFA), RF06 (perfil), RF10 (saldo e extrato), RF15 e RF17 (integridade por hash), RF18 a RF20 (auditoria) e RF21 (gateway).

@@ -6,7 +6,7 @@
 # um m='$(shell ...)' executaria. As receitas leem m e s por $(value), nunca do ambiente
 unexport m s n
 
-SERVICES := gateway auth notification monitoring
+SERVICES := gateway auth notification monitoring payment
 # Serviço com banco é o que tem alembic.ini
 DB_SERVICES := $(patsubst services/%/alembic.ini,%,$(wildcard services/*/alembic.ini))
 
@@ -15,6 +15,7 @@ PORT_gateway := 8080
 PORT_auth := 8001
 PORT_notification := 8002
 PORT_monitoring := 8003
+PORT_payment := 8004
 
 # O IP real do gateway vem do TRUSTED_PROXIES; o uvicorn não reescreve o peer pelo XFF
 DEV_FLAGS_gateway := --no-proxy-headers
@@ -23,9 +24,11 @@ DEV_FLAGS_gateway := --no-proxy-headers
 DB_USER_auth := auth_svc
 DB_USER_notification := notification_svc
 DB_USER_monitoring := veriditi_logs_writer
+DB_USER_payment := payment_svc
 DB_PASS_auth := AUTH_DB_PASSWORD
 DB_PASS_notification := NOTIFICATION_DB_PASSWORD
 DB_PASS_monitoring := LOGS_DB_PASSWORD
+DB_PASS_payment := PAYMENT_DB_PASSWORD
 DB_NAME_monitoring := veriditi_logs
 
 empty :=
@@ -82,7 +85,7 @@ audit-tail: ## Acompanha a trilha de auditoria (n=<qtd> eventos do histórico, p
 db: ## Sobe só o MySQL no Docker
 	docker compose up -d --wait mysql
 
-dev: ## Serviço com hot reload (s=gateway|auth|notification|monitoring)
+dev: ## Serviço com hot reload (s=gateway|auth|notification|monitoring|payment)
 	$(need_s)@$(svc_env) uv run uvicorn $(s)_service.main:create_app --factory --reload \
 		--port $(PORT_$(s)) --reload-dir services/$(s)/src --reload-dir libs/python/common/src \
 		$(DEV_FLAGS_$(s))
@@ -133,7 +136,7 @@ endif
 # MySQL descartável na 3317 com docker/mysql/init (mesmo comando local e no CI, ADR-023)
 DB_TEST := veriditi-db-test
 DB_CONTRACT_ENV := CONTRACT_DB_PORT=3317 DB_MIGRATOR_PASSWORD=m AUTH_DB_PASSWORD=a \
-	NOTIFICATION_DB_PASSWORD=n LOGS_DB_PASSWORD=l
+	NOTIFICATION_DB_PASSWORD=n PAYMENT_DB_PASSWORD=p LOGS_DB_PASSWORD=l
 
 define db_test_up
 	@docker rm -f $(DB_TEST) >/dev/null 2>&1 || true

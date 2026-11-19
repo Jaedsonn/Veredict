@@ -24,6 +24,7 @@ def _http_url(name: str, value: str) -> str:
 class Settings(BaseServiceSettings):
     service_name: str = "gateway"
     auth_url: str = "http://localhost:8001"
+    payment_url: str = "http://localhost:8004"
     upstream_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     health_timeout_s: float = Field(default=2.0, gt=0, le=60)
     jwt_public_key: str | None = None
@@ -39,6 +40,11 @@ class Settings(BaseServiceSettings):
     @classmethod
     def _auth_url(cls, value: str) -> str:
         return _http_url("AUTH_URL", value)
+
+    @field_validator("payment_url")
+    @classmethod
+    def _payment_url(cls, value: str) -> str:
+        return _http_url("PAYMENT_URL", value)
 
     @field_validator("web_url")
     @classmethod
@@ -73,7 +79,10 @@ class Settings(BaseServiceSettings):
     @property
     def upstreams(self) -> dict[str, Upstream]:
         """Notification e monitoring são internos e ficam fora, de propósito"""
-        return {"auth": Upstream("auth", self.auth_url, "autenticação")}
+        return {
+            "auth": Upstream("auth", self.auth_url, "autenticação"),
+            "payment": Upstream("payment", self.payment_url, "pagamento"),
+        }
 
     @property
     def upstream_urls(self) -> dict[str, str]:

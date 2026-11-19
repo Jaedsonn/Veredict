@@ -13,6 +13,8 @@ type GatewayInit = {
   body?: unknown;
   /** Envia `Authorization: Bearer` a partir do cookie (padrão: true). */
   auth?: boolean;
+  /** Headers extras que o gateway repassa (ex.: `Idempotency-Key` dos pedidos, #22). */
+  headers?: Record<string, string>;
 };
 
 /** Repassa o IP real do usuário: a auditoria precisa dele (ADR-001 / #11). */
@@ -29,7 +31,7 @@ async function forwardedHeaders(): Promise<Record<string, string>> {
 }
 
 async function send(path: string, init: GatewayInit, token: string | undefined, extra: Record<string, string>) {
-  const reqHeaders: Record<string, string> = { Accept: "application/json", ...extra };
+  const reqHeaders: Record<string, string> = { Accept: "application/json", ...extra, ...init.headers };
   if (init.body !== undefined) reqHeaders["Content-Type"] = "application/json";
   if (token) reqHeaders.Authorization = `Bearer ${token}`;
 

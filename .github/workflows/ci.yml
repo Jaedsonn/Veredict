@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [auth, gateway, notification, monitoring, common]
+        service: [auth, gateway, notification, monitoring, payment, common]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -70,6 +70,8 @@ jobs:
             dockerfile: services/notification/Dockerfile
           - name: monitoring
             dockerfile: services/monitoring/Dockerfile
+          - name: payment
+            dockerfile: services/payment/Dockerfile
           - name: web
             dockerfile: apps/web/Dockerfile
     steps:

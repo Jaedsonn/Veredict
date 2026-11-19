@@ -6,6 +6,7 @@ from gateway_service.routes import (
     FORGOT_EMAIL_LIMIT,
     FORGOT_IP_LIMIT,
     LOGIN_LIMIT,
+    ORDER_LIMIT,
     REGISTER_LIMIT,
     RESEND_LIMIT,
     RESET_LIMIT,
@@ -13,7 +14,10 @@ from gateway_service.routes import (
 )
 from gateway_service.routing import ALLOWED_METHODS, RouteTable, is_safe_path
 
-UPSTREAMS = {"auth": Upstream("auth", "http://auth.test", "autenticação")}
+UPSTREAMS = {
+    "auth": Upstream("auth", "http://auth.test", "autenticação"),
+    "payment": Upstream("payment", "http://payment.test", "pagamento"),
+}
 
 
 @pytest.fixture
@@ -83,16 +87,26 @@ def test_rate_limits_by_route(table: RouteTable) -> None:
     assert limit("/api/auth/refresh") == ()
     assert limit("/api/auth/password/forgot") == (FORGOT_IP_LIMIT, FORGOT_EMAIL_LIMIT)
     assert limit("/api/auth/password/reset") == (RESET_LIMIT,)
+    assert limit("/api/orders") == (ORDER_LIMIT,)
+    assert limit("/api/orders/0c3b9b6e-6c43-4a49-9d3f-1d0f1b2e3c4d/simulate-payment") == (
+        ORDER_LIMIT,
+    )
 
 
 def test_public_and_protected_routes() -> None:
     protected = {r.path for r in ROUTES if not r.public}
 
-    assert protected == {"/api/auth/logout", "/api/me", "/api/me/password"}
+    assert protected == {
+        "/api/auth/logout",
+        "/api/me",
+        "/api/me/password",
+        "/api/orders",
+        "/api/credits",
+    }
 
 
 def test_table_does_not_reach_internal_services() -> None:
-    assert {r.upstream for r in ROUTES} == {"auth"}
+    assert {r.upstream for r in ROUTES} == {"auth", "payment"}
     for route in ROUTES:
         assert "notification" not in route.path
         assert "monitoring" not in route.path
@@ -209,3 +223,28 @@ def test_longest_prefix_wins() -> None:
 
 def test_upstream_lookup(table: RouteTable) -> None:
     assert table.upstream("auth") == UPSTREAMS["auth"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "upstream_path"),
+    [
+        ("GET", "/api/packages", "/packages"),
+        ("POST", "/api/orders", "/orders"),
+        ("GET", "/api/orders/abc", "/orders/abc"),
+        ("POST", "/api/orders/abc/simulate-payment", "/orders/abc/simulate-payment"),
+        ("GET", "/api/credits/balance", "/credits/balance"),
+        ("GET", "/api/credits/statement", "/credits/statement"),
+    ],
+)
+def test_payment_paths_reach_payment(
+    table: RouteTable, method: str, path: str, upstream_path: str
+) -> None:
+    match = table.match(method, path)
+    assert match.route.upstream == "payment"
+    assert match.upstream_path == upstream_path
+
+
+def test_payment_rejects_other_methods(table: RouteTable) -> None:
+    assert _status(table, "POST", "/api/packages") == 405
+    assert _status(table, "DELETE", "/api/orders/abc") == 405
+    assert _status(table, "POST", "/api/credits/balance") == 405

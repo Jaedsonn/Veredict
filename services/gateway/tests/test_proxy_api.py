@@ -83,7 +83,7 @@ async def test_each_route_reaches_auth_without_api_prefix(
 
 
 def test_routing_test_covers_the_whole_table() -> None:
-    assert sum(len(r.methods) for r in ROUTES) == 11
+    assert sum(len(r.methods) for r in ROUTES) == 15
 
 
 @pytest.mark.parametrize("status", [400, 409, 422])
@@ -870,3 +870,95 @@ async def test_lone_surrogate_email_is_not_500_and_still_limited(
     assert route.call_count == 5
     assert route.calls.last.request.content == body
     assert "unhandled_exception" not in [e["event"] for e in json_logs()]
+
+
+# Pagamento (REQ05)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "upstream_path"),
+    [
+        ("POST", "/api/orders", "/orders"),
+        (
+            "GET",
+            "/api/orders/0c3b9b6e-6c43-4a49-9d3f-1d0f1b2e3c4d",
+            "/orders/0c3b9b6e-6c43-4a49-9d3f-1d0f1b2e3c4d",
+        ),
+        (
+            "POST",
+            "/api/orders/0c3b9b6e-6c43-4a49-9d3f-1d0f1b2e3c4d/simulate-payment",
+            "/orders/0c3b9b6e-6c43-4a49-9d3f-1d0f1b2e3c4d/simulate-payment",
+        ),
+        ("GET", "/api/credits/balance", "/credits/balance"),
+        ("GET", "/api/credits/statement", "/credits/statement"),
+    ],
+)
+async def test_payment_routes_need_jwt_and_reach_payment(
+    client: AsyncClient,
+    payment_mock: respx.MockRouter,
+    make_token: TokenFactory,
+    method: str,
+    path: str,
+    upstream_path: str,
+) -> None:
+    route = payment_mock.route(method=method, path=upstream_path).respond(200, json={"ok": 1})
+
+    assert (await client.request(method, path)).status_code == 401
+    assert not route.called
+
+    resp = await client.request(method, path, headers=_bearer(make_token()), json={})
+
+    assert resp.status_code == 200
+    sent = route.calls.last.request
+    assert sent.headers["x-user-id"] == str(USER_ID)
+    assert sent.headers["x-internal-token"] == TOKEN
+
+
+async def test_packages_are_public(client: AsyncClient, payment_mock: respx.MockRouter) -> None:
+    route = payment_mock.get("/packages").respond(200, json=[])
+
+    resp = await client.get("/api/packages")
+
+    assert resp.status_code == 200
+    assert "x-user-id" not in route.calls.last.request.headers
+
+
+async def test_idempotency_key_is_forwarded_only_on_orders(
+    client: AsyncClient,
+    payment_mock: respx.MockRouter,
+    auth_mock: respx.MockRouter,
+    make_token: TokenFactory,
+) -> None:
+    orders = payment_mock.post("/orders").respond(201, json={})
+    me = auth_mock.get("/me").respond(200, json={})
+    headers = {**_bearer(make_token()), "Idempotency-Key": "key-00000001"}
+
+    await client.post("/api/orders", headers=headers, json={})
+    await client.get("/api/me", headers=headers)
+
+    assert orders.calls.last.request.headers["idempotency-key"] == "key-00000001"
+    assert "idempotency-key" not in me.calls.last.request.headers
+
+
+async def test_orders_are_rate_limited(
+    client: AsyncClient, payment_mock: respx.MockRouter, make_token: TokenFactory
+) -> None:
+    payment_mock.post("/orders").respond(201, json={})
+    headers = _bearer(make_token())
+
+    statuses = [
+        (await client.post("/api/orders", headers=headers, json={})).status_code for _ in range(11)
+    ]
+
+    assert statuses == [201] * 10 + [429]
+
+
+async def test_payment_down_is_503_with_its_label(
+    client: AsyncClient, payment_mock: respx.MockRouter
+) -> None:
+    payment_mock.get("/packages").mock(side_effect=httpx.ConnectError("recusado"))
+
+    resp = await client.get("/api/packages")
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["message"] == "Serviço de pagamento indisponível."

@@ -12,6 +12,8 @@ RESEND_LIMIT: Final = RateLimit("resend", 10, 60.0)
 FORGOT_IP_LIMIT: Final = RateLimit("forgot_ip", 10, 3600.0)
 FORGOT_EMAIL_LIMIT: Final = RateLimit("forgot_email", 3, 3600.0, RateKey.EMAIL)
 RESET_LIMIT: Final = RateLimit("reset_ip", 10, 3600.0)
+# Cada pedido gera uma cobrança no provedor: limita rajadas de cliques e scripts (REQ05)
+ORDER_LIMIT: Final = RateLimit("orders", 10, 60.0)
 
 ROUTES: Final[tuple[Route, ...]] = (
     Route(
@@ -45,4 +47,25 @@ ROUTES: Final[tuple[Route, ...]] = (
     Route("/api/auth/logout", "auth", "/auth/logout", public=False),
     Route("/api/me", "auth", "/me", public=False, methods=frozenset({"GET", "PATCH"})),
     Route("/api/me/password", "auth", "/me/password", public=False),
+    # Pagamento (REQ05): catálogo público; pedidos e carteira só com JWT
+    Route("/api/packages", "payment", "/packages", public=True, methods=frozenset({"GET"})),
+    # POST /api/orders cria; /api/orders/{id} (GET) e /{id}/simulate-payment (POST) via prefixo
+    Route(
+        "/api/orders",
+        "payment",
+        "/orders",
+        public=False,
+        methods=frozenset({"GET", "POST"}),
+        prefix=True,
+        rate_limits=(ORDER_LIMIT,),
+        extra_request_headers=frozenset({"idempotency-key"}),
+    ),
+    Route(
+        "/api/credits",
+        "payment",
+        "/credits",
+        public=False,
+        methods=frozenset({"GET"}),
+        prefix=True,
+    ),
 )

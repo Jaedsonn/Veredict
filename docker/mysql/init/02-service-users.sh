@@ -11,7 +11,8 @@ if ! command -v docker_process_sql >/dev/null 2>&1; then
   docker_process_sql() { mysql --protocol=socket -uroot -p"${MYSQL_ROOT_PASSWORD}" "$@"; }
 fi
 
-for _veriditi_var in DB_MIGRATOR_PASSWORD AUTH_DB_PASSWORD NOTIFICATION_DB_PASSWORD LOGS_DB_PASSWORD; do
+for _veriditi_var in DB_MIGRATOR_PASSWORD AUTH_DB_PASSWORD NOTIFICATION_DB_PASSWORD PAYMENT_DB_PASSWORD \
+  LOGS_DB_PASSWORD; do
   if [ -z "${!_veriditi_var:-}" ]; then
     echo "02-service-users.sh: defina ${_veriditi_var}" >&2
     exit 1
@@ -40,6 +41,9 @@ ALTER USER 'auth_svc'@'%' IDENTIFIED BY '${AUTH_DB_PASSWORD}';
 
 CREATE USER IF NOT EXISTS 'notification_svc'@'%' IDENTIFIED BY '${NOTIFICATION_DB_PASSWORD}';
 ALTER USER 'notification_svc'@'%' IDENTIFIED BY '${NOTIFICATION_DB_PASSWORD}';
+
+CREATE USER IF NOT EXISTS 'payment_svc'@'%' IDENTIFIED BY '${PAYMENT_DB_PASSWORD}';
+ALTER USER 'payment_svc'@'%' IDENTIFIED BY '${PAYMENT_DB_PASSWORD}';
 
 CREATE USER IF NOT EXISTS 'veriditi_logs_writer'@'%' IDENTIFIED BY '${LOGS_DB_PASSWORD}';
 ALTER USER 'veriditi_logs_writer'@'%' IDENTIFIED BY '${LOGS_DB_PASSWORD}';

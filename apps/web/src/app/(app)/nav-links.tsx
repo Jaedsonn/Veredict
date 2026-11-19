@@ -8,14 +8,14 @@ import { cn } from "@/components/ui/cn";
 const LINKS = [
   { href: "/painel", label: "Painel" },
   { href: null, label: "Minhas provas" }, // Sprint 2 (#32)
-  { href: null, label: "Créditos" }, // Sprint 2 (#25)
+  { href: "/creditos", label: "Créditos" },
   { href: "/perfil", label: "Perfil" },
 ] as const;
 
 const itemBase = "flex min-h-11 shrink-0 items-center rounded-button px-4 text-sm font-bold whitespace-nowrap";
 
-export function NavLinks() {
-  const pathname = usePathname();
+/** Lista do menu; sem hook, serve também de fallback enquanto o caminho não é conhecido. */
+export function NavList({ pathname }: { pathname?: string }) {
   return (
     <ul className="flex gap-1 md:flex-col">
       {LINKS.map((l) => {
@@ -29,7 +29,7 @@ export function NavLinks() {
             </li>
           );
         }
-        const active = pathname === l.href || pathname.startsWith(`${l.href}/`);
+        const active = pathname !== undefined && (pathname === l.href || pathname.startsWith(`${l.href}/`));
         return (
           <li key={l.href}>
             <Link
@@ -44,4 +44,12 @@ export function NavLinks() {
       })}
     </ul>
   );
+}
+
+/**
+ * Destaca o item da página atual. Fica dentro de `<Suspense>` no layout: em rotas com
+ * parâmetro (`/creditos/pedidos/[id]`) o caminho só é conhecido na requisição.
+ */
+export function NavLinks() {
+  return <NavList pathname={usePathname()} />;
 }

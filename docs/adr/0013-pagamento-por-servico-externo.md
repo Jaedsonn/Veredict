@@ -18,4 +18,5 @@ Utilizaremos um checkout transparente, com as informações aparecendo diretamen
 
 ## Implementação
 
-- Sprint 2: #21–#24 (serviço de pagamento) e #25 (telas). O provedor PIX fica atrás de uma interface `PaymentProvider`, e a escolha do provedor será registrada numa nova ADR (#22).
+- Sprint 1 (REQ05): serviço `services/payment` com catálogo (#21), pedido PIX (#22), carteira (#73) e telas (#25). O provedor PIX fica atrás da porta `PaymentProvider`; na Sprint 1 o adapter é o sandbox ([ADR-025](0025-provedor-pix-sandbox-e-faturamento.md)).
+- Sprint 2: provedor real e webhook assinado (#23); débito e estorno da captura (#24).
