@@ -338,6 +338,42 @@ async def test_weak_password_is_422_and_does_not_burn_the_link(
     assert ok.status_code == 204
 
 
+async def test_current_password_is_422_and_does_not_burn_the_link(
+    client: AsyncClient, notifier: InMemoryNotifier, db: Database
+) -> None:
+    await _active_user(client, notifier)
+    assert await _login(client, OLD_PASSWORD) == 200
+    token = await _forgot(client, notifier)
+
+    same = await client.post(RESET, json={"token": token, "new_password": OLD_PASSWORD})
+
+    assert same.status_code == 422
+    assert same.json() == {
+        "detail": [
+            {
+                "loc": ["body", "new_password"],
+                "msg": "A nova senha deve ser diferente da atual.",
+                "type": "value_error",
+            }
+        ]
+    }
+    [row] = await _reset_rows(db)
+    assert row.consumed_at is None
+    async with db.session_factory() as session:
+        [refresh] = list(await session.scalars(select(RefreshToken)))
+    assert refresh.revoked_at is None
+    assert _reset_mails(notifier) == ["password_reset"]
+    assert await _login(client, OLD_PASSWORD) == 200
+
+    ok = await client.post(RESET, json={"token": token, "new_password": NEW_PASSWORD})
+    assert ok.status_code == 204
+    assert await _login(client, OLD_PASSWORD) == 401
+    assert await _login(client, NEW_PASSWORD) == 200
+    used = await client.post(RESET, json={"token": token, "new_password": NEW_PASSWORD})
+    assert used.status_code == 400
+    assert used.json() == INVALID
+
+
 async def test_missing_fields_are_422_without_echoing_input(client: AsyncClient) -> None:
     resp = await client.post(RESET, json={"token": "x" * 43})
 

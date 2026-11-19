@@ -16,7 +16,7 @@ from auth_service.adapters.repositories import (
     SqlAlchemyUserRepository,
 )
 from auth_service.domain.entities import RequestContext
-from auth_service.domain.errors import InvalidResetTokenError
+from auth_service.domain.errors import InvalidResetTokenError, WeakPasswordError
 from auth_service.domain.password_policy import PasswordPolicy
 from auth_service.domain.reset_token import ResetTokenService
 from auth_service.models import User, UserType
@@ -106,6 +106,18 @@ async def harness(auth_database_url: str) -> AsyncIterator[Harness]:
         await users.mark_email_verified(user.id, verified_at=clock.now())
     yield Harness(db)
     await db.dispose()
+
+
+async def test_reusing_current_password_rolls_back_the_token_consumption(harness: Harness) -> None:
+    original_hash = await harness.password_hash()
+    token = await harness.forgot_token()
+
+    with pytest.raises(WeakPasswordError):
+        await harness.reset(token, "SenhaInicial1")
+
+    assert await harness.password_hash() == original_hash
+    await harness.reset(token, "SenhaDiferente2")
+    assert HASHER.verify("SenhaDiferente2", await harness.password_hash())
 
 
 async def test_same_link_twice_at_once_changes_the_password_once(harness: Harness) -> None:

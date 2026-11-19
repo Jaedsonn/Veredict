@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import NoReturn
 
 from auth_service.domain.entities import PasswordResetTokenEntity, RequestContext
-from auth_service.domain.errors import InvalidResetTokenError
+from auth_service.domain.errors import InvalidResetTokenError, WeakPasswordError
 from auth_service.domain.password_policy import PasswordPolicy
 from auth_service.domain.reset_token import ResetTokenService
 from auth_service.models import RevokeReason, UserStatus
@@ -144,7 +144,7 @@ class ResetPassword:
 
         # Antes de consumir: senha fraca não pode queimar o link
         self._password_policy.validate(cmd.new_password, field="new_password")
-        # O Argon2 roda fora da transação, que fica só com os UPDATEs
+        # Calcula o hash novo antes de abrir a transação para reduzir o tempo sob lock
         new_hash = self._hasher.hash(cmd.new_password)
 
         now = self._clock.now()
@@ -165,6 +165,13 @@ class ResetPassword:
             # Perdeu a corrida: a leitura travada enxerga o consumo que a outra já gravou
             current = await self._reset_tokens.get_by_hash(token_hash, for_update=True)
             await self._fail(ctx, reason=_failure_reason(current), stored=current)
+
+        if self._hasher.verify(cmd.new_password, user.password_hash):
+            # O rollback da sessão desfaz o consumo provisório e permite reutilizar o link
+            raise WeakPasswordError(
+                "A nova senha deve ser diferente da atual.",
+                field="new_password",
+            )
 
         await self._users.update_password_hash(
             user.id,

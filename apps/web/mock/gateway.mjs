@@ -217,6 +217,8 @@ const routes = {
     if (!entry || entry.used || entry.expiresAt < Date.now() || users.get(entry.email)?.status !== "active")
       return fail(res, 400, "invalid_reset_token", "Link inválido ou expirado. Solicite um novo.");
     const user = users.get(entry.email);
+    if (b.new_password === user.password)
+      return invalid(res, "new_password", "A nova senha deve ser diferente da atual.");
     entry.used = true;
     user.password = b.new_password;
     // Todas as sessões do usuário caem, como no auth.
