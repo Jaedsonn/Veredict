@@ -5,24 +5,19 @@ import hmac
 import os
 from typing import Final
 
+__all__ = ["KEY_BYTES", "AesGcmCpfProtector", "CpfDecryptionError"]
+
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from auth_service.domain.cpf import Cpf
-from auth_service.domain.errors import InvalidCpfError
+from auth_service.domain.errors import CpfDecryptionError, InvalidCpfError
 
 KEY_BYTES: Final = 32
 _VERSION: Final = b"\x01"
 _NONCE_BYTES: Final = 12
 # Amarra a cifra à coluna e à versão; o id do usuário ainda não existe no INSERT
 _AAD: Final = b"veriditi:users.cpf_enc:v1"
-
-
-class CpfDecryptionError(Exception):
-    """Cifra adulterada, de outra chave ou de versão desconhecida; nunca carrega os bytes"""
-
-    def __init__(self) -> None:
-        super().__init__("Não foi possível decifrar o CPF")
 
 
 class AesGcmCpfProtector:

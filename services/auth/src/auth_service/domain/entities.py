@@ -52,6 +52,7 @@ class UserEntity:
     user_type: UserType
     # Cifrado (ADR-024); só o perfil decifra, e para mascarar
     cpf_enc: bytes = field(repr=False)
+    cpf_hmac: str = field(repr=False)
     oab: Oab | None
 
 

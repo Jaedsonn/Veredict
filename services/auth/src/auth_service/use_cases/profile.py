@@ -1,5 +1,6 @@
 """Casos de uso [S1-10]: Consulta e edição de perfil e troca de senha (RF06)"""
 
+import hmac
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,6 +9,7 @@ from pydantic import JsonValue
 
 from auth_service.domain.entities import RequestContext, UserEntity
 from auth_service.domain.errors import (
+    CpfDecryptionError,
     InvalidCurrentPasswordError,
     UserNotFoundError,
     WeakPasswordError,
@@ -24,6 +26,9 @@ from auth_service.ports import (
     UserRepository,
 )
 from veriditi_common.audit import AuditEvent, AuditLogger, AuditOutcome
+from veriditi_common.logging import get_logger
+
+log = get_logger(__name__)
 
 
 def _parse_uuid(value: str | None) -> uuid.UUID | None:
@@ -50,6 +55,15 @@ class ProfileView:
     oab: Oab | None
 
 
+def _reveal_cpf(user: UserEntity, cpf_protector: CpfProtector) -> str:
+    cpf = cpf_protector.decrypt(user.cpf_enc)
+    # O AAD é fixo (ADR-024): um cpf_enc copiado de outra linha decifra; o índice da linha não bate
+    if not hmac.compare_digest(cpf_protector.blind_index(cpf), user.cpf_hmac):
+        log.error("cpf_integrity_mismatch", user_id=user.id)
+        raise CpfDecryptionError()
+    return cpf.masked
+
+
 def _to_view(user: UserEntity, cpf_protector: CpfProtector) -> ProfileView:
     return ProfileView(
         id=user.id,
@@ -59,7 +73,7 @@ def _to_view(user: UserEntity, cpf_protector: CpfProtector) -> ProfileView:
         email_verified_at=user.email_verified_at,
         created_at=user.created_at,
         user_type=user.user_type,
-        cpf_masked=cpf_protector.decrypt(user.cpf_enc).masked,
+        cpf_masked=_reveal_cpf(user, cpf_protector),
         oab=user.oab,
     )
 

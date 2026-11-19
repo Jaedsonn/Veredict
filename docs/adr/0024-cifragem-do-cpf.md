@@ -21,7 +21,9 @@ Duas colunas e duas chaves independentes:
   - Formato: `versão (1 byte) || nonce (12 bytes) || cifra (11 bytes) || tag (16 bytes)`, 40 bytes ao todo. O `VARBINARY(64)` deixa folga para uma versão futura.
   - A versão `0x01` identifica algoritmo e chave; uma chave nova entra como versão `0x02`, sem migrar as linhas antigas de uma vez.
   - Nonce de 96 bits de `os.urandom` a cada cifragem. Com o volume esperado, a chance de repetir nonce sob a mesma chave é desprezível.
-  - AAD fixo (`veriditi:users.cpf_enc:v1`): amarra a cifra a esta coluna e versão. Não usa o `id` do usuário porque ele só existe depois do INSERT; a consequência é que trocar `cpf_enc` entre duas linhas não é detectado pela cifra (só quem tem DML no banco faria isso, e o `cpf_hmac` da linha deixaria de bater).
+  - AAD fixo (`veriditi:users.cpf_enc:v1`): amarra a cifra a esta coluna e versão.
+    - O AAD fixo permite copiar o `cpf_enc` de uma linha para outra: a cifra copiada continua decifrando. Isso exige DML no banco. A mitigação é o `/me` recalcular o HMAC do CPF decifrado e compará-lo, com `hmac.compare_digest`, ao `cpf_hmac` da linha. Se divergirem, o `/me` falha com o mesmo erro de decifração e registra `cpf_integrity_mismatch` com o `user_id`, sem o CPF.
+    - Pôr o `user_id` no AAD foi descartado porque o `id` só existe depois do INSERT. Seria preciso cifrar numa segunda escrita, deixando a linha sem CPF dentro da transação.
 - **`cpf_hmac CHAR(64)`** com `uq_users_cpf_hmac`: HMAC-SHA256 dos 11 dígitos com a chave `CPF_HMAC_KEY`, em hex minúsculo (`HashHex`). É determinístico, então o UNIQUE detecta o CPF repetido, e sem a chave não dá para montar o dicionário de CPFs.
 - **Chaves**: base64 de 32 bytes cada, obrigatoriamente diferentes (uma chave vazada não compromete a outra função). Ficam no `.env` (dev) e chegam só ao container `auth`; o `auth-migrate` não as recebe.
   - `make keys` gera as duas só quando estão vazias e **nunca** as troca, nem com `force=1`.
@@ -47,7 +49,7 @@ Duas colunas e duas chaves independentes:
 
 ## Implementação
 
-- #60: `services/auth/src/auth_service/adapters/cpf_protector.py` (`AesGcmCpfProtector`, porta `CpfProtector` em `ports.py`), validação das chaves em `config.py`, colunas na migration `0006` (`docs/banco-de-dados.md` §5.1), geração das chaves em `scripts/jwt_keys.py`.
+- #60: `services/auth/src/auth_service/adapters/cpf_protector.py` (`AesGcmCpfProtector`, porta `CpfProtector` em `ports.py`), conferência com o `cpf_hmac` em `use_cases/profile.py`, validação das chaves em `config.py`, colunas na migration `0006` (`docs/banco-de-dados.md` §5.1), geração das chaves em `scripts/jwt_keys.py`.
 - Pendente: backup e rotação das chaves (#62).
 
 ## Aceite da equipe arquiteta

@@ -70,6 +70,13 @@ class InvalidOabError(InvalidFieldError):
         super().__init__(code="invalid_oab", message=message, field=field)
 
 
+class CpfDecryptionError(Exception):
+    """Cifra adulterada, de outra chave, de versão desconhecida ou de outra linha; vira 500"""
+
+    def __init__(self) -> None:
+        super().__init__("Não foi possível decifrar o CPF")
+
+
 class WeakPasswordError(DomainError):
     """Senha viola a política de segurança (`422 Unprocessable Entity`)"""
 

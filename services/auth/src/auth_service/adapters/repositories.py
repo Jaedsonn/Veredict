@@ -79,6 +79,7 @@ def _to_user_entity(model: User) -> UserEntity:
         updated_at=model.updated_at,
         user_type=model.user_type,
         cpf_enc=model.cpf_enc,
+        cpf_hmac=model.cpf_hmac,
         oab=_to_oab(model),
     )
 

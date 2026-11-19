@@ -4,13 +4,15 @@ from typing import Any
 
 from auth_test_data import common_identity, cpf_for_email, make_cpf
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from auth_service.adapters.token_issuer import PyJwtTokenIssuer
 from auth_service.models import User
 from veriditi_common.audit import InMemoryAuditLogger
 from veriditi_common.db import Database
 from veriditi_common.notifications import InMemoryNotifier
+
+from .conftest import RenderedLogs
 
 TEST_INTERNAL_TOKEN = "test-internal-token-0123456789"
 
@@ -247,3 +249,32 @@ async def test_change_password_preserves_current_session_via_x_session_id_and_re
         json={"email": "senha@example.com", "password": "NovaSenhaValida456"},
     )
     assert new_login.status_code == 200
+
+
+async def test_me_rejects_cpf_copied_from_another_user(
+    client: AsyncClient,
+    notifier: InMemoryNotifier,
+    db: Database,
+    rendered_logs: RenderedLogs,
+) -> None:
+    owner = await _setup_active_user(client, notifier, email="dono@example.com")
+    target = await _setup_active_user(client, notifier, email="alvo@example.com")
+    # Com o AAD fixo o cpf_enc de outra linha decifra; só o cpf_hmac da linha denuncia a cópia
+    async with db.session_factory() as session:
+        stolen = await session.scalar(select(User.cpf_enc).where(User.id == owner))
+        await session.execute(update(User).where(User.id == target).values(cpf_enc=stolen))
+        await session.commit()
+
+    res = await client.get("/me", headers=gateway_headers(target, "alvo@example.com"))
+    owner_ok = await client.get("/me", headers=gateway_headers(owner, "dono@example.com"))
+
+    assert res.status_code == 500
+    assert res.json()["detail"]["code"] == "internal_error"
+    assert owner_ok.status_code == 200
+    logs = rendered_logs()
+    assert '"cpf_integrity_mismatch"' in logs and f'"user_id": {target}' in logs
+    for email in ("dono@example.com", "alvo@example.com"):
+        cpf = cpf_for_email(email)
+        for leaked in (cpf, cpf.replace(".", "").replace("-", ""), cpf[4:11]):
+            assert leaked not in res.text
+            assert leaked not in logs
