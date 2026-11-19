@@ -49,7 +49,7 @@ Nenhuma ADR de desvio pode ser marcada como **Aceita** sem o registro do aceite.
 | [022](0022-convencoes-do-modelo-fisico.md) | Convenções do modelo físico | Aceita | 014 | Em uso | #41 |
 | [023](0023-migrations-por-servico-e-testes-com-mysql.md) | Migrations por serviço e testes com MySQL real | Aceita | 020 | Em uso | #41 |
 | [024](0024-cifragem-do-cpf.md) | Cifragem do CPF com AES-GCM e índice HMAC | Aceita | 002, 022 | Em uso: `users.cpf_enc` e `users.cpf_hmac` | #60 |
-| [025](0025-provedor-pix-sandbox-e-faturamento.md) | Provedor PIX sandbox e dados de faturamento sem CPF em claro | Proposta | 013, 024 | Em uso: `SandboxPixProvider` e `orders.billing_cpf_masked` | #22 |
+| [025](0025-provedor-pix-sandbox-e-faturamento.md) | Provedor PIX sandbox e dados de faturamento sem CPF em claro | Aceita | 013, 024 | Em uso: `SandboxPixProvider` e `orders.billing_cpf_masked` | #22 |
 
 ## Numeração
 
@@ -65,7 +65,7 @@ As ADRs 001–013 reproduzem o texto do documento, com ajustes mínimos de ortog
 
 ## Aceite das ADRs de desvio
 
-As ADRs 014–024 foram aprovadas pelos quatro integrantes da equipe arquiteta, de forma assíncrona, pelo WhatsApp, e estão como **Aceita**. A ADR-025 (REQ05) está como **Proposta** até o aceite. Para uma ADR de desvio nova:
+As ADRs 014–025 foram aprovadas pelos quatro integrantes da equipe arquiteta, de forma assíncrona, pelo WhatsApp, e estão como **Aceita**. Para uma ADR de desvio nova:
 
 1. Enviar a ADR para a equipe arquiteta (WhatsApp, e-mail, *Discussion* ou issue).
 2. Registrar cada aprovação na tabela "Aceite da equipe arquiteta" da ADR, com o integrante e a evidência.
