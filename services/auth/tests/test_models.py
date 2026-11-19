@@ -1,23 +1,30 @@
 from datetime import UTC, timedelta
+from typing import Any
 
 import pytest
+from auth_test_data import user_columns
 from sqlalchemy.exc import IntegrityError
 
 from auth_service.models import (
     EmailVerificationCode,
+    OabKind,
+    OabUf,
     PasswordResetToken,
     RefreshToken,
     RevokeReason,
     User,
+    UserType,
 )
 from veriditi_common.db import Database
 from veriditi_common.db_types import utcnow
+
+OAB = ("12345", OabUf.BA, OabKind.PRINCIPAL)
 
 
 async def test_created_at_comes_from_server_in_utc(db: Database) -> None:
     before = utcnow() - timedelta(seconds=1)
     async with db.session_factory() as session:
-        user = User(email="ana@example.com", name="Ana", password_hash="$argon2id$stub")
+        user = User(**user_columns("ana@example.com"))
         session.add(user)
         await session.commit()
         await session.refresh(user)
@@ -28,10 +35,10 @@ async def test_created_at_comes_from_server_in_utc(db: Database) -> None:
 
 async def test_duplicate_email_is_rejected(db: Database) -> None:
     async with db.session_factory() as session:
-        session.add(User(email="dup@example.com", name="A", password_hash="$argon2id$stub"))
+        session.add(User(**user_columns("dup@example.com", cpf_seed=1)))
         await session.commit()
 
-        session.add(User(email="dup@example.com", name="B", password_hash="$argon2id$stub"))
+        session.add(User(**user_columns("dup@example.com", cpf_seed=2)))
         with pytest.raises(IntegrityError):
             await session.commit()
 
@@ -42,7 +49,14 @@ def test_constraints_follow_naming_convention() -> None:
     refresh_names = {c.name for c in RefreshToken.__table__.constraints}
     reset_names = {c.name for c in PasswordResetToken.__table__.constraints}
 
-    assert {"pk_users", "uq_users_email", "ck_users_active_requires_verified"} <= user_names
+    assert {
+        "pk_users",
+        "uq_users_email",
+        "uq_users_cpf_hmac",
+        "uq_users_oab_uf_oab_number",
+        "ck_users_active_requires_verified",
+        "ck_users_oab_matches_type",
+    } <= user_names
     assert {
         "pk_email_verification_codes",
         "fk_email_verification_codes_user_id_users",
@@ -72,7 +86,7 @@ def test_password_reset_is_the_last_revoke_reason() -> None:
 async def test_duplicate_reset_token_hash_is_rejected(db: Database) -> None:
     expires = utcnow() + timedelta(minutes=30)
     async with db.session_factory() as session:
-        user = User(email="rt@example.com", name="Rt", password_hash="$argon2id$stub")
+        user = User(**user_columns("rt@example.com"))
         session.add(user)
         await session.flush()
         session.add(PasswordResetToken(user_id=user.id, token_hash="a" * 64, expires_at=expires))
@@ -80,4 +94,50 @@ async def test_duplicate_reset_token_hash_is_rejected(db: Database) -> None:
 
         session.add(PasswordResetToken(user_id=user.id, token_hash="A" * 64, expires_at=expires))
         with pytest.raises(IntegrityError):
+            await session.commit()
+
+
+async def test_duplicate_cpf_hmac_is_rejected(db: Database) -> None:
+    async with db.session_factory() as session:
+        session.add(User(**user_columns("a@example.com", cpf_seed=7)))
+        await session.commit()
+
+        session.add(User(**user_columns("b@example.com", cpf_seed=7)))
+        with pytest.raises(IntegrityError, match="users.cpf_hmac"):
+            await session.commit()
+
+
+async def test_same_oab_number_in_other_uf_is_allowed(db: Database) -> None:
+    lawyer = UserType.LAWYER
+    async with db.session_factory() as session:
+        session.add(User(**user_columns("a@example.com", user_type=lawyer, oab=OAB)))
+        session.add(
+            User(**user_columns("b@example.com", user_type=lawyer, oab=("12345", OabUf.SP, OAB[2])))
+        )
+        await session.commit()
+
+        session.add(User(**user_columns("c@example.com", user_type=lawyer, oab=OAB)))
+        with pytest.raises(IntegrityError, match="users.oab_uf, users.oab_number"):
+            await session.commit()
+
+
+async def test_many_common_users_have_null_oab(db: Database) -> None:
+    async with db.session_factory() as session:
+        session.add_all(User(**user_columns(f"u{i}@example.com")) for i in range(3))
+        await session.commit()
+
+
+@pytest.mark.parametrize(
+    ("user_type", "oab"),
+    [
+        (UserType.LAWYER, None),
+        (UserType.COMMON, OAB),
+        (UserType.LAWYER, ("12345", OabUf.BA, None)),
+        (UserType.LAWYER, ("12345", None, OabKind.PRINCIPAL)),
+    ],
+)
+async def test_check_requires_oab_iff_lawyer(db: Database, user_type: UserType, oab: Any) -> None:
+    async with db.session_factory() as session:
+        session.add(User(**user_columns("x@example.com", user_type=user_type, oab=oab)))
+        with pytest.raises(IntegrityError, match="ck_users_oab_matches_type"):
             await session.commit()

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     SmallInteger,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -22,6 +23,8 @@ from veriditi_common.db_types import (
     UTCDateTime,
     UtcNow,
     UUIDStr,
+    VarBinary,
+    ascii_string,
     str_enum,
     utcnow,
 )
@@ -37,6 +40,51 @@ class UserStatus(enum.StrEnum):
     PENDING_VERIFICATION = "pending_verification"
     ACTIVE = "active"
     BLOCKED = "blocked"
+
+
+class UserType(enum.StrEnum):
+    """Escolhido no cadastro e imutável (RF22)"""
+
+    COMMON = "common"
+    LAWYER = "lawyer"
+
+
+class OabUf(enum.StrEnum):
+    """As 27 seccionais da OAB"""
+
+    AC = "AC"
+    AL = "AL"
+    AP = "AP"
+    AM = "AM"
+    BA = "BA"
+    CE = "CE"
+    DF = "DF"
+    ES = "ES"
+    GO = "GO"
+    MA = "MA"
+    MT = "MT"
+    MS = "MS"
+    MG = "MG"
+    PA = "PA"
+    PB = "PB"
+    PR = "PR"
+    PE = "PE"
+    PI = "PI"
+    RJ = "RJ"
+    RN = "RN"
+    RS = "RS"
+    RO = "RO"
+    RR = "RR"
+    SC = "SC"
+    SP = "SP"
+    SE = "SE"
+    TO = "TO"
+
+
+class OabKind(enum.StrEnum):
+    PRINCIPAL = "principal"
+    SUPLEMENTAR = "suplementar"
+    TRANSITORIA = "transitoria"
 
 
 class VerificationPurpose(enum.StrEnum):
@@ -59,6 +107,15 @@ class User(Base):
             "status <> 'active' OR email_verified_at IS NOT NULL",
             name="active_requires_verified",
         ),
+        # OAB completa se e somente se advogado (#60); a regra também vive em domain/oab.py
+        CheckConstraint(
+            "(user_type = 'lawyer' AND oab_number IS NOT NULL AND oab_uf IS NOT NULL"
+            " AND oab_kind IS NOT NULL) OR (user_type = 'common' AND oab_number IS NULL"
+            " AND oab_uf IS NULL AND oab_kind IS NULL)",
+            name="oab_matches_type",
+        ),
+        # NULLs não colidem no UNIQUE: contas comuns não disputam a inscrição
+        UniqueConstraint("oab_uf", "oab_number"),
     )
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
@@ -71,6 +128,14 @@ class User(Base):
         server_default=UserStatus.PENDING_VERIFICATION.value,
         nullable=False,
     )
+    user_type: Mapped[UserType] = mapped_column(str_enum(UserType, "user_type"), nullable=False)
+    # AES-256-GCM: versão + nonce + cifra + tag; só o auth decifra (ADR-024)
+    cpf_enc: Mapped[bytes] = mapped_column(VarBinary(64), nullable=False)
+    # HMAC-SHA256 do CPF: o UNIQUE pega a duplicidade sem guardar o CPF em claro
+    cpf_hmac: Mapped[str] = mapped_column(HashHex(), unique=True, nullable=False)
+    oab_number: Mapped[str | None] = mapped_column(ascii_string(6), nullable=True)
+    oab_uf: Mapped[OabUf | None] = mapped_column(str_enum(OabUf, "oab_uf"), nullable=True)
+    oab_kind: Mapped[OabKind | None] = mapped_column(str_enum(OabKind, "oab_kind"), nullable=True)
     email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),

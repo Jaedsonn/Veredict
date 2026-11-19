@@ -12,7 +12,15 @@ import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 
 from veriditi_common.db import Database, make_metadata
-from veriditi_common.db_types import BigIntPK, HashHex, UTCDateTime, UtcNow, UUIDStr, str_enum
+from veriditi_common.db_types import (
+    BigIntPK,
+    HashHex,
+    UTCDateTime,
+    UtcNow,
+    UUIDStr,
+    VarBinary,
+    str_enum,
+)
 from veriditi_common.migrations import grant_table_privileges, revoke_table_privileges
 
 pytestmark = pytest.mark.mysql
@@ -46,6 +54,7 @@ probe = sa.Table(
     sa.Column("status", str_enum(Status, "status"), nullable=False, server_default="pending"),
     sa.Column("ref", UUIDStr(), nullable=True),
     sa.Column("digest", HashHex(), nullable=True),
+    sa.Column("blob", VarBinary(16), nullable=True),
 )
 
 # Tabela "própria" do notification: sem nenhum GRANT no banco ele nem conecta (1044)
@@ -161,19 +170,23 @@ async def test_types_produce_contract_ddl(schema: None, auth: Database) -> None:
     assert "enum('pending','active')" in ddl
     assert "`ref` char(36) CHARACTER SET ascii COLLATE ascii_bin" in ddl
     assert "`digest` char(64) CHARACTER SET ascii COLLATE ascii_bin" in ddl
+    assert "`blob` varbinary(16)" in ddl
 
 
 async def test_utc_roundtrip_keeps_microseconds(schema: None, auth: Database) -> None:
     bahia = datetime(2026, 1, 1, 9, 0, 0, 123456, tzinfo=ZoneInfo("America/Bahia"))
     ref = uuid.uuid4()
     async with auth.engine.begin() as conn:
-        await conn.execute(probe.insert().values(at=bahia, ref=ref, digest="AB" * 32))
+        await conn.execute(
+            probe.insert().values(at=bahia, ref=ref, digest="AB" * 32, blob=b"\x00\xff'\\")
+        )
         row = (await conn.execute(sa.select(probe))).one()
 
     assert row.at == datetime(2026, 1, 1, 12, 0, 0, 123456, tzinfo=UTC)
     assert row.created_at.tzinfo is UTC
     assert row.ref == ref
     assert row.digest == "ab" * 32
+    assert row.blob == b"\x00\xff'\\"
     assert row.status == Status.PENDING
 
 

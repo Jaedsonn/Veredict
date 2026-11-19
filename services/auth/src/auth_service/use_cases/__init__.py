@@ -18,6 +18,7 @@ from auth_service.use_cases.profile import (
     ChangePassword,
     ChangePasswordCommand,
     GetProfile,
+    ProfileView,
     UpdateProfile,
     UpdateProfileCommand,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "ChangePassword",
     "ChangePasswordCommand",
     "GetProfile",
+    "ProfileView",
     "LoginCommand",
     "LogoutCommand",
     "LogoutUser",

@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from auth_service.adapters.clock import SystemClock
+from auth_service.adapters.cpf_protector import AesGcmCpfProtector
 from auth_service.adapters.password_hasher import Argon2PasswordHasher
 from auth_service.adapters.token_issuer import PyJwtTokenIssuer
 from auth_service.api.auth import router as auth_router
@@ -16,11 +17,12 @@ from auth_service.config import Settings, get_settings
 from auth_service.dependencies import get_session
 from auth_service.domain.errors import (
     AccountBlockedError,
+    AlreadyRegisteredError,
     DomainError,
-    EmailAlreadyRegisteredError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     InvalidCurrentPasswordError,
+    InvalidFieldError,
     InvalidRefreshTokenError,
     InvalidResetTokenError,
     InvalidVerificationCodeError,
@@ -31,7 +33,7 @@ from auth_service.domain.errors import (
     WeakPasswordError,
 )
 from auth_service.domain.password_policy import PasswordPolicy
-from auth_service.ports import Clock, PasswordHasher, TokenIssuer
+from auth_service.ports import Clock, CpfProtector, PasswordHasher, TokenIssuer
 from veriditi_common.audit import AuditLogger, HttpAuditLogger
 from veriditi_common.db import Database
 from veriditi_common.errors import install_error_handlers
@@ -45,13 +47,26 @@ from veriditi_common.security import install_internal_auth
 def _register_exception_handlers(app: FastAPI) -> None:
     """Converte erros de domínio puros em respostas HTTP padronizadas"""
 
-    @app.exception_handler(EmailAlreadyRegisteredError)
-    async def handle_email_conflict(
-        _request: Request, exc: EmailAlreadyRegisteredError
+    # Um só ponto para o 409 por campo: a #61 troca aqui pela resposta uniforme
+    @app.exception_handler(AlreadyRegisteredError)
+    async def handle_already_registered(
+        _request: Request, exc: AlreadyRegisteredError
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            content={"detail": {"code": exc.code, "message": exc.message}},
+            content={"detail": {"code": exc.code, "message": exc.message, "field": exc.field}},
+        )
+
+    @app.exception_handler(InvalidFieldError)
+    async def handle_invalid_field(_request: Request, exc: InvalidFieldError) -> JSONResponse:
+        field = exc.field or "body"
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "detail": [
+                    {"loc": ["body", *field.split(".")], "msg": exc.message, "type": exc.code}
+                ]
+            },
         )
 
     @app.exception_handler(WeakPasswordError)
@@ -125,6 +140,11 @@ def _register_exception_handlers(app: FastAPI) -> None:
         )
 
 
+def _build_cpf_protector(settings: Settings) -> CpfProtector:
+    encryption_key, hmac_key = settings.resolved_cpf_keys()
+    return AesGcmCpfProtector(encryption_key=encryption_key, hmac_key=hmac_key)
+
+
 def create_app(
     settings: Settings | None = None,
     db: Database | None = None,
@@ -134,6 +154,7 @@ def create_app(
     clock: Clock | None = None,
     password_hasher: PasswordHasher | None = None,
     token_issuer: TokenIssuer | None = None,
+    cpf_protector: CpfProtector | None = None,
 ) -> FastAPI:
     """App factory do serviço de Autenticação (`auth-service`)"""
     resolved_settings = settings or get_settings()
@@ -150,6 +171,7 @@ def create_app(
         access_ttl_seconds=resolved_settings.access_token_ttl_seconds,
         refresh_ttl_days=resolved_settings.refresh_token_ttl_days,
     )
+    resolved_cpf_protector = cpf_protector or _build_cpf_protector(resolved_settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -159,6 +181,7 @@ def create_app(
         app.state.password_policy = PasswordPolicy()
         app.state.password_hasher = password_hasher or Argon2PasswordHasher()
         app.state.token_issuer = resolved_token_issuer
+        app.state.cpf_protector = resolved_cpf_protector
 
         app.state.http = httpx.AsyncClient()
         app.state.audit_logger = audit_logger or HttpAuditLogger(

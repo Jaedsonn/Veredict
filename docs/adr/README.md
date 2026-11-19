@@ -48,11 +48,12 @@ Nenhuma ADR de desvio pode ser marcada como **Aceita** sem o registro do aceite.
 | [021](0021-datas-utc-datetime6.md) | Datas em UTC com DATETIME(6) | Proposta | 001 | Em uso | #41 |
 | [022](0022-convencoes-do-modelo-fisico.md) | Convenções do modelo físico | Proposta | 014 | Em uso | #41 |
 | [023](0023-migrations-por-servico-e-testes-com-mysql.md) | Migrations por serviço e testes com MySQL real | Proposta | 020 | Em uso | #41 |
+| [024](0024-cifragem-do-cpf.md) | Cifragem do CPF com AES-GCM e índice HMAC | Proposta | 002, 022 | Em uso: `users.cpf_enc` e `users.cpf_hmac` | #60 |
 
 ## Numeração
 
 - **ADRs 002–004:** no documento original, as ADRs de Segurança (2.1), Confiabilidade (2.2) e Recuperabilidade (2.4) aparecem apenas como "ADR", sem número. Como o documento numera a de Auditabilidade como 001 e a de Estilo Arquitetural como 005, elas foram numeradas como 002, 003 e 004 na ordem em que aparecem.
-- **Broker de mensagens:** o épico #40 e a issue #37 citam a escolha do Redis Streams como "ADR-020". Esse número foi usado pelo #41 (banco compartilhado). A ADR do broker vai receber o próximo número livre (024 em diante) e substituir a [ADR-016](0016-comunicacao-interna-http-fire-and-forget.md).
+- **Broker de mensagens:** o épico #40 e a issue #37 citam a escolha do Redis Streams como "ADR-020". Esse número foi usado pelo #41 (banco compartilhado). A ADR do broker vai receber o próximo número livre (025 em diante) e substituir a [ADR-016](0016-comunicacao-interna-http-fire-and-forget.md).
 
 ## Notas de transcrição
 
@@ -63,7 +64,7 @@ As ADRs 001–013 reproduzem o texto do documento, com ajustes mínimos de ortog
 
 ## Aceite pendente
 
-As ADRs 014–023 estão como **Proposta**. Para movê-las a **Aceita**:
+As ADRs 014–024 estão como **Proposta**. Para movê-las a **Aceita**:
 
 1. Abrir uma *Discussion* (ou issue) no repositório, ou mandar e-mail para a equipe arquiteta, com o link deste índice.
 2. Registrar em cada ADR, na tabela "Aceite da equipe arquiteta", o nome, a data e o link do comentário ou print da aprovação.

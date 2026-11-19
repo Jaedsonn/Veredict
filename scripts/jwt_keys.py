@@ -1,8 +1,10 @@
-"""Gera o par RS256 de dev no .env: o auth assina com a privada e o gateway valida com a pública"""
+"""Gera no .env o par RS256 de dev (auth assina, gateway valida) e as chaves do CPF (ADR-024)"""
 
 import argparse
+import base64
 import os
 import re
+import secrets
 import stat
 import sys
 import tempfile
@@ -15,7 +17,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 PRIVATE: Final = "JWT_PRIVATE_KEY"
 PUBLIC: Final = "JWT_PUBLIC_KEY"
-_LINE: Final = re.compile(rb"(JWT_PRIVATE_KEY|JWT_PUBLIC_KEY)=(.*?)\r?\n?")
+CPF_ENCRYPTION: Final = "CPF_ENCRYPTION_KEY"
+CPF_HMAC: Final = "CPF_HMAC_KEY"
+CPF_KEYS: Final = (CPF_ENCRYPTION, CPF_HMAC)
+_MANAGED: Final = (PRIVATE, PUBLIC, *CPF_KEYS)
+_LINE: Final = re.compile(rb"(" + b"|".join(n.encode() for n in _MANAGED) + rb")=(.*?)\r?\n?")
 
 
 def _one_line(pem: bytes) -> str:
@@ -36,6 +42,11 @@ def generate_pair() -> dict[str, str]:
     return {PRIVATE: _one_line(private), PUBLIC: _one_line(public)}
 
 
+def generate_cpf_key() -> str:
+    """32 bytes aleatórios em base64, o formato que o auth exige (ADR-024)"""
+    return base64.b64encode(secrets.token_bytes(32)).decode()
+
+
 def _unquote(value: bytes) -> bytes:
     if len(value) >= 2 and value[:1] == value[-1:] and value[:1] in (b"'", b'"'):
         return value[1:-1]
@@ -51,24 +62,27 @@ def _filled(lines: list[bytes]) -> set[str]:
     return {name for name, value in values.items() if value}
 
 
-def _rewrite(lines: list[bytes], pair: dict[str, str]) -> bytes:
-    """Troca a 1ª ocorrência de cada chave, remove as duplicadas e acrescenta as que faltam"""
+def _rewrite(lines: list[bytes], values: dict[str, str]) -> bytes:
+    """Troca a 1ª ocorrência de cada chave nova, remove as duplicadas e acrescenta as que faltam
+
+    Chaves fora de `values` ficam como estão
+    """
     out: list[bytes] = []
     written: set[str] = set()
     for line in lines:
         match = _LINE.fullmatch(line)
-        if match is None:
+        name = match.group(1).decode() if match else None
+        if name is None or name not in values:
             out.append(line)
             continue
-        name = match.group(1).decode()
         if name not in written:
             ending = b"\r\n" if line.endswith(b"\r\n") else b"\n"
-            out.append(f"{name}={pair[name]}".encode() + ending)
+            out.append(f"{name}={values[name]}".encode() + ending)
             written.add(name)
     if out and not out[-1].endswith(b"\n"):
         out[-1] += b"\n"
-    missing = [name for name in (PRIVATE, PUBLIC) if name not in written]
-    out.extend(f"{name}={pair[name]}\n".encode() for name in missing)
+    missing = [name for name in _MANAGED if name in values and name not in written]
+    out.extend(f"{name}={values[name]}\n".encode() for name in missing)
     return b"".join(out)
 
 
@@ -87,9 +101,11 @@ def _atomic_write(path: Path, data: bytes) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Gera o par RS256 de dev no .env")
+    parser = argparse.ArgumentParser(description="Gera o par RS256 e as chaves do CPF no .env")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
-    parser.add_argument("--force", action="store_true", help="troca um par já existente")
+    parser.add_argument(
+        "--force", action="store_true", help="troca o par RS256; as chaves do CPF nunca mudam"
+    )
     args = parser.parse_args(argv)
     env_file: Path = args.env_file
 
@@ -98,16 +114,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     lines = env_file.read_bytes().splitlines(keepends=True)
     filled = _filled(lines)
-    if not args.force and filled == {PRIVATE, PUBLIC}:
-        print(f"{PRIVATE} e {PUBLIC} já existem em {env_file}; use force=1 para trocar o par")
-        return 0
-    if not args.force and filled:
+    jwt_filled = filled & {PRIVATE, PUBLIC}
+    if not args.force and jwt_filled and jwt_filled != {PRIVATE, PUBLIC}:
         print(f"Par incompleto em {env_file}; use force=1 para gerar outro", file=sys.stderr)
         return 1
 
-    _atomic_write(env_file, _rewrite(lines, generate_pair()))
-    # Nunca imprime a chave
-    print(f"Par RS256 gravado em {env_file} ({PRIVATE} e {PUBLIC}); reinicie auth e gateway")
+    values: dict[str, str] = {}
+    if args.force or not jwt_filled:
+        values.update(generate_pair())
+    # force=1 não troca as chaves do CPF: a de cifra perderia os CPFs gravados e a do HMAC
+    # quebraria o UNIQUE (ADR-024); a troca é uma migração de dados (#62)
+    values.update({name: generate_cpf_key() for name in CPF_KEYS if name not in filled})
+    if not values:
+        print(f"As chaves já existem em {env_file}; use force=1 para trocar o par RS256")
+        return 0
+
+    _atomic_write(env_file, _rewrite(lines, values))
+    # Nunca imprime as chaves
+    if PRIVATE in values:
+        print(f"Par RS256 gravado em {env_file} ({PRIVATE} e {PUBLIC}); reinicie auth e gateway")
+    if cpf := [name for name in CPF_KEYS if name in values]:
+        print(f"Chaves do CPF gravadas em {env_file} ({' e '.join(cpf)}); reinicie o auth")
     return 0
 
 

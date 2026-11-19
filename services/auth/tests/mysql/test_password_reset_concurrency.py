@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
+from auth_test_data import user_columns
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
@@ -18,7 +19,7 @@ from auth_service.domain.entities import RequestContext
 from auth_service.domain.errors import InvalidResetTokenError
 from auth_service.domain.password_policy import PasswordPolicy
 from auth_service.domain.reset_token import ResetTokenService
-from auth_service.models import User
+from auth_service.models import User, UserType
 from auth_service.use_cases.password_reset import (
     RequestPasswordReset,
     RequestPasswordResetCommand,
@@ -91,8 +92,16 @@ async def harness(auth_database_url: str) -> AsyncIterator[Harness]:
     clock = SystemClock()
     async with db.session_factory() as session:
         users = SqlAlchemyUserRepository(session)
+        identity = user_columns(EMAIL)
         user = await users.create(
-            email=EMAIL, name="Corrida", password_hash=HASHER.hash("SenhaInicial1"), now=clock.now()
+            email=EMAIL,
+            name="Corrida",
+            password_hash=HASHER.hash("SenhaInicial1"),
+            user_type=UserType.COMMON,
+            cpf_enc=identity["cpf_enc"],
+            cpf_hmac=identity["cpf_hmac"],
+            oab=None,
+            now=clock.now(),
         )
         await users.mark_email_verified(user.id, verified_at=clock.now())
     yield Harness(db)

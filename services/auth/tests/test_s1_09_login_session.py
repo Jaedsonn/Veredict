@@ -3,6 +3,7 @@
 import uuid
 
 import pytest
+from auth_test_data import common_identity
 from httpx import AsyncClient
 
 from auth_service.adapters.clock import FakeClock
@@ -23,7 +24,12 @@ async def _create_verified_user(
 ) -> int:
     reg = await client.post(
         "/auth/register",
-        json={"name": "Usuário Ativo", "email": email, "password": password},
+        json={
+            "name": "Usuário Ativo",
+            "email": email,
+            "password": password,
+            **common_identity(email),
+        },
     )
     assert reg.status_code == 201
     user_id: int = reg.json()["id"]
@@ -51,6 +57,7 @@ async def test_login_pending_verification_returns_403_email_not_verified(
             "name": "Pendente",
             "email": "pendente@example.com",
             "password": "SenhaForte123",
+            **common_identity("pendente@example.com"),
         },
     )
     res = await client.post(

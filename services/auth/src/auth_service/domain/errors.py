@@ -11,7 +11,11 @@ class DomainError(Exception):
         self.field = field
 
 
-class EmailAlreadyRegisteredError(DomainError):
+class AlreadyRegisteredError(DomainError):
+    """Dado único já cadastrado (`409` com `code` por campo); a #61 troca por resposta uniforme"""
+
+
+class EmailAlreadyRegisteredError(AlreadyRegisteredError):
     """E-mail já cadastrado na base (`409 Conflict`)"""
 
     def __init__(self, email: str) -> None:
@@ -21,6 +25,56 @@ class EmailAlreadyRegisteredError(DomainError):
             field="email",
         )
         self.email = email
+
+
+class CpfAlreadyRegisteredError(AlreadyRegisteredError):
+    """CPF já cadastrado (`409 Conflict`); nunca carrega o CPF"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="cpf_already_registered",
+            message="Este CPF já está cadastrado.",
+            field="cpf",
+        )
+
+
+class OabAlreadyRegisteredError(AlreadyRegisteredError):
+    """Inscrição na OAB (UF e número) já cadastrada (`409 Conflict`)"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="oab_already_registered",
+            message="Esta inscrição na OAB já está cadastrada.",
+            field="oab",
+        )
+
+
+class InvalidFieldError(DomainError):
+    """Campo recusado por regra de domínio (`422`, no formato de validação)"""
+
+    def __init__(self, code: str, message: str, *, field: str) -> None:
+        super().__init__(code=code, message=message, field=field)
+
+
+class InvalidCpfError(InvalidFieldError):
+    """CPF com formato ou dígitos verificadores inválidos; nunca carrega o valor"""
+
+    def __init__(self) -> None:
+        super().__init__(code="invalid_cpf", message="CPF inválido.", field="cpf")
+
+
+class InvalidOabError(InvalidFieldError):
+    """Inscrição na OAB inválida ou incoerente com o tipo de conta"""
+
+    def __init__(self, message: str, *, field: str = "oab") -> None:
+        super().__init__(code="invalid_oab", message=message, field=field)
+
+
+class CpfDecryptionError(Exception):
+    """Cifra adulterada, de outra chave, de versão desconhecida ou de outra linha; vira 500"""
+
+    def __init__(self) -> None:
+        super().__init__("Não foi possível decifrar o CPF")
 
 
 class WeakPasswordError(DomainError):

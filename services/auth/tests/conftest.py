@@ -1,8 +1,12 @@
 """Fixtures de teste para o `auth-service` (SQLite em memória + adaptadores determinísticos)."""
 
+import base64
 import io
 import logging
+import os
+import sys
 from collections.abc import AsyncIterator, Callable, Iterator
+from pathlib import Path
 
 import pytest
 import structlog
@@ -12,6 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 
 from auth_service.adapters.clock import FakeClock
+from auth_service.adapters.cpf_protector import AesGcmCpfProtector
 from auth_service.adapters.password_hasher import Argon2PasswordHasher
 from auth_service.adapters.token_issuer import PyJwtTokenIssuer
 from auth_service.config import Settings
@@ -22,9 +27,14 @@ from veriditi_common.db import Database
 from veriditi_common.logging import configure_logging
 from veriditi_common.notifications import InMemoryNotifier
 
+# O --import-mode=importlib não põe a pasta dos testes no sys.path; o auth_test_data precisa
+sys.path.insert(0, str(Path(__file__).parent))
+
 TOKEN = "test-internal-token-0123456789"
 TEST_INTERNAL_TOKEN = TOKEN
 TEST_PEPPER = "test-verification-pepper-0123456789"
+TEST_CPF_ENCRYPTION_KEY = base64.b64encode(os.urandom(32)).decode()
+TEST_CPF_HMAC_KEY = base64.b64encode(os.urandom(32)).decode()
 
 RenderedLogs = Callable[[], str]
 
@@ -66,6 +76,8 @@ def settings(rsa_keypair: tuple[str, str]) -> Settings:
         jwt_public_key=pub_pem,
         access_token_ttl_seconds=900,
         refresh_token_ttl_days=7,
+        cpf_encryption_key=SecretStr(TEST_CPF_ENCRYPTION_KEY),
+        cpf_hmac_key=SecretStr(TEST_CPF_HMAC_KEY),
     )
 
 
@@ -113,6 +125,12 @@ def token_issuer(settings: Settings) -> PyJwtTokenIssuer:
 
 
 @pytest.fixture
+def cpf_protector(settings: Settings) -> AesGcmCpfProtector:
+    encryption_key, hmac_key = settings.resolved_cpf_keys()
+    return AesGcmCpfProtector(encryption_key=encryption_key, hmac_key=hmac_key)
+
+
+@pytest.fixture
 async def db() -> AsyncIterator[Database]:
     database = Database("sqlite+aiosqlite:///:memory:")
     async with database.engine.begin() as conn:
@@ -130,6 +148,7 @@ async def client(
     notifier: InMemoryNotifier,
     password_hasher: Argon2PasswordHasher,
     token_issuer: PyJwtTokenIssuer,
+    cpf_protector: AesGcmCpfProtector,
 ) -> AsyncIterator[AsyncClient]:
     app = create_app(
         settings=settings,
@@ -139,6 +158,7 @@ async def client(
         clock=fake_clock,
         password_hasher=password_hasher,
         token_issuer=token_issuer,
+        cpf_protector=cpf_protector,
     )
     async with (
         app.router.lifespan_context(app),

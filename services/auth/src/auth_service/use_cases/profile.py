@@ -1,26 +1,34 @@
 """Casos de uso [S1-10]: Consulta e edição de perfil e troca de senha (RF06)"""
 
+import hmac
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 
 from pydantic import JsonValue
 
 from auth_service.domain.entities import RequestContext, UserEntity
 from auth_service.domain.errors import (
+    CpfDecryptionError,
     InvalidCurrentPasswordError,
     UserNotFoundError,
     WeakPasswordError,
 )
+from auth_service.domain.oab import Oab
 from auth_service.domain.password_policy import PasswordPolicy
-from auth_service.models import RevokeReason
+from auth_service.models import RevokeReason, UserStatus, UserType
 from auth_service.ports import (
     Clock,
+    CpfProtector,
     PasswordHasher,
     RefreshTokenRepository,
     TokenIssuer,
     UserRepository,
 )
 from veriditi_common.audit import AuditEvent, AuditLogger, AuditOutcome
+from veriditi_common.logging import get_logger
+
+log = get_logger(__name__)
 
 
 def _parse_uuid(value: str | None) -> uuid.UUID | None:
@@ -30,6 +38,44 @@ def _parse_uuid(value: str | None) -> uuid.UUID | None:
         return uuid.UUID(value)
     except ValueError:
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileView:
+    """Perfil para o próprio usuário: o CPF sai só mascarado e a OAB como foi informada (#60)"""
+
+    id: int
+    name: str
+    email: str
+    status: UserStatus
+    email_verified_at: datetime | None
+    created_at: datetime
+    user_type: UserType
+    cpf_masked: str
+    oab: Oab | None
+
+
+def _reveal_cpf(user: UserEntity, cpf_protector: CpfProtector) -> str:
+    cpf = cpf_protector.decrypt(user.cpf_enc)
+    # O AAD é fixo (ADR-024): um cpf_enc copiado de outra linha decifra; o índice da linha não bate
+    if not hmac.compare_digest(cpf_protector.blind_index(cpf), user.cpf_hmac):
+        log.error("cpf_integrity_mismatch", user_id=user.id)
+        raise CpfDecryptionError()
+    return cpf.masked
+
+
+def _to_view(user: UserEntity, cpf_protector: CpfProtector) -> ProfileView:
+    return ProfileView(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        status=user.status,
+        email_verified_at=user.email_verified_at,
+        created_at=user.created_at,
+        user_type=user.user_type,
+        cpf_masked=_reveal_cpf(user, cpf_protector),
+        oab=user.oab,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,33 +96,39 @@ class ChangePasswordCommand:
 class GetProfile:
     """Consulta os dados de perfil do usuário autenticado (#10)
 
-    Depende apenas de `UserRepository`.
+    Único lugar que decifra o CPF, e só para devolvê-lo mascarado (ADR-024).
     """
 
-    def __init__(self, users: UserRepository) -> None:
+    def __init__(self, users: UserRepository, cpf_protector: CpfProtector) -> None:
         self._users = users
+        self._cpf_protector = cpf_protector
 
-    async def execute(self, user_id: int) -> UserEntity:
+    async def execute(self, user_id: int) -> ProfileView:
         user = await self._users.get_by_id(user_id)
         if user is None:
             raise UserNotFoundError()
-        return user
+        return _to_view(user, self._cpf_protector)
 
 
 class UpdateProfile:
-    """Atualiza campos permitidos do perfil e emite auditoria dos campos alterados (#10)"""
+    """Atualiza campos permitidos do perfil e emite auditoria dos campos alterados (#10)
+
+    Tipo de conta, CPF e OAB não são editáveis aqui (#60): o comando nem os carrega.
+    """
 
     def __init__(
         self,
         users: UserRepository,
         audit: AuditLogger,
         clock: Clock,
+        cpf_protector: CpfProtector,
     ) -> None:
         self._users = users
         self._audit = audit
         self._clock = clock
+        self._cpf_protector = cpf_protector
 
-    async def execute(self, cmd: UpdateProfileCommand, ctx: RequestContext) -> UserEntity:
+    async def execute(self, cmd: UpdateProfileCommand, ctx: RequestContext) -> ProfileView:
         user = await self._users.get_by_id(cmd.user_id)
         if user is None:
             raise UserNotFoundError()
@@ -104,7 +156,7 @@ class UpdateProfile:
             )
         )
 
-        return user
+        return _to_view(user, self._cpf_protector)
 
 
 class ChangePassword:

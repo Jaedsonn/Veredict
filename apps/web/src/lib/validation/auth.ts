@@ -1,8 +1,18 @@
 import { z } from "zod";
 
+import { cpfDigits } from "@/lib/validation/cpf";
+import {
+  OAB_KIND_MESSAGE,
+  OAB_NUMBER_MESSAGE,
+  OAB_UF_MESSAGE,
+  isOabKind,
+  isOabNumber,
+  isOabUf,
+} from "@/lib/validation/oab";
+
 /**
  * Schemas compartilhados entre o formulário (cliente) e a Server Action (servidor).
- * As regras espelham a API do serviço de autenticação (#7, #8, #9, #10, #19).
+ * As regras espelham a API do serviço de autenticação (#7, #8, #9, #10, #19, #60).
  */
 
 export const PASSWORD_MIN = 10;
@@ -45,18 +55,49 @@ function bothStrings(a: string, b: string) {
   };
 }
 
+export const USER_TYPES = ["common", "lawyer"] as const;
+export type UserType = (typeof USER_TYPES)[number];
+
+/** O bloco da OAB só vale para advogado; para conta comum os campos são ignorados. */
+function isLawyer(payload: z.core.ParsePayload) {
+  return (payload.value as Record<string, unknown> | null)?.userType === "lawyer";
+}
+
+/**
+ * Discriminado pelo `userType`: advogado precisa dos três campos da OAB. Os campos
+ * ficam planos no formulário e a Server Action monta o `oab` aninhado da API.
+ */
 export const registerSchema = z
   .object({
     name: nameSchema,
     email: emailSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, "Confirme sua senha."),
+    userType: z.enum(USER_TYPES, "Escolha o tipo de conta."),
+    cpf: z
+      .string("CPF inválido.")
+      .refine((v) => cpfDigits(v) !== null, "CPF inválido.")
+      .transform((v) => cpfDigits(v) ?? ""),
+    oabNumber: z.string().optional(),
+    oabUf: z.string().optional(),
+    oabKind: z.string().optional(),
     terms: z.literal("on", "Você precisa aceitar os termos de uso."),
   })
   .refine((d) => d.password === d.confirmPassword, {
     path: ["confirmPassword"],
     message: "As senhas não coincidem.",
     when: bothStrings("password", "confirmPassword"),
+  })
+  .refine((d) => isOabNumber(d.oabNumber), {
+    path: ["oabNumber"],
+    message: OAB_NUMBER_MESSAGE,
+    when: isLawyer,
+  })
+  .refine((d) => isOabUf(d.oabUf), { path: ["oabUf"], message: OAB_UF_MESSAGE, when: isLawyer })
+  .refine((d) => isOabKind(d.oabKind), {
+    path: ["oabKind"],
+    message: OAB_KIND_MESSAGE,
+    when: isLawyer,
   });
 
 export const verifyEmailSchema = z.object({

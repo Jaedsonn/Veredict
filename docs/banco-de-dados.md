@@ -51,6 +51,12 @@ erDiagram
     varchar name
     varchar password_hash
     enum status "pending_verification | active | blocked"
+    enum user_type "common | lawyer"
+    varbinary cpf_enc "AES-256-GCM (ADR-024)"
+    char cpf_hmac UK "HMAC-SHA256 hex"
+    varchar oab_number "so lawyer"
+    enum oab_uf "27 UFs, so lawyer"
+    enum oab_kind "principal | suplementar | transitoria"
     datetime email_verified_at
     datetime created_at
     datetime updated_at
@@ -206,11 +212,25 @@ CREATE TABLE users (
   email_verified_at DATETIME(6)  NULL,
   created_at        DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   updated_at        DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  user_type         ENUM('common','lawyer') NOT NULL,
+  cpf_enc           VARBINARY(64) NOT NULL,
+  cpf_hmac          CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  oab_number        VARCHAR(6) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  oab_uf            ENUM('AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA',
+                         'PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO') NULL,
+  oab_kind          ENUM('principal','suplementar','transitoria') NULL,
   CONSTRAINT pk_users PRIMARY KEY (id),
   CONSTRAINT uq_users_email UNIQUE (email),
-  CONSTRAINT ck_users_active_requires_verified CHECK (status <> 'active' OR email_verified_at IS NOT NULL)
+  CONSTRAINT uq_users_cpf_hmac UNIQUE (cpf_hmac),
+  CONSTRAINT uq_users_oab_uf_oab_number UNIQUE (oab_uf, oab_number),
+  CONSTRAINT ck_users_active_requires_verified CHECK (status <> 'active' OR email_verified_at IS NOT NULL),
+  CONSTRAINT ck_users_oab_matches_type CHECK (
+    (user_type = 'lawyer' AND oab_number IS NOT NULL AND oab_uf IS NOT NULL AND oab_kind IS NOT NULL)
+    OR (user_type = 'common' AND oab_number IS NULL AND oab_uf IS NULL AND oab_kind IS NULL))
 );
 ```
+
+As colunas de `user_type` em diante vêm da migration `0006` (#60), que as acrescenta depois de `updated_at`.
 
 | Coluna | Tipo | Nulo | Padrão | Descrição | PII |
 |---|---|---|---|---|---|
@@ -222,10 +242,24 @@ CREATE TABLE users (
 | `email_verified_at` | DATETIME(6) | sim | — | Quando o código foi confirmado (#8). Obrigatório com `status = 'active'` (CHECK) | não |
 | `created_at` | DATETIME(6) | não | agora (UTC) | Cadastro | não |
 | `updated_at` | DATETIME(6) | não | agora (UTC) | Atualizado pelo banco (`ON UPDATE`) e pela aplicação (`onupdate=utcnow`) | não |
+| `user_type` | ENUM | não | — | `common` ou `lawyer`, escolhido no cadastro e imutável (`PATCH /me` ignora, #60) | não |
+| `cpf_enc` | VARBINARY(64) | não | — | CPF cifrado com AES-256-GCM: versão (1 byte), nonce (12), cifra (11) e tag (16), 40 bytes ([ADR-024](adr/0024-cifragem-do-cpf.md)). Só o auth decifra, e só para o `/me` mascarar | **sim** (cifrado) |
+| `cpf_hmac` | CHAR(64) ascii | não | — | HMAC-SHA256 dos 11 dígitos com `CPF_HMAC_KEY`: índice do UNIQUE, sem o CPF em claro. Sem a chave não dá para montar o dicionário de CPFs | **sim** (pseudônimo) |
+| `oab_number` | VARCHAR(6) ascii | sim | — | 1 a 6 dígitos, sem zeros à esquerda (`001234` e `1234` são a mesma inscrição). Só advogado | não (dado público do CNA) |
+| `oab_uf` | ENUM (27 UFs) | sim | — | Seccional da inscrição. Só advogado | não |
+| `oab_kind` | ENUM | sim | — | `principal`, `suplementar` ou `transitoria`. Só advogado | não |
 
 O `ON UPDATE` aparece só no DDL do MySQL, escrito na migration. O SQLite dos testes não tem esse recurso, e por isso o model também usa `onupdate=utcnow`.
 
 O CHECK `ck_users_active_requires_verified` (`status <> 'active' OR email_verified_at IS NOT NULL`) impede uma conta ativa sem e-mail verificado, mesmo que a aplicação erre. A migration `0002` só o cria no MySQL, então o SQLite dos testes não o aplica.
+
+Tipo, CPF e OAB (#60, migration `0006`):
+
+- **`ck_users_oab_matches_type`**: a OAB vem completa (número, UF e tipo) se e somente se `user_type = 'lawyer'`. A regra também vive no domínio (`domain/oab.py`), que dá a mensagem em PT-BR; o CHECK pega um erro da aplicação ou um INSERT manual (erro 3819). O model declara o CHECK, então o SQLite dos testes também o aplica.
+- **`uq_users_oab_uf_oab_number`**: a mesma inscrição não serve a duas contas. Contas comuns têm `(NULL, NULL)`, e NULLs não colidem no UNIQUE do InnoDB.
+- **Duplicidade**: o cadastro faz só o INSERT, e o adapter traduz a constraint violada em erro de domínio por campo (`uq_users_email`, `uq_users_cpf_hmac`, `uq_users_oab_uf_oab_number` → `409` com `email_already_registered`, `cpf_already_registered` ou `oab_already_registered`). O nome vem da mensagem do erro 1062 no MySQL e das colunas no SQLite. O mapeamento fica num dicionário só (`_DUPLICATE_ERRORS` em `adapters/repositories.py`), que a #61 troca pela resposta uniforme.
+- **Usuários antigos**: a `0006` conta as linhas de `users` antes do `ALTER` e falha com "N usuário(s) sem CPF em users; rode `make reset`…" se houver alguma. Não há ambiente implantado (#17), e um `ADD COLUMN NOT NULL` sem essa checagem gravaria `''` no `cpf_hmac` e quebraria o UNIQUE a partir da 2ª linha. Uma coluna nula com CHECK provisório deixaria um estado temporário no modelo definitivo.
+- **Inscrições da OAB**: uma por advogado, nas colunas de `users`. A tabela de várias inscrições (suplementares) com status de verificação (`pending`, `verified`, `rejected`) entra no #64; até lá, a OAB é validada só pelo formato e a interface não a chama de verificada.
 
 ### 5.2 `veriditi.email_verification_codes` (dono: auth)
 
@@ -430,6 +464,8 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 | Índice | Consulta | Issue |
 |---|---|---|
 | `uq_users_email` | Login: `SELECT id, password_hash, status FROM users WHERE email = :email`. No cadastro, a violação do UNIQUE vira 409 sem SELECT prévio | #7, #9 |
+| `uq_users_cpf_hmac` | Cadastro: o INSERT com o HMAC do CPF; a violação vira `409 cpf_already_registered`, sem SELECT prévio | #60 |
+| `uq_users_oab_uf_oab_number` | Cadastro de advogado: o INSERT; a violação vira `409 oab_already_registered`. A consulta por inscrição do #64 (`WHERE oab_uf = :uf AND oab_number = :n`) usa o mesmo índice | #60, #64 |
 | `ix_email_verification_codes_user_id_consumed_at` | Código ativo: `SELECT … WHERE user_id = :uid AND consumed_at IS NULL AND purpose = :p ORDER BY id DESC LIMIT 1 FOR UPDATE`. Invalidar os anteriores: `UPDATE … SET consumed_at = :now WHERE user_id = :uid AND consumed_at IS NULL`. Cooldown e limite de reenvio: `SELECT COUNT(*) … WHERE user_id = :uid AND created_at >= :since` (o prefixo `user_id` reduz a busca a poucas linhas por usuário) | #8 |
 | `uq_refresh_tokens_token_hash` | Refresh e logout: `SELECT … FROM refresh_tokens WHERE token_hash = :h FOR UPDATE` | #9 |
 | `ix_refresh_tokens_user_id_revoked_at` | Reuso detectado revoga **todos** os tokens do usuário: `UPDATE refresh_tokens SET revoked_at = :now, revoke_reason = 'reuse_detected' WHERE user_id = :uid AND revoked_at IS NULL`. A redefinição de senha faz o mesmo com `'password_reset'` | #9, #19 |
@@ -507,6 +543,7 @@ Os models usam estes tipos. Eles mantêm o mesmo comportamento no MySQL e no SQL
 | `HashHex()` | `CHAR(64)` ascii_bin | `CHAR(64)` | Normaliza para minúsculas e valida o hex |
 | `UUIDStr()` | `CHAR(36)` ascii_bin | `CHAR(36)` | O `sa.Uuid` geraria `CHAR(32)` sem hífens |
 | `ascii_string(n)` | `VARCHAR(n)` ascii_bin | `VARCHAR(n)` | Chaves geradas por código |
+| `VarBinary(n)` | `VARBINARY(n)` | `BLOB` | Recusa mais de `n` bytes. No MySQL o valor viaja em hex dentro de `UNHEX(...)`: o aiomysql 0.3.2 quebra ao escapar `bytes` com o PyMySQL 1.2 ([PyMySQL#1274](https://github.com/PyMySQL/PyMySQL/issues/1274)) |
 | `str_enum(Enum, "status")` | `ENUM(...)` | `VARCHAR` + `ck_<tabela>_status` | Grava o valor (`"active"`), não o nome |
 
 Cada serviço declara a própria `Base` com `metadata = make_metadata()` (`veriditi_common.db`).
@@ -577,6 +614,7 @@ Já na Sprint 2:
 | Serviço / `version_table` | Revisão | `down_revision` | Issue | Conteúdo |
 |---|---|---|---|---|
 | auth | `0005` | `0004` | #19 | `password_reset_tokens` + GRANT, e `password_reset` no fim do ENUM `refresh_tokens.revoke_reason` |
+| auth | `0006` | `0005` | #60 | `user_type`, `cpf_enc`, `cpf_hmac` e as colunas da OAB em `users`, com `uq_users_cpf_hmac`, `uq_users_oab_uf_oab_number` e `ck_users_oab_matches_type`; falha se `users` tiver linhas (dev: `make reset`) |
 
 ## 13. Sprint 2: notas do modelo lógico
 
@@ -624,6 +662,9 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 | #19 | Revogar todas as sessões, sem motivo | `revoke_reason = 'password_reset'` (fim do ENUM) | Distingue o reset de logout e de roubo na trilha de sessões |
 | #19 | "O MFA continua exigido no próximo login" | Não se aplica ainda | O MFA (#18, `user_mfa`) não existe. O reset não toca em tabela de MFA; quando o #18 entrar, um teste precisa provar que o login depois do reset continua pedindo o 2º fator |
 | #19 | Auditoria só com os nomes das ações | `reset_requested` também com `outcome=failure` (conta inexistente ou não ativa) e `reset_failed` com `metadata.reason` (`malformed`, `not_found`, `expired`, `consumed`, `account_not_active`) | A resposta é a mesma para todos os casos; a trilha guarda o motivo, nunca o e-mail nem o token |
+| #60 | "CPF guardado cifrado" | `cpf_enc` (AES-256-GCM com byte de versão e AAD fixo) + `cpf_hmac` (HMAC-SHA256 com chave separada) | Cifra com nonce aleatório não serve de UNIQUE e hash sem chave é revertido por força bruta (ADR-024) |
+| #60 | OAB sem modelo físico | Colunas nulas em `users`, CHECK por tipo e UNIQUE `(oab_uf, oab_number)` | Uma inscrição por advogado nesta entrega; a tabela de várias inscrições e o status de verificação ficam para o #64 |
+| #60 | Usuários existentes sem CPF | A `0006` falha com mensagem se `users` não estiver vazia | Sem ambiente implantado (#17); em dev, `make reset` |
 | #3, #5 | `LOGS_DB_MIGRATOR_*` separado | Um único `migrator` para os dois bancos | Uma credencial de DDL a menos para gerenciar; o runtime continua separado |
 | #3 | `LogsDbSettings` / `env_prefix="LOGS_DB_"` para o monitoring | O monitoring usa o `ServiceSettings` com `db_name = "veriditi_logs"` como padrão; o compose mapeia `LOGS_DB_PASSWORD` para `DB_PASSWORD` | Um único `migrator` (acima); nome do banco e do usuário são fixos pelo init, então só a senha vai para o `.env` |
 | #3 | Compose sobe 9 serviços, sem `notification-migrate` | Entra o `notification-migrate` | O notification é dono de `notifications_sent` (seções 7 e 12) e a seção 10 exige `<serviço>-migrate` antes do serviço; até o #6, com `versions/` vazia, ele só criava a `alembic_version_notification` |
@@ -651,6 +692,6 @@ Conferido contra o texto das issues em 2026-11-12. Vale o que está neste docume
 ## Como verificar
 
 - `uv run pytest`: tipos, convenções e helpers em SQLite.
-- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos, a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade), a 0005 do auth (DDL de `password_reset_tokens`, GRANT com DELETE, `password_reset` no ENUM de `revoke_reason` e downgrade que o converte em `logout`), a 0001 do monitoring (DDL de `audit_events`, 1142 em UPDATE, DELETE, TRUNCATE e ALTER para o `veriditi_logs_writer`, REVOKE no downgrade e reenvios concorrentes gravando uma linha só) e a 0001 do notification (DDL de `notifications_sent`, GRANT de SELECT, INSERT e UPDATE sem DELETE, 1142 em DELETE, TRUNCATE e ALTER, CHECKs com 3819, REVOKE no downgrade, reserva concorrente gravando uma linha só e UPDATE condicional que não regride).
+- `make db-test-contract`: sobe um MySQL 8.4 descartável com `docker/mysql/init` e prova os privilégios, a sessão em UTC, o DDL físico dos tipos, a migration 0001 do auth (DDL, GRANT sem DELETE e REVOKE no downgrade), a 0005 do auth (DDL de `password_reset_tokens`, GRANT com DELETE, `password_reset` no ENUM de `revoke_reason` e downgrade que o converte em `logout`), a 0006 do auth (DDL das colunas de tipo, CPF e OAB, CHECK por tipo com 3819, UNIQUE de CPF e de OAB com 1062, recusa com `users` não vazia e o repositório traduzindo cada duplicidade no erro do campo, com só a cifra do CPF no banco), a 0001 do monitoring (DDL de `audit_events`, 1142 em UPDATE, DELETE, TRUNCATE e ALTER para o `veriditi_logs_writer`, REVOKE no downgrade e reenvios concorrentes gravando uma linha só) e a 0001 do notification (DDL de `notifications_sent`, GRANT de SELECT, INSERT e UPDATE sem DELETE, 1142 em DELETE, TRUNCATE e ALTER, CHECKs com 3819, REVOKE no downgrade, reserva concorrente gravando uma linha só e UPDATE condicional que não regride).
 - `make db-test-migrations`: num MySQL descartável igual, roda os 5 passos da seção 11 para cada serviço com banco.
 - `make db-test`: os dois acima; é o que o job `database` do CI executa.

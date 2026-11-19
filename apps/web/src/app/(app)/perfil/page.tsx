@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { getCurrentUser } from "@/lib/user";
+import { oabKindLabel } from "@/lib/validation/oab";
 
 import { PasswordForm } from "./password-form";
 import { ProfileForm } from "./profile-form";
@@ -11,6 +12,8 @@ import { ProfileForm } from "./profile-form";
 export const metadata: Metadata = { title: "Perfil · Veriditi" };
 
 const dateFormat = new Intl.DateTimeFormat("pt-BR", { dateStyle: "long", timeZone: "America/Sao_Paulo" });
+
+const USER_TYPE_LABELS = { common: "Pessoa", lawyer: "Advogado(a)" } as const;
 
 async function ProfileDetails() {
   const user = await getCurrentUser();
@@ -27,6 +30,25 @@ async function ProfileDetails() {
             <dt className="label-mono">Cadastro em:</dt>
             <dd className="font-medium">{dateFormat.format(new Date(user.created_at))}</dd>
           </div>
+          <div className="flex flex-col gap-1">
+            <dt className="label-mono">Tipo de conta:</dt>
+            <dd className="font-medium">{USER_TYPE_LABELS[user.user_type]}</dd>
+          </div>
+          <div className="flex flex-col gap-1">
+            <dt className="label-mono">CPF:</dt>
+            <dd className="font-mono font-medium">{user.cpf_masked}</dd>
+          </div>
+          {user.oab && (
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <dt className="label-mono">Inscrição na OAB:</dt>
+              <dd className="font-medium">
+                {user.oab.number}/{user.oab.uf} · {oabKindLabel(user.oab.kind)}
+              </dd>
+              <dd className="text-sm text-muted-foreground">
+                Informada no cadastro; ainda não conferimos a inscrição no Cadastro Nacional dos Advogados.
+              </dd>
+            </div>
+          )}
         </dl>
         <ProfileForm name={user.name} />
       </Card>

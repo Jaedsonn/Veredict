@@ -5,6 +5,7 @@ import json
 import re
 
 import pytest
+from auth_test_data import common_identity
 from httpx import AsyncClient
 from sqlalchemy import select, update
 
@@ -33,7 +34,13 @@ INVALID = {
 
 async def _register(client: AsyncClient, notifier: InMemoryNotifier, email: str = EMAIL) -> int:
     reg = await client.post(
-        "/auth/register", json={"name": "Ana Reset", "email": email, "password": OLD_PASSWORD}
+        "/auth/register",
+        json={
+            "name": "Ana Reset",
+            "email": email,
+            "password": OLD_PASSWORD,
+            **common_identity(email),
+        },
     )
     assert reg.status_code == 201
     user_id: int = reg.json()["id"]

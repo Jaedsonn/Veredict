@@ -8,13 +8,15 @@ import uuid
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from auth_service.domain.cpf import Cpf
 from auth_service.domain.entities import (
     PasswordResetTokenEntity,
     RefreshTokenEntity,
     UserEntity,
     VerificationCodeEntity,
 )
-from auth_service.models import RevokeReason, VerificationPurpose
+from auth_service.domain.oab import Oab
+from auth_service.models import RevokeReason, UserType, VerificationPurpose
 
 
 @runtime_checkable
@@ -69,6 +71,20 @@ class TokenIssuer(Protocol):
 
 
 @runtime_checkable
+class CpfProtector(Protocol):
+    """Porta da cifra do CPF e do índice que garante a unicidade sem guardar o CPF em claro"""
+
+    def encrypt(self, cpf: Cpf) -> bytes:
+        """Cifra com nonce aleatório: o mesmo CPF gera bytes diferentes a cada chamada"""
+
+    def decrypt(self, blob: bytes) -> Cpf:
+        """Decifra o que `encrypt` gerou; levanta erro se a cifra foi adulterada"""
+
+    def blind_index(self, cpf: Cpf) -> str:
+        """HMAC-SHA256 hex, determinístico, para o UNIQUE de `users.cpf_hmac`"""
+
+
+@runtime_checkable
 class UserRepository(Protocol):
     """Porta de persistência de usuários"""
 
@@ -78,10 +94,14 @@ class UserRepository(Protocol):
         email: str,
         name: str,
         password_hash: str,
+        user_type: UserType,
+        cpf_enc: bytes,
+        cpf_hmac: str,
+        oab: Oab | None,
         now: datetime,
         commit: bool = True,
     ) -> UserEntity:
-        """Cria usuário `pending_verification`; levanta `EmailAlreadyRegisteredError`"""
+        """Cria usuário `pending_verification`; duplicidade vira `AlreadyRegisteredError`"""
 
     async def get_by_id(self, user_id: int, *, for_update: bool = False) -> UserEntity | None:
         """Busca usuário pelo ID primário (opcionalmente com `SELECT ... FOR UPDATE`)"""

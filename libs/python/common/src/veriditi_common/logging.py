@@ -51,6 +51,9 @@ _SENSITIVE_SEGMENTS: Final = frozenset(
         "pepper",
         "seed",
         "senhas",
+        # Dado pessoal, não segredo, mas fora de log e auditoria igual (#60, ADR-024)
+        "cpf",
+        "cpfs",
     }
 )
 # *_code(s) só é segredo com um destes prefixos logo antes; status_code e email_error_code não são
