@@ -1,11 +1,5 @@
 name: veriditi
 
-# Só mysql, mailpit, gateway e web publicam porta; o resto fica na rede do compose
-# Em dev todas as portas publicadas ficam presas a 127.0.0.1
-# Nenhum serviço usa env_file: o DB_PORT do .env é o do host, aqui dentro é 3306
-# Cada par <svc>-migrate/<svc> declara a mesma image para o build acontecer uma vez só;
-# pull_policy: build impede o compose pull de procurar essas imagens no Docker Hub
-
 x-secrets:
   root-password: &root-password "${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env (make install copia o .env.example)}"
   migrator-password: &migrator-password "${DB_MIGRATOR_PASSWORD:?defina DB_MIGRATOR_PASSWORD no .env (make install copia o .env.example)}"
@@ -37,7 +31,6 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: *root-password
       MYSQL_DATABASE: veriditi
-      # Lidas pelo docker/mysql/init/02-service-users.sh
       DB_MIGRATOR_PASSWORD: *migrator-password
       AUTH_DB_PASSWORD: *auth-db-password
       NOTIFICATION_DB_PASSWORD: *notification-db-password
@@ -48,8 +41,6 @@ services:
       - mysql-data:/var/lib/mysql
       - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      # Exige os usuários do init: se o 02-service-users.sh falhou, o restart pula o init
-      # e um ping daria healthy sem o migrator (corrija o .env e rode make reset)
       test:
         - CMD-SHELL
         - >-
@@ -70,7 +61,6 @@ services:
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
     ports:
       - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
-      # SMTP só para o make dev s=notification fora do Docker
       - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
@@ -141,17 +131,13 @@ services:
       DB_PASSWORD: *auth-db-password
       INTERNAL_API_TOKEN: *internal-api-token
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      # Fixos: o MONITORING_URL/NOTIFICATION_URL do .env são os do make dev
-      # Sem depends_on: o envio é fire-and-forget (ADR-016)
       MONITORING_URL: http://monitoring:8000
       NOTIFICATION_URL: http://notification:8000
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       VERIFICATION_PEPPER: ${VERIFICATION_PEPPER:-change-me-verification-pepper}
-      # Sem padrão: o auth recusa subir sem elas (make keys, ADR-024)
       CPF_ENCRYPTION_KEY: ${CPF_ENCRYPTION_KEY:-}
       CPF_HMAC_KEY: ${CPF_HMAC_KEY:-}
-      # Os mesmos do gateway: um iss/aud diferente daria 401 em todo token
       JWT_ISSUER: ${JWT_ISSUER:-veriditi-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-veriditi}
     healthcheck: *ready
@@ -171,9 +157,7 @@ services:
       DB_PASSWORD: *notification-db-password
       INTERNAL_API_TOKEN: *internal-api-token
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      # Fixo: o MONITORING_URL do .env é o do make dev
       MONITORING_URL: http://monitoring:8000
-      # Fixos: o SMTP_HOST/SMTP_PORT do .env são os do notification rodando fora do Docker
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
       SMTP_USER: ${SMTP_USER:-}
@@ -183,7 +167,6 @@ services:
       SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
       SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-10}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
-    # Pior caso, entrega na 3ª tentativa: 4 × 10 s (2 falhas, envio, QUIT) + 3 s de espera + 5 s do UPDATE + 8 s da auditoria = 56 s
     stop_grace_period: 65s
     healthcheck: *ready
     depends_on:
@@ -223,11 +206,9 @@ services:
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       JWT_ISSUER: ${JWT_ISSUER:-veriditi-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-veriditi}
-      # A web (BFF) repassa o XFF; só vale porque web e gateway escutam só no loopback do host
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
     ports:
-      # Só no loopback: uma máquina da LAN não fala com o gateway
       - "127.0.0.1:${GATEWAY_PORT:-8080}:8000"
     healthcheck: *ready
     depends_on:
@@ -242,11 +223,8 @@ services:
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     environment:
-      # Fixo: o GATEWAY_URL do .env é o da web rodando fora do Docker
       GATEWAY_URL: http://gateway:8000
     ports:
-      # Só no loopback: o Next só preenche o X-Forwarded-For quando ele não veio, então
-      # a web exposta na LAN deixaria qualquer máquina forjar o IP que o gateway confia
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
