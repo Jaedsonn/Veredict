@@ -6,8 +6,8 @@ from typing import Self
 
 from auth_service.domain.errors import InvalidCpfError
 
-# Com ou sem máscara, mas sem misturar outros separadores
-_FORMAT = re.compile(r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}")
+# Com ou sem máscara, sem misturar separadores; re.ASCII porque o \d aceitaria '١٢٣' e '１２３'
+_FORMAT = re.compile(r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}", re.ASCII)
 
 
 def _check_digit(digits: str) -> int:
@@ -16,7 +16,7 @@ def _check_digit(digits: str) -> int:
 
 
 def _is_valid(digits: str) -> bool:
-    if len(digits) != 11 or not digits.isdigit() or len(set(digits)) == 1:
+    if len(digits) != 11 or not (digits.isascii() and digits.isdigit()) or len(set(digits)) == 1:
         return False
     first = _check_digit(digits[:9])
     second = _check_digit(digits[:9] + str(first))

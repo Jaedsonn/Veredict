@@ -13,7 +13,8 @@ OAB_KIND_MESSAGE = "Escolha o tipo de inscrição."
 OAB_REQUIRED_MESSAGE = "Informe a inscrição na OAB."
 OAB_NOT_ALLOWED_MESSAGE = "Só advogados informam OAB."
 
-_NUMBER = re.compile(r"\d{1,6}")
+# Sem re.ASCII o \d aceitaria dígitos Unicode, como '١٢٣'
+_NUMBER = re.compile(r"\d{1,6}", re.ASCII)
 
 
 def parse_oab_number(raw: object) -> str:

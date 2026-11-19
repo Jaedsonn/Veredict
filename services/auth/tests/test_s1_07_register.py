@@ -395,3 +395,23 @@ async def test_use_case_rejects_oab_mismatch_even_without_the_schema(
 
     assert exc.value.message == "Informe a inscrição na OAB."
     assert await _count_users(db) == 0
+
+
+@pytest.mark.parametrize("zero", ["٠", "０"], ids=["arabe-indico", "fullwidth"])
+async def test_register_rejects_non_ascii_digits(
+    client: AsyncClient, db: Database, zero: str
+) -> None:
+    def unicode_digits(text: str) -> str:
+        return text.translate({ord(str(d)): chr(ord(zero) + d) for d in range(10)})
+
+    cpf = await client.post(REGISTER, json=_common("a@example.com", unicode_digits(CPF)))
+    oab = await client.post(
+        REGISTER,
+        json=_lawyer("b@example.com", make_cpf(41), {**OAB, "number": unicode_digits("123")}),
+    )
+
+    assert cpf.status_code == 422
+    assert _errors(cpf) == {("cpf",): "CPF inválido."}
+    assert oab.status_code == 422
+    assert _errors(oab) == {("oab", "number"): "Informe o número da OAB com até 6 dígitos."}
+    assert await _count_users(db) == 0

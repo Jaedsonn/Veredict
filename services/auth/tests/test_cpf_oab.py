@@ -117,3 +117,30 @@ def test_lawyer_requires_oab_and_common_rejects_it() -> None:
 
     assert (missing.value.field, missing.value.message) == ("oab", OAB_REQUIRED_MESSAGE)
     assert (extra.value.field, extra.value.message) == ("oab", OAB_NOT_ALLOWED_MESSAGE)
+
+
+def _unicode_digits(text: str, zero: str) -> str:
+    return text.translate({ord(str(d)): chr(ord(zero) + d) for d in range(10)})
+
+
+# Dígitos de outros sistemas de escrita: o \d do Python sem re.ASCII os aceitaria
+UNICODE_ZEROS = pytest.mark.parametrize("zero", ["٠", "０"], ids=["arabe-indico", "fullwidth"])
+
+
+@UNICODE_ZEROS
+@pytest.mark.parametrize("cpf", ["529.982.247-25", "52998224725"])
+def test_cpf_with_non_ascii_digits_is_rejected(zero: str, cpf: str) -> None:
+    raw = _unicode_digits(cpf, zero)
+
+    with pytest.raises(InvalidCpfError):
+        Cpf.parse(raw)
+    with pytest.raises(InvalidCpfError):
+        Cpf(_unicode_digits("52998224725", zero))
+
+
+@UNICODE_ZEROS
+def test_oab_number_with_non_ascii_digits_is_rejected(zero: str) -> None:
+    with pytest.raises(InvalidOabError) as exc:
+        Oab.parse(number=_unicode_digits("123", zero), uf="BA", kind="principal")
+
+    assert exc.value.field == "oab.number"
