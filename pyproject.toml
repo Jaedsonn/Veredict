@@ -59,3 +59,6 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.coverage.run]
 # O pacote medido vem do --cov de `make cov`
 branch = true
+# O SQLAlchemy async roda o I/O em greenlets: sem isso o código depois de um await no
+# banco aparece como não executado
+concurrency = ["thread", "greenlet"]
