@@ -11,6 +11,7 @@ dependencies = [
     "gateway-service",
     "monitoring-service",
     "notification-service",
+    "payment-service",
     "veriditi-common",
 ]
 
@@ -22,6 +23,7 @@ auth-service = { workspace = true }
 gateway-service = { workspace = true }
 notification-service = { workspace = true }
 monitoring-service = { workspace = true }
+payment-service = { workspace = true }
 veriditi-common = { workspace = true }
 
 [tool.uv.workspace]
