@@ -1,12 +1,15 @@
 """Fixtures de teste para o `auth-service` (SQLite em memória + adaptadores determinísticos)."""
 
 import base64
+import io
+import logging
 import os
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 
 import pytest
+import structlog
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import ASGITransport, AsyncClient
@@ -21,6 +24,7 @@ from auth_service.main import create_app
 from auth_service.models import Base
 from veriditi_common.audit import InMemoryAuditLogger
 from veriditi_common.db import Database
+from veriditi_common.logging import configure_logging
 from veriditi_common.notifications import InMemoryNotifier
 
 # O --import-mode=importlib não põe a pasta dos testes no sys.path; o auth_test_data precisa
@@ -31,6 +35,8 @@ TEST_INTERNAL_TOKEN = TOKEN
 TEST_PEPPER = "test-verification-pepper-0123456789"
 TEST_CPF_ENCRYPTION_KEY = base64.b64encode(os.urandom(32)).decode()
 TEST_CPF_HMAC_KEY = base64.b64encode(os.urandom(32)).decode()
+
+RenderedLogs = Callable[[], str]
 
 
 @pytest.fixture(scope="session")
@@ -162,3 +168,26 @@ async def client(
         ) as ac,
     ):
         yield ac
+
+
+def _reset_logging() -> None:
+    root = logging.getLogger()
+    for handler in [h for h in root.handlers if h.name == "veriditi"]:
+        root.removeHandler(handler)
+    root.setLevel(logging.WARNING)
+    structlog.reset_defaults()
+
+
+@pytest.fixture
+def reset_logging() -> Iterator[None]:
+    """Desfaz o configure_logging, que mexe no root logger e no structlog"""
+    yield
+    _reset_logging()
+
+
+@pytest.fixture
+def rendered_logs(client: AsyncClient, reset_logging: None) -> RenderedLogs:
+    """Saída do handler real, já redigida; pede o client antes porque o create_app reconfigura"""
+    stream = io.StringIO()
+    configure_logging("auth", stream=stream, level="DEBUG")
+    return stream.getvalue

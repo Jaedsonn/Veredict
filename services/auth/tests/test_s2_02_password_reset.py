@@ -17,6 +17,8 @@ from veriditi_common.db import Database
 from veriditi_common.logging import is_sensitive_key
 from veriditi_common.notifications import InMemoryNotifier
 
+from .conftest import RenderedLogs
+
 EMAIL = "reset@example.com"
 OLD_PASSWORD = "SenhaAntiga123"
 NEW_PASSWORD = "SenhaNovinha456"
@@ -370,9 +372,8 @@ async def test_token_and_email_never_reach_audit_or_logs(
     client: AsyncClient,
     notifier: InMemoryNotifier,
     audit: InMemoryAuditLogger,
-    caplog: pytest.LogCaptureFixture,
+    rendered_logs: RenderedLogs,
 ) -> None:
-    caplog.set_level("DEBUG")
     await _active_user(client, notifier)
     token = await _forgot(client, notifier)
     await client.post(RESET, json={"token": token, "new_password": "curta"})
@@ -387,11 +388,12 @@ async def test_token_and_email_never_reach_audit_or_logs(
         "auth.password.reset_failed",
     }
     trail = json.dumps([e.model_dump(mode="json") for e in reset_events])
-    # Registros já passaram pelo redact_sensitive da lib
-    logs = "\n".join(str(record.msg) for record in caplog.records)
+    # Saída do formatter real: evento, campos extras e args já interpolados, depois da redação
+    logs = rendered_logs()
     assert "/auth/password/reset" in logs
     for secret in (token, hashlib.sha256(token.encode()).hexdigest(), NEW_PASSWORD):
         assert secret not in trail
         assert secret not in logs
     for email in (EMAIL, "ninguem@example.com"):
         assert email not in trail
+        assert email not in logs
