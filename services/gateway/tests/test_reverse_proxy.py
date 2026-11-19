@@ -35,7 +35,10 @@ from gateway_service.routing import RouteTable
 from .conftest import EMAIL, USER_ID
 
 TOKEN = "test-internal-token-0123456789"
-UPSTREAMS = {"auth": Upstream("auth", "http://auth.test", "autenticação")}
+UPSTREAMS = {
+    "auth": Upstream("auth", "http://auth.test", "autenticação"),
+    "payment": Upstream("payment", "http://payment.test", "pagamento"),
+}
 TABLE = RouteTable(ROUTES, UPSTREAMS)
 IP = "203.0.113.7"
 PRINCIPAL = Principal(user_id=USER_ID, email=EMAIL)

@@ -78,11 +78,23 @@ def test_auth_url_requires_scheme(url: str) -> None:
         _settings(auth_url=url)
 
 
-def test_upstreams_only_auth_without_trailing_slash() -> None:
-    settings = _settings(auth_url="http://auth:8000/")
+def test_upstreams_are_auth_and_payment_without_trailing_slash() -> None:
+    settings = _settings(auth_url="http://auth:8000/", payment_url="http://payment:8000/")
 
-    assert settings.upstreams == {"auth": Upstream("auth", "http://auth:8000", "autenticação")}
-    assert settings.upstream_urls == {"auth": "http://auth:8000"}
+    assert settings.upstreams == {
+        "auth": Upstream("auth", "http://auth:8000", "autenticação"),
+        "payment": Upstream("payment", "http://payment:8000", "pagamento"),
+    }
+    assert settings.upstream_urls == {
+        "auth": "http://auth:8000",
+        "payment": "http://payment:8000",
+    }
+
+
+@pytest.mark.parametrize("url", ["payment:8000", "ftp://payment", ""])
+def test_payment_url_requires_scheme(url: str) -> None:
+    with pytest.raises(ValidationError, match="PAYMENT_URL"):
+        _settings(payment_url=url)
 
 
 @pytest.mark.parametrize("value", ["", "   "])

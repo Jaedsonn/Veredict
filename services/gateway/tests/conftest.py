@@ -33,6 +33,7 @@ EMAIL = "ana@exemplo.com"
 TOKEN = "test-internal-token-0123456789"
 CLIENT_IP = "203.0.113.7"
 AUTH = "http://auth.test"
+PAYMENT = "http://payment.test"
 
 TokenFactory = Callable[..., str]
 JsonLogs = Callable[[], list[dict[str, Any]]]
@@ -150,6 +151,7 @@ def settings(rsa_keys: RsaKeys) -> Settings:
     return Settings(
         _env_file=None,  # type: ignore[call-arg]
         auth_url=AUTH,
+        payment_url=PAYMENT,
         internal_api_token=TOKEN,  # type: ignore[arg-type]
         jwt_public_key=rsa_keys.public_pem_escaped,
         trusted_proxies="10.0.0.0/8",  # type: ignore[arg-type]
@@ -184,6 +186,12 @@ async def client(client_from: ClientFactory) -> AsyncIterator[AsyncClient]:
 @pytest.fixture
 def auth_mock() -> Iterator[respx.MockRouter]:
     with respx.mock(base_url=AUTH, assert_all_called=False) as mock:
+        yield mock
+
+
+@pytest.fixture
+def payment_mock() -> Iterator[respx.MockRouter]:
+    with respx.mock(base_url=PAYMENT, assert_all_called=False) as mock:
         yield mock
 
 
