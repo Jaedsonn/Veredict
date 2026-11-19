@@ -24,6 +24,18 @@ export function cpfDigits(raw: unknown): string | null {
   return digits.slice(9) === `${first}${second}` ? digits : null;
 }
 
+/**
+ * Erro do CPF enquanto a pessoa digita, antes de enviar o formulário.
+ * Não acusa nada com o campo vazio nem com o número pela metade ainda em edição;
+ * acusa ao completar os 11 dígitos ou ao sair do campo (`blurred`).
+ */
+export function cpfLiveError(value: string, blurred: boolean): string | undefined {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 0) return undefined;
+  if (digits.length < 11) return blurred ? "Informe os 11 dígitos do CPF." : undefined;
+  return cpfDigits(value) === null ? "CPF inválido." : undefined;
+}
+
 /** `***.982.247-**`: o formato que o `/me` devolve em `cpf_masked`. */
 export function hideCpf(digits: string): string {
   return `***.${digits.slice(3, 6)}.${digits.slice(6, 9)}-**`;

@@ -13,7 +13,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Select } from "@/components/ui/select";
 import { initialFormState } from "@/lib/form-state";
 import { registerSchema, type UserType } from "@/lib/validation/auth";
-import { formatCpfInput } from "@/lib/validation/cpf";
+import { cpfDigits, cpfLiveError, formatCpfInput } from "@/lib/validation/cpf";
 import { OAB_KINDS, OAB_UFS } from "@/lib/validation/oab";
 
 import { registerAction } from "./actions";
@@ -31,10 +31,17 @@ export function RegisterForm() {
   // Controlados: o CPF não volta do servidor (publicValues) e o tipo decide o bloco da OAB
   const [userType, setUserType] = useState<UserType>(v.userType === "lawyer" ? "lawyer" : "common");
   const [cpf, setCpf] = useState("");
+  const [cpfBlurred, setCpfBlurred] = useState(false);
+  // CPF do último envio: o erro do envio (inclusive "já cadastrado") some quando o CPF muda
+  const [submittedCpf, setSubmittedCpf] = useState<string | null>(null);
   const [oabUf, setOabUf] = useState(v.oabUf ?? "");
   const [oabKind, setOabKind] = useState(v.oabKind ?? "principal");
 
+  const cpfError = cpfLiveError(cpf, cpfBlurred) ?? (cpf === submittedCpf ? errors.cpf : undefined);
+  const cpfOk = !cpfError && cpfDigits(cpf) !== null;
+
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    setSubmittedCpf(cpf);
     onSubmit(e);
     if (e.defaultPrevented) return;
     // Sem o reset automático do <form action>: ele desmarcaria o rádio e os selects controlados
@@ -101,7 +108,12 @@ export function RegisterForm() {
         <Input name="email" type="email" autoComplete="email" defaultValue={v.email} required />
       </FormField>
 
-      <FormField id="cpf" label="CPF:" error={errors.cpf}>
+      <FormField
+        id="cpf"
+        label="CPF:"
+        error={cpfError}
+        hint={cpfOk ? <span className="text-success">CPF válido.</span> : undefined}
+      >
         <Input
           name="cpf"
           inputMode="numeric"
@@ -110,6 +122,7 @@ export function RegisterForm() {
           maxLength={14}
           value={cpf}
           onChange={(e) => setCpf(formatCpfInput(e.target.value))}
+          onBlur={() => setCpfBlurred(true)}
           required
         />
       </FormField>

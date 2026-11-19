@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cpfDigits, formatCpfInput, hideCpf } from "@/lib/validation/cpf";
+import { cpfDigits, cpfLiveError, formatCpfInput, hideCpf } from "@/lib/validation/cpf";
 
 import vectors from "./cpf-vectors.json";
 
@@ -40,5 +40,26 @@ describe("formatCpfInput", () => {
 
   it("gera sempre um texto que o validador aceita", () => {
     expect(cpfDigits(formatCpfInput("52998224725"))).toBe("52998224725");
+  });
+});
+
+describe("cpfLiveError", () => {
+  it.each([
+    ["", false],
+    ["", true],
+    ["529.98", false],
+    ["529.982.247-25", false],
+    ["529.982.247-25", true],
+  ])("não acusa %j (saiu do campo: %s)", (value, blurred) => {
+    expect(cpfLiveError(value, blurred)).toBeUndefined();
+  });
+
+  it("acusa o CPF incompleto só depois de sair do campo", () => {
+    expect(cpfLiveError("529.982.24", true)).toBe("Informe os 11 dígitos do CPF.");
+  });
+
+  it.each([false, true])("acusa dígitos verificadores errados assim que completa (saiu: %s)", (blurred) => {
+    expect(cpfLiveError("529.982.247-24", blurred)).toBe("CPF inválido.");
+    expect(cpfLiveError("111.111.111-11", blurred)).toBe("CPF inválido.");
   });
 });
