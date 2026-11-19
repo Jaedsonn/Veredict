@@ -15,5 +15,8 @@
     "typecheck:web": "npm run typecheck -w @veriditi/web",
     "test:web": "npm run test -w @veriditi/web",
     "mock:gateway": "npm run mock:gateway -w @veriditi/web"
+  },
+  "overrides": {
+    "vite": "8.3.5"
   }
 }
