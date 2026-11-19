@@ -457,6 +457,125 @@ CREATE TABLE password_reset_tokens (
 
 Só conta `active` recebe token: pedido para conta inexistente, `pending_verification` ou `blocked` não grava nada (#19, anti-enumeração). Token malformado, inexistente, expirado, usado ou substituído dá sempre o mesmo `400 invalid_reset_token`.
 
+### 5.7 `veriditi.credit_packages` (dono: payment, REQ05)
+
+Criada pela migration `0001` do payment (#21), com o seed dos pacotes da **D2** do Documento de Requisitos. O Apêndice A pede nome, quantidade de créditos, valor por crédito e descrição dos benefícios. O `payment_svc` só tem `SELECT`: o catálogo muda por migration.
+
+```sql
+CREATE TABLE credit_packages (
+  id               INT          NOT NULL AUTO_INCREMENT,
+  code             VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  name             VARCHAR(60)  NOT NULL,
+  credits          INT          NOT NULL,
+  unit_price_cents INT          NOT NULL,
+  price_cents      INT          NOT NULL,
+  currency         CHAR(3) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'BRL',
+  benefits         VARCHAR(500) NOT NULL,
+  highlight        BOOL         NOT NULL DEFAULT 0,
+  active           BOOL         NOT NULL DEFAULT 1,
+  created_at       DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT pk_credit_packages PRIMARY KEY (id),
+  CONSTRAINT uq_credit_packages_code UNIQUE (code),
+  CONSTRAINT ck_credit_packages_credits_positive CHECK (credits > 0),
+  CONSTRAINT ck_credit_packages_unit_price_positive CHECK (unit_price_cents > 0),
+  CONSTRAINT ck_credit_packages_price_matches_unit CHECK (price_cents = credits * unit_price_cents)
+);
+```
+
+| `code` | Nome | Créditos | Valor por crédito | Preço | Destaque |
+|---|---|---|---|---|---|
+| `basico` | Básico | 5 | R$ 5,00 | R$ 25,00 | não |
+| `medio` | Médio | 20 | R$ 4,00 | R$ 80,00 | sim |
+| `premium` | Premium | 60 | R$ 3,50 | R$ 210,00 | não |
+
+O Documento de Requisitos não fixa os valores. Os totais são os que a #21 já previa, agora com os nomes da D2. Valores sempre em centavos inteiros.
+
+### 5.8 `veriditi.orders` (dono: payment, REQ05)
+
+Migration `0002` do payment (#22). O pedido copia do pacote os créditos e o valor (o cliente nunca os informa) e guarda os dados de faturamento do Apêndice A. **O CPF fica só mascarado**: o número completo vai apenas ao provedor de pagamento (ADR-013, ADR-024, ADR-025).
+
+```sql
+CREATE TABLE orders (
+  id                  CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  user_id             BIGINT       NOT NULL,
+  package_id          INT          NOT NULL,
+  credits             INT          NOT NULL,
+  amount_cents        INT          NOT NULL,
+  status              ENUM('pending','paid','expired','failed') NOT NULL DEFAULT 'pending',
+  provider            VARCHAR(30) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  provider_payment_id VARCHAR(80) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  pix_copy_paste      TEXT         NULL,
+  idempotency_key     VARCHAR(80) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  billing_name        VARCHAR(120) NOT NULL,
+  billing_email       VARCHAR(255) NOT NULL,
+  billing_phone       VARCHAR(11) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  billing_cpf_masked  CHAR(14) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  billing_cep         CHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  billing_street      VARCHAR(120) NOT NULL,
+  billing_number      VARCHAR(10)  NOT NULL,
+  billing_complement  VARCHAR(60)  NULL,
+  billing_district    VARCHAR(60)  NOT NULL,
+  billing_city        VARCHAR(60)  NOT NULL,
+  billing_state       CHAR(2) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  expires_at          DATETIME(6)  NOT NULL,
+  paid_at             DATETIME(6)  NULL,
+  created_at          DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at          DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  CONSTRAINT pk_orders PRIMARY KEY (id),
+  CONSTRAINT uq_orders_user_id_idempotency_key UNIQUE (user_id, idempotency_key),
+  CONSTRAINT uq_orders_provider_payment_id UNIQUE (provider_payment_id),
+  CONSTRAINT fk_orders_package_id_credit_packages FOREIGN KEY (package_id) REFERENCES credit_packages (id),
+  CONSTRAINT ck_orders_credits_positive CHECK (credits > 0),
+  CONSTRAINT ck_orders_amount_positive CHECK (amount_cents > 0),
+  CONSTRAINT ck_orders_paid_requires_paid_at CHECK (status <> 'paid' OR paid_at IS NOT NULL),
+  INDEX ix_orders_user_id_created_at (user_id, created_at),
+  INDEX ix_orders_package_id (package_id)
+);
+```
+
+| Coluna | Descrição | PII |
+|---|---|---|
+| `user_id` | Referência lógica a `users.id` (sem FK entre serviços, §7) | não |
+| `credits`, `amount_cents` | Snapshot do pacote na hora do pedido; mudar o catálogo não altera pedidos antigos | não |
+| `status` | `pending` → `paid` (confirmação), `expired` (30 min, na leitura) ou `failed` (provedor fora do ar). As transições são `UPDATE … WHERE status = 'pending'` | não |
+| `idempotency_key` | `Idempotency-Key` do `POST /api/orders`; repetir a chave devolve o mesmo pedido | não |
+| `pix_copy_paste` | Código PIX copia-e-cola (BR Code). O QR Code é gerado dele na hora e não é gravado | não |
+| `billing_*` | Dados da compra do Apêndice A | **sim** |
+| `billing_cpf_masked` | `***.982.247-**`, o mesmo formato do `/me` | parcial |
+
+### 5.9 `veriditi.credit_wallets` e `veriditi.credit_ledger` (dono: payment, #73)
+
+Migration `0003` do payment. A carteira guarda o saldo atual, que é o cache do `SUM(delta)` do ledger. O ledger é **append-only**: o `payment_svc` só tem `SELECT, INSERT` nele.
+
+```sql
+CREATE TABLE credit_wallets (
+  user_id    BIGINT      NOT NULL,
+  balance    INT         NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  CONSTRAINT pk_credit_wallets PRIMARY KEY (user_id),
+  CONSTRAINT ck_credit_wallets_balance_not_negative CHECK (balance >= 0)
+);
+
+CREATE TABLE credit_ledger (
+  id            BIGINT      NOT NULL AUTO_INCREMENT,
+  user_id       BIGINT      NOT NULL,
+  delta         INT         NOT NULL,
+  reason        ENUM('purchase','capture','refund','adjustment') NOT NULL,
+  reference_id  VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  balance_after INT         NOT NULL,
+  created_at    DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT pk_credit_ledger PRIMARY KEY (id),
+  CONSTRAINT uq_credit_ledger_reason_reference_id UNIQUE (reason, reference_id),
+  CONSTRAINT fk_credit_ledger_user_id_credit_wallets FOREIGN KEY (user_id) REFERENCES credit_wallets (user_id),
+  CONSTRAINT ck_credit_ledger_delta_not_zero CHECK (delta <> 0),
+  CONSTRAINT ck_credit_ledger_balance_after_not_negative CHECK (balance_after >= 0),
+  INDEX ix_credit_ledger_user_id_id (user_id, id)
+);
+```
+
+A confirmação do pagamento é uma transação só: `UPDATE orders SET status = 'paid' … WHERE id = :id AND status = 'pending'`, `UPDATE credit_wallets SET balance = balance + :n WHERE user_id = :uid` e o `INSERT` no ledger com `reason = 'purchase'` e `reference_id` = id do pedido. A transição condicional e o `UNIQUE (reason, reference_id)` garantem um crédito por pedido, mesmo com confirmações concorrentes (teste com MySQL real em `services/payment/tests/mysql`). O débito da captura (`reason = 'capture'`) entra com a #24.
+
 ## 6. Índices e as consultas que eles atendem
 
 Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não aparecem na tabela. O InnoDB exige índice na coluna de FK, e os índices compostos abaixo já começam por ela.
@@ -474,6 +593,12 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 | `uq_notifications_sent_idempotency_key` | Reserva idempotente: `INSERT …`. A violação significa "já enviado, em andamento ou falhou", e então `SELECT status … WHERE idempotency_key = :k` só para o log. Deadlock (1213) repete o INSERT uma vez; 1205 sobe. O fim do envio atualiza pela PK: `UPDATE … WHERE id = :id AND status = 'pending'` | #6 |
 | `uq_audit_events_event_id` | Ingestão idempotente: `INSERT …`. `IntegrityError` → 202 sem duplicar. Deadlock (1213) repete o INSERT uma vez; lock wait timeout (1205) não, porque já esperou 50 s | #5 |
 | `ix_audit_events_actor_id_occurred_at` | `GET /internal/events?actor_id=&from=&to=` e as atividades do usuário (RF20): `WHERE actor_id = :uid AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n`. O `ORDER BY id` faz filesort só das linhas filtradas | #5, #34 |
+| `uq_credit_packages_code` | Pedido: `SELECT … FROM credit_packages WHERE code = :code AND active` | #21 |
+| `uq_orders_user_id_idempotency_key` | Pedido idempotente: `SELECT … WHERE user_id = :uid AND idempotency_key = :k`; a violação no INSERT concorrente devolve o pedido já gravado | #22 |
+| `ix_orders_user_id_created_at` | Pedidos do usuário (histórico de compras); o prefixo `user_id` também atende consultas por dono | #22 |
+| `ix_orders_package_id` | Índice da FK; o InnoDB o exige | #22 |
+| `uq_credit_ledger_reason_reference_id` | Crédito único por pedido: o INSERT do movimento; a violação significa que o crédito já foi lançado | #73 |
+| `ix_credit_ledger_user_id_id` | Extrato: `SELECT … WHERE user_id = :uid ORDER BY id DESC LIMIT 50`; também serve à FK | #73 |
 | `ix_audit_events_action_occurred_at` | `GET /internal/events?action=&from=&to=`: `WHERE action = :a AND occurred_at >= :from AND occurred_at < :to AND id > :after ORDER BY id LIMIT :n` (filesort só das linhas filtradas) | #5 |
 
 Índices que **não** existem, e por quê:
@@ -481,7 +606,7 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 - `notifications_sent.status` e `created_at`: entram com a limpeza ou o reprocessamento (#35/#37).
 - `audit_events.occurred_at` sozinho: o `GET /internal/events` só com `from`/`to` varre a PK até completar o `limit`. A rota é interna; um keyset `(occurred_at, id)` fica para o volume do RF20 (#34).
 
-Índices previstos para a Sprint 2 (#41): `ix_credit_ledger_user_id_id` (extrato paginado), `ix_captures_user_id_requested_at` ("Minhas provas") e `ix_evidence_files_sha256` (verificação pública por hash).
+Índices previstos para a Sprint 2 (#41): `ix_captures_user_id_requested_at` ("Minhas provas") e `ix_evidence_files_sha256` (verificação pública por hash).
 
 ## 7. Matriz de posse e privilégios
 
@@ -494,15 +619,17 @@ Regra: **nenhum índice sem uma consulta real**. A chave primária e as FKs não
 | `password_reset_tokens` | veriditi | auth | `auth_svc` | SELECT, INSERT, UPDATE, DELETE (expurgo de expirados) | 2 |
 | `user_mfa`, `mfa_recovery_codes` | veriditi | auth | `auth_svc` | a definir na issue (#18) | 2 |
 | `notifications_sent` | veriditi | notification | `notification_svc` | SELECT, INSERT, UPDATE | 1 |
-| `credit_packages`, `capture_prices`, `orders`, `credit_wallets` | veriditi | payment | `payment_svc` | a definir (#21–#24) | 2 |
-| `credit_ledger` | veriditi | payment | `payment_svc` | SELECT, INSERT (**append-only**) | 2 |
+| `credit_packages` | veriditi | payment | `payment_svc` | SELECT (o catálogo muda por migration) | 1 (REQ05) |
+| `orders`, `credit_wallets` | veriditi | payment | `payment_svc` | SELECT, INSERT, UPDATE (**sem DELETE**: pedido muda de status) | 1 (REQ05) |
+| `credit_ledger` | veriditi | payment | `payment_svc` | SELECT, INSERT (**append-only**) | 1 (REQ05) |
+| `capture_prices` | veriditi | payment | `payment_svc` | a definir (#29) | 2 |
 | `captures` | veriditi | capture | `capture_svc` | a definir (#29) | 2 |
 | `evidences`, `evidence_files` | veriditi | storage | `storage_svc` | SELECT, INSERT (provas nunca mudam) | 2 |
 | `<serviço>_outbox` | veriditi | cada produtor | o do serviço | SELECT, INSERT, UPDATE (o relay marca `published_at`) | 2 |
 | `audit_events` | veriditi_logs | monitoring | `veriditi_logs_writer` | SELECT, INSERT (**append-only**, ADR-015) | 1 |
 | `operational_logs` | veriditi_logs | monitoring | `veriditi_logs_writer` (+ usuário de limpeza com DELETE) | SELECT, INSERT | 2 |
 
-Nenhuma tabela é lida por outro serviço na Sprint 1.
+Nenhuma tabela é lida por outro serviço na Sprint 1. O `orders.user_id` e o `credit_wallets.user_id` são referências lógicas a `users.id`.
 
 ## 8. Object Storage (MinIO)
 
@@ -554,26 +681,26 @@ Cada serviço declara a própria `Base` com `metadata = make_metadata()` (`verid
 |---|---|---|
 | `root` | Só o initdb e a administração | imagem `mysql` |
 | `migrator` | Alembic de todos os serviços: DDL + DML em `veriditi.*` e `veriditi_logs.*` `WITH GRANT OPTION` | `02-service-users.sh` |
-| `auth_svc`, `notification_svc` | Runtime dos serviços do Banco Central | `02-service-users.sh` |
+| `auth_svc`, `notification_svc`, `payment_svc` | Runtime dos serviços do Banco Central | `02-service-users.sh` |
 | `veriditi_logs_writer` | Runtime do monitoring | `02-service-users.sh` |
-| `payment_svc`, `capture_svc`, `storage_svc` | Runtime da Sprint 2 | Sprint 2, nas issues dos serviços |
+| `capture_svc`, `storage_svc` | Runtime da Sprint 2 | Sprint 2, nas issues dos serviços |
 
 - `docker/mysql/init/01-logs-db.sql`: fixa a collation do `veriditi` e cria o `veriditi_logs`.
-- `docker/mysql/init/02-service-users.sh`: cria os usuários com as senhas de `DB_MIGRATOR_PASSWORD`, `AUTH_DB_PASSWORD`, `NOTIFICATION_DB_PASSWORD` e `LOGS_DB_PASSWORD`.
+- `docker/mysql/init/02-service-users.sh`: cria os usuários com as senhas de `DB_MIGRATOR_PASSWORD`, `AUTH_DB_PASSWORD`, `NOTIFICATION_DB_PASSWORD`, `PAYMENT_DB_PASSWORD` e `LOGS_DB_PASSWORD`. Num volume que já existia, o `payment_svc` é criado reaplicando o script (`docker compose exec mysql bash /docker-entrypoint-initdb.d/02-service-users.sh`), sem `make reset`.
   - É `.sh` porque o initdb não expande `${VAR}` em `.sql`. O arquivo não é executável, para que o entrypoint faça `source` e exponha o `docker_process_sql`.
   - Falha o container se faltar uma senha ou se ela tiver `'` ou `\`.
   - Pode ser reaplicado (`CREATE USER IF NOT EXISTS` + `ALTER USER`): `docker compose exec mysql bash /docker-entrypoint-initdb.d/02-service-users.sh`.
 - Os scripts **só rodam com o volume vazio**. Depois de mudá-los: `docker compose down -v`.
-- Se o init falhar (senha faltando ou com `'`/`\`), o MySQL reinicia com o datadir já criado e **não roda o init de novo**. Por isso o healthcheck do compose exige que os quatro usuários existam em vez de só responder ao ping: o `mysql` fica `unhealthy` e os `*-migrate` não chegam a rodar com erro 1045. Corrija o `.env` e rode `make reset`.
+- Se o init falhar (senha faltando ou com `'`/`\`), o MySQL reinicia com o datadir já criado e **não roda o init de novo**. Por isso o healthcheck do compose exige que os cinco usuários existam em vez de só responder ao ping: o `mysql` fica `unhealthy` e os `*-migrate` não chegam a rodar com erro 1045. Corrija o `.env` e rode `make reset`.
 - O initdb **não concede nenhum privilégio de tabela**. As tabelas ainda não existem nessa hora, e o MySQL só aceita GRANT de SELECT/INSERT em tabela existente. Cada GRANT nasce na migration que cria a tabela (seção 11).
 - Um usuário sem nenhum privilégio num banco **nem consegue conectar** a ele (erro 1044). Por isso o `<serviço>-migrate` precisa terminar antes de o serviço subir.
 
-Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAME` (`ServiceSettings.database_url`), além de `DB_MIGRATOR_USER` e `DB_MIGRATOR_PASSWORD` no container de migração (`ServiceSettings.migration_database_url`). O compose faz o mapeamento desde o #3: `AUTH_DB_PASSWORD` → `DB_PASSWORD` do auth, `NOTIFICATION_DB_PASSWORD` → do notification e `LOGS_DB_PASSWORD` → do monitoring (com `DB_NAME=veriditi_logs`). Os três têm um `<serviço>-migrate` (`auth-migrate`, `notification-migrate`, `monitoring-migrate`), o único que recebe `DB_MIGRATOR_*`, e o serviço só sobe depois que ele termina. O Makefile faz a mesma tradução para `make dev`/`make migrate s=<serviço>`.
+Cada container recebe as próprias variáveis `DB_USER`, `DB_PASSWORD` e `DB_NAME` (`ServiceSettings.database_url`), além de `DB_MIGRATOR_USER` e `DB_MIGRATOR_PASSWORD` no container de migração (`ServiceSettings.migration_database_url`). O compose faz o mapeamento desde o #3: `AUTH_DB_PASSWORD` → `DB_PASSWORD` do auth, `NOTIFICATION_DB_PASSWORD` → do notification, `PAYMENT_DB_PASSWORD` → do payment e `LOGS_DB_PASSWORD` → do monitoring (com `DB_NAME=veriditi_logs`). Os quatro têm um `<serviço>-migrate` (`auth-migrate`, `notification-migrate`, `payment-migrate`, `monitoring-migrate`), o único que recebe `DB_MIGRATOR_*`, e o serviço só sobe depois que ele termina. O Makefile faz a mesma tradução para `make dev`/`make migrate s=<serviço>`.
 
 ## 11. Política de migrations
 
 - **Uma pasta `migrations/` e uma `version_table` por serviço**: `alembic_version_<serviço>`. Sem isso, dois serviços no mesmo banco disputariam a mesma `alembic_version`.
-- **Histórico linear**: no máximo 1 head por serviço (0 enquanto o serviço ainda não tem revisão; desde o #6, os 3 serviços com banco têm 1 head). Se dois PRs criarem a mesma revisão, quem mergear por último rebaseia e renumera.
+- **Histórico linear**: no máximo 1 head por serviço (0 enquanto o serviço ainda não tem revisão; desde o #6, os serviços com banco têm 1 head; o payment entrou com o REQ05). Se dois PRs criarem a mesma revisão, quem mergear por último rebaseia e renumera.
 - Revisões sequenciais (`0001`, `0002`, …) em arquivos `YYYYMMDD_<rev>_<slug>.py`.
 - **Uma revisão mergeada na `main` nunca é editada**; a mudança vem numa nova. A única exceção é o rebaseline do #3 (`users` → `auth`), aceito porque ainda não existe ambiente implantado e a troca de `version_table` já exige recriar o volume.
 - **Migrations não importam models**: usam tipos físicos explícitos (`mysql.DATETIME(fsp=6)`, `mysql.CHAR(64, charset="ascii", collation="ascii_bin")`, `sa.text("CURRENT_TIMESTAMP(6)")`). Assim uma migration antiga continua igual mesmo que o model mude.
@@ -614,6 +741,9 @@ Já na Sprint 2:
 | Serviço / `version_table` | Revisão | `down_revision` | Issue | Conteúdo |
 |---|---|---|---|---|
 | auth | `0005` | `0004` | #19 | `password_reset_tokens` + GRANT, e `password_reset` no fim do ENUM `refresh_tokens.revoke_reason` |
+| payment / `alembic_version_payment` | `0001` | — | #21 | `credit_packages` + seed da D2 + GRANT `SELECT` ao `payment_svc` |
+| payment | `0002` | `0001` | #22 | `orders` + GRANT `SELECT, INSERT, UPDATE` |
+| payment | `0003` | `0002` | #73 | `credit_wallets` (`SELECT, INSERT, UPDATE`) e `credit_ledger` (`SELECT, INSERT`) |
 | auth | `0006` | `0005` | #60 | `user_type`, `cpf_enc`, `cpf_hmac` e as colunas da OAB em `users`, com `uq_users_cpf_hmac`, `uq_users_oab_uf_oab_number` e `ck_users_oab_matches_type`; falha se `users` tiver linhas (dev: `make reset`) |
 
 ## 13. Sprint 2: notas do modelo lógico

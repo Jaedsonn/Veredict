@@ -4,15 +4,19 @@
 O Veriditi é uma plataforma de captura e preservação de provas digitais, construída em
 **Arquitetura Baseada em Serviços** ([ADR-005](docs/adr/0005-arquitetura-baseada-em-servicos.md)):
 uma web Next.js (BFF) fala com um único gateway, que valida o JWT e repassa as chamadas aos serviços de
-autenticação, notificação e monitoramento, com bancos separados por serviço no MySQL. A Sprint 1
-entrega cadastro (pessoa ou advogado, com CPF e OAB) com verificação de e-mail, login, perfil e
-trilha de auditoria; o restante do escopo está em [`docs/requisitos.md`](docs/requisitos.md).
+autenticação, pagamento, notificação e monitoramento, com bancos separados por serviço no MySQL.
+A Sprint 1 entrega cadastro (pessoa ou advogado, com CPF e OAB) com verificação de e-mail, login,
+perfil, recuperação de senha, compra de créditos com PIX sandbox e trilha de auditoria; o restante do
+escopo está em [`docs/requisitos.md`](docs/requisitos.md).
 
 ```mermaid
 flowchart LR
     U(["Usuário"]) --> WEB["web (Next.js BFF)"]
     WEB --> GW["gateway"]
     GW --> AUTH["auth"]
+    GW --> PAY["payment"]
+    PAY -- "eventos" --> MON
+    PAY --> DB1
     AUTH -- "pede e-mail" --> NOTIF["notification"]
     AUTH -- "eventos" --> MON["monitoring"]
     NOTIF -- "eventos" --> MON
@@ -23,8 +27,9 @@ flowchart LR
 
     REDIS["Redis: rate limit distribuído"]:::s2 -.-> GW
     OUTBOX["Outbox de notificação"]:::s2 -.-> NOTIF
-    MFA["MFA e recuperação de conta"]:::s2 -.-> AUTH
-    OUTROS["Pagamento, captura e armazenamento (ADR-005)"]:::s2 -.-> GW
+    MFA["MFA"]:::s2 -.-> AUTH
+    PIX["Provedor PIX real e webhook (#23)"]:::s2 -.-> PAY
+    OUTROS["Captura e armazenamento (ADR-005)"]:::s2 -.-> GW
 
     classDef s2 stroke-dasharray: 5 5,fill:none
 ```
@@ -32,7 +37,8 @@ flowchart LR
 Linhas tracejadas são a Sprint 2, ainda não implementadas. As chamadas entre serviços são HTTP
 internas com `X-Internal-Token`, sem passar pelo gateway
 ([ADR-016](docs/adr/0016-comunicacao-interna-http-fire-and-forget.md)); `auth` e `notification` usam o banco
-`veriditi` (cada um com seu usuário e suas tabelas), e só o `monitoring` escreve em `veriditi_logs`.
+`veriditi` (cada um com seu usuário e suas tabelas), assim como o `payment`, e só o `monitoring`
+escreve em `veriditi_logs`.
 
 ```
 veriditi/
@@ -46,6 +52,7 @@ veriditi/
 │   │   ├── tests/
 │   │   └── Dockerfile
 │   ├── notification/         # Notificações por e-mail (banco veriditi)
+│   ├── payment/              # Pacotes, pedidos PIX e carteira de créditos (banco veriditi)
 │   └── monitoring/           # Trilha de auditoria (banco veriditi_logs)
 ├── libs/
 │   └── python/common/        # Infra compartilhada: settings, conexão, tipos, health
@@ -136,8 +143,13 @@ http://127.0.0.1:8080):
 3. Informe o código em http://localhost:3000/verificar-email.
 4. Entre em http://localhost:3000/entrar com o e-mail e a senha.
 5. Em http://localhost:3000/perfil, confira o tipo de conta e o CPF mascarado, edite o nome e salve.
-6. Num terminal, rode `make audit-tail`: aparecem `auth.user.registered`, `notification.email.sent`
-   e os demais eventos do fluxo (Ctrl-C para sair; `n=30` mostra mais histórico).
+6. Em http://localhost:3000/creditos, escolha um pacote (básico, médio ou premium), preencha os
+   dados de faturamento e continue. Na tela do PIX, use "Simular pagamento": o provedor é o sandbox
+   ([ADR-025](docs/adr/0025-provedor-pix-sandbox-e-faturamento.md)) e nada é cobrado. O saldo aparece
+   no painel e em http://localhost:3000/creditos/extrato.
+7. Num terminal, rode `make audit-tail`: aparecem `auth.user.registered`, `notification.email.sent`,
+   `payment.order.paid`, `payment.credits.credited` e os demais eventos do fluxo (Ctrl-C para sair;
+   `n=30` mostra mais histórico).
 
 ## Variáveis de ambiente
 
@@ -150,11 +162,14 @@ comentários completos e as regras de formato. Esta tabela é o índice:
 | `DB_MIGRATOR_PASSWORD` | Senha do `migrator`, que faz o DDL | [Banco](#banco) |
 | `AUTH_DB_PASSWORD` | Senha do usuário de runtime do auth | [Banco](#banco) |
 | `NOTIFICATION_DB_PASSWORD` | Senha do usuário de runtime do notification | [Banco](#banco) |
+| `PAYMENT_DB_PASSWORD` | Senha do usuário de runtime do payment | [Banco](#banco) |
 | `LOGS_DB_PASSWORD` | Senha do `veriditi_logs_writer`, do monitoring | [Banco](#banco) |
 | `DB_HOST` | Host do MySQL no `make dev`/`migrate`; no compose é `mysql` | [Hot reload](#desenvolvimento-com-hot-reload) |
 | `DB_PORT` | Porta do MySQL publicada no host (3307) | [Hot reload](#desenvolvimento-com-hot-reload) |
 | `MONITORING_URL` | URL do monitoring no `make dev` | [Logs](#logs-e-x-request-id) |
 | `NOTIFICATION_URL` | URL do notification no `make dev` | [Logs](#logs-e-x-request-id) |
+| `PAYMENT_URL` | URL do payment para o gateway no `make dev` (no compose, `http://payment:8000`) | [API Gateway](#api-gateway) |
+| `PAYMENT_PROVIDER` | Provedor PIX; na Sprint 1 só `sandbox` (ADR-025) | [ADR-025](docs/adr/0025-provedor-pix-sandbox-e-faturamento.md) |
 | `INTERNAL_API_TOKEN` | Token das chamadas internas (mínimo de 16 caracteres) | [Logs](#logs-e-x-request-id) |
 | `LOG_LEVEL` | Nível dos logs JSON | [Logs](#logs-e-x-request-id) |
 | `JWT_PRIVATE_KEY` | Chave privada RS256 do auth, gerada por `make keys` | [Setup](#setup) |
@@ -190,8 +205,11 @@ vazio**. Ao atualizar para esta versão, ou ao mudar o init:
 
 1. Atualize o `.env` a partir do `.env.example`. As senhas agora são por
    usuário (`DB_MIGRATOR_PASSWORD`, `AUTH_DB_PASSWORD`,
-   `NOTIFICATION_DB_PASSWORD`, `LOGS_DB_PASSWORD`), e o compose recusa subir
-   sem elas. Quem não tinha `.env` pode rodar `make install`.
+   `NOTIFICATION_DB_PASSWORD`, `PAYMENT_DB_PASSWORD`, `LOGS_DB_PASSWORD`), e o compose
+   recusa subir sem elas. Quem não tinha `.env` pode rodar `make install`.
+   Para só acrescentar o `payment_svc` a um volume existente, sem apagar dados, recrie o
+   container do MySQL e reaplique o script de usuários:
+   `docker compose up -d --no-deps mysql && docker compose exec mysql bash /docker-entrypoint-initdb.d/02-service-users.sh`.
 2. Recrie o volume e suba de novo:
 
    ```bash
@@ -424,12 +442,15 @@ JWT nas rotas protegidas e repassa ao upstream em streaming. `/docs` e
 | `/api/auth/logout` | POST | protegida | — |
 | `/api/me` | GET, PATCH | protegida | — |
 | `/api/me/password` | POST | protegida | — |
+| `/api/packages` | GET | pública | — (catálogo da D2, upstream payment) |
+| `/api/orders`, `/api/orders/{id}`, `/api/orders/{id}/simulate-payment` | POST, GET (prefixo) | protegida | 10 por IP por minuto; repassa o `Idempotency-Key` |
+| `/api/credits/balance`, `/api/credits/statement` | GET (prefixo) | protegida | — |
 
 Uma rota nova é uma linha nova em `ROUTES` (`Route(path, upstream,
 upstream_path, public=..., methods=..., rate_limits=(...))`); a tabela é validada
 na subida (duplicata, upstream desconhecido, caminho inseguro, método
-inválido). O casamento é exato; `prefix=True` casa também `path/...` e fica
-para os ids da Sprint 2. Um upstream novo entra em `Settings.upstreams` e
+inválido). O casamento é exato; `prefix=True` casa também `path/...`, como em
+`/api/orders/{id}`. Um upstream novo entra em `Settings.upstreams` e
 passa a ser agregado no `/health/ready`.
 
 **JWT.** Só RS256 com `JWT_PUBLIC_KEY`, exigindo `exp`, `iat`, `iss`
@@ -438,7 +459,8 @@ Qualquer falha dá `401 unauthorized` + `WWW-Authenticate: Bearer`; o motivo vai
 só para o log `jwt_rejected`.
 
 **Headers.** Do cliente só passam `Accept`, `Accept-Language`, `Content-Type`,
-`User-Agent`, `If-*` e `Range`; o resto cai, inclusive `Authorization`, `Cookie`,
+`User-Agent`, `If-*` e `Range`, mais os que a rota declara em `extra_request_headers`
+(o `Idempotency-Key` dos pedidos); o resto cai, inclusive `Authorization`, `Cookie`,
 `X-Forwarded-*`, `Forwarded`, `X-Real-IP` e `X-Refresh-Token`. O gateway sempre
 injeta `X-Internal-Token`, `X-Request-ID` e `X-Forwarded-For` (um único IP, o
 real) e, nas rotas protegidas, `X-User-Id`, `X-User-Email` e `X-Session-Id`.
