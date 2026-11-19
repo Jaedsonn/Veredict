@@ -1,6 +1,6 @@
 # ADR-020 – Banco Central compartilhado com posse por serviço e privilégio mínimo
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-12
 - Afeta: ADR-005 (arquitetura baseada em serviços), ADR-010 (camada de dados), ADR-015 (Log Storage)
 
@@ -38,6 +38,9 @@ A mitigação recomendada para banco compartilhado é particioná-lo logicamente
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| | | |
+| Integrante | Evidência |
+|---|---|
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |

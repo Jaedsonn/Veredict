@@ -1,6 +1,6 @@
 # ADR-015 – Log Storage como database MySQL separada (`veriditi_logs`)
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-12
 - Afeta: ADR-001 (auditabilidade), ADR-010 (divisão dos bancos), ADR-012 (logs estruturados)
 
@@ -44,9 +44,9 @@ A ADR-001 exige que os registros de auditoria fiquem isolados dos logs comuns e 
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| Beatriz Marques dos Santos | | |
-| Danielle Santos de Souza | | |
-| Giovanna Ferrúcio Farani | | |
-| Luiz Antony Duarte Ribeiro | | |
+| Integrante | Evidência |
+|---|---|
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |

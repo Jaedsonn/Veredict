@@ -1,6 +1,6 @@
 # ADR-016 – Comunicação interna por HTTP assíncrono "fire-and-forget" na Sprint 1
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-12
 - Afeta: ADR-005 (arquitetura baseada em serviços), ADR-012 (logs estruturados)
 
@@ -45,9 +45,9 @@ Uma fila com entrega garantida (broker, outbox, consumidores, DLQ) é a soluçã
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| Beatriz Marques dos Santos | | |
-| Danielle Santos de Souza | | |
-| Giovanna Ferrúcio Farani | | |
-| Luiz Antony Duarte Ribeiro | | |
+| Integrante | Evidência |
+|---|---|
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |

@@ -22,6 +22,6 @@
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| | | |
+| Integrante | Evidência |
+|---|---|
+| | |

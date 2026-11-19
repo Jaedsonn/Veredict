@@ -9,7 +9,7 @@ Para criar uma ADR nova, copie o [modelo](0000-template.md) com o próximo núme
 | Status | Significado |
 |---|---|
 | **Proposta** | Decisão em uso ou planejada, ainda **sem** o aceite registrado da equipe arquiteta |
-| **Aceita** | Aprovada. Para ADRs de desvio, só com a tabela "Aceite da equipe arquiteta" preenchida (integrante, data e evidência) |
+| **Aceita** | Aprovada. Para ADRs de desvio, só com a tabela "Aceite da equipe arquiteta" preenchida (integrante e evidência; o aceite pode ser assíncrono) |
 | **Substituída** | Trocada por outra ADR, indicada no campo Status |
 
 Nenhuma ADR de desvio pode ser marcada como **Aceita** sem o registro do aceite.
@@ -38,17 +38,17 @@ Nenhuma ADR de desvio pode ser marcada como **Aceita** sem o registro do aceite.
 
 | ADR | Título | Status | Afeta | Situação no código | Issue |
 |---|---|---|---|---|---|
-| [014](0014-mysql-como-banco-de-dados-central.md) | MySQL 8.4 como Banco de Dados Central | Proposta | 010 | Em uso | #2 |
-| [015](0015-log-storage-em-database-mysql-separada.md) | Log Storage como database MySQL separada (`veriditi_logs`) | Proposta | 001, 010, 012 | Em uso: `audit_events` append-only (`SELECT, INSERT`); `operational_logs` na Sprint 2 | #3, #5 |
-| [016](0016-comunicacao-interna-http-fire-and-forget.md) | Comunicação interna por HTTP "fire-and-forget" na Sprint 1 | Proposta | 005, 012 | Em uso: consumidores no monitoring (#5) e no notification (#6); produtores a partir do #7 | #4, #5, #6 |
-| [017](0017-aplicacao-web-nextjs-com-bff.md) | Aplicação Web em Next.js com padrão BFF | Proposta | 006 | Em uso | #12 |
-| [018](0018-api-gateway-como-servico-fastapi.md) | API Gateway como serviço FastAPI próprio | Proposta | 005 | Em uso (#11) | #11 |
-| [019](0019-minio-como-object-storage.md) | MinIO como Object Storage | Proposta | 004, 010 | Planejada (Sprint 2) | #26 |
-| [020](0020-banco-central-compartilhado-com-posse-por-servico.md) | Banco Central compartilhado com posse por serviço e privilégio mínimo | Proposta | 005, 010, 015 | Em uso | #41 |
-| [021](0021-datas-utc-datetime6.md) | Datas em UTC com DATETIME(6) | Proposta | 001 | Em uso | #41 |
-| [022](0022-convencoes-do-modelo-fisico.md) | Convenções do modelo físico | Proposta | 014 | Em uso | #41 |
-| [023](0023-migrations-por-servico-e-testes-com-mysql.md) | Migrations por serviço e testes com MySQL real | Proposta | 020 | Em uso | #41 |
-| [024](0024-cifragem-do-cpf.md) | Cifragem do CPF com AES-GCM e índice HMAC | Proposta | 002, 022 | Em uso: `users.cpf_enc` e `users.cpf_hmac` | #60 |
+| [014](0014-mysql-como-banco-de-dados-central.md) | MySQL 8.4 como Banco de Dados Central | Aceita | 010 | Em uso | #2 |
+| [015](0015-log-storage-em-database-mysql-separada.md) | Log Storage como database MySQL separada (`veriditi_logs`) | Aceita | 001, 010, 012 | Em uso: `audit_events` append-only (`SELECT, INSERT`); `operational_logs` na Sprint 2 | #3, #5 |
+| [016](0016-comunicacao-interna-http-fire-and-forget.md) | Comunicação interna por HTTP "fire-and-forget" na Sprint 1 | Aceita | 005, 012 | Em uso: consumidores no monitoring (#5) e no notification (#6); produtores a partir do #7 | #4, #5, #6 |
+| [017](0017-aplicacao-web-nextjs-com-bff.md) | Aplicação Web em Next.js com padrão BFF | Aceita | 006 | Em uso | #12 |
+| [018](0018-api-gateway-como-servico-fastapi.md) | API Gateway como serviço FastAPI próprio | Aceita | 005 | Em uso (#11) | #11 |
+| [019](0019-minio-como-object-storage.md) | MinIO como Object Storage | Aceita | 004, 010 | Planejada (Sprint 2) | #26 |
+| [020](0020-banco-central-compartilhado-com-posse-por-servico.md) | Banco Central compartilhado com posse por serviço e privilégio mínimo | Aceita | 005, 010, 015 | Em uso | #41 |
+| [021](0021-datas-utc-datetime6.md) | Datas em UTC com DATETIME(6) | Aceita | 001 | Em uso | #41 |
+| [022](0022-convencoes-do-modelo-fisico.md) | Convenções do modelo físico | Aceita | 014 | Em uso | #41 |
+| [023](0023-migrations-por-servico-e-testes-com-mysql.md) | Migrations por serviço e testes com MySQL real | Aceita | 020 | Em uso | #41 |
+| [024](0024-cifragem-do-cpf.md) | Cifragem do CPF com AES-GCM e índice HMAC | Aceita | 002, 022 | Em uso: `users.cpf_enc` e `users.cpf_hmac` | #60 |
 
 ## Numeração
 
@@ -62,10 +62,10 @@ As ADRs 001–013 reproduzem o texto do documento, com ajustes mínimos de ortog
 - [ADR-004](0004-recuperabilidade.md): o campo "Decisão" repete o "Contexto".
 - [ADR-005](0005-arquitetura-baseada-em-servicos.md): as consequências citam "arquitetura em eventos" em vez de arquitetura baseada em serviços.
 
-## Aceite pendente
+## Aceite das ADRs de desvio
 
-As ADRs 014–024 estão como **Proposta**. Para movê-las a **Aceita**:
+As ADRs 014–024 foram aprovadas pelos quatro integrantes da equipe arquiteta, de forma assíncrona, pelo WhatsApp, e estão como **Aceita**. Para uma ADR de desvio nova:
 
-1. Abrir uma *Discussion* (ou issue) no repositório, ou mandar e-mail para a equipe arquiteta, com o link deste índice.
-2. Registrar em cada ADR, na tabela "Aceite da equipe arquiteta", o nome, a data e o link do comentário ou print da aprovação.
+1. Enviar a ADR para a equipe arquiteta (WhatsApp, e-mail, *Discussion* ou issue).
+2. Registrar cada aprovação na tabela "Aceite da equipe arquiteta" da ADR, com o integrante e a evidência.
 3. Só então trocar o Status para **Aceita**.

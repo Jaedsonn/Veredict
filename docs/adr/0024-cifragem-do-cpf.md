@@ -1,6 +1,6 @@
 # ADR-024 – Cifragem do CPF com AES-GCM e índice HMAC
 
-- Status: Proposta
+- Status: Aceita
 - Data: 2026-11-18
 - Afeta: ADR-002 (segurança), ADR-022 (convenções do modelo físico)
 
@@ -54,6 +54,9 @@ Duas colunas e duas chaves independentes:
 
 ## Aceite da equipe arquiteta
 
-| Integrante | Data | Evidência |
-|---|---|---|
-| | | |
+| Integrante | Evidência |
+|---|---|
+| Beatriz Marques dos Santos | Aprovação pelo WhatsApp |
+| Danielle Santos de Souza | Aprovação pelo WhatsApp |
+| Giovanna Ferrúcio Farani | Aprovação pelo WhatsApp |
+| Luiz Antony Duarte Ribeiro | Aprovação pelo WhatsApp |
